@@ -1,0 +1,15 @@
+{
+  "recommendations": [
+    "github.copilot",
+    "github.copilot-chat",
+    "ms-python.python",
+    "ms-python.vscode-pylance",
+    "charliermarsh.ruff",
+    "ms-azuretools.vscode-bicep",
+    "ms-azuretools.azure-dev",
+    "ms-azuretools.vscode-docker",
+    "ms-vscode.azure-account",
+    "bradlc.vscode-tailwindcss",
+    "dbaeumer.vscode-eslint"
+  ]
+}

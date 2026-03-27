@@ -1,0 +1,16 @@
+# Azure Developer CLI (azd) 設定
+name: travel-marketing-agents
+metadata:
+  template: travel-marketing-agents
+
+services:
+  web:
+    project: .
+    host: containerapp
+    language: python
+    docker:
+      path: Dockerfile
+
+infra:
+  provider: bicep
+  path: infra

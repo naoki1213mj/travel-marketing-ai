@@ -1,0 +1,58 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    needs: []
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push to ACR
+        run: |
+          az acr build \
+            --registry ${{ vars.ACR_NAME }} \
+            --image travel-agents:${{ github.sha }} \
+            --image travel-agents:latest \
+            --file Dockerfile .
+
+      - name: Deploy to Container Apps
+        run: |
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --image ${{ vars.ACR_NAME }}.azurecr.io/travel-agents:${{ github.sha }}
+
+      - name: Health check
+        run: |
+          APP_URL=$(az containerapp show \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query 'properties.configuration.ingress.fqdn' -o tsv)
+          for i in 1 2 3 4 5; do
+            if curl -sf "https://${APP_URL}/api/health"; then
+              echo "Health check passed"
+              exit 0
+            fi
+            echo "Retry $i..."
+            sleep 10
+          done
+          echo "Health check failed"
+          exit 1

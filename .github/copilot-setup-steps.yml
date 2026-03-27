@@ -1,0 +1,6 @@
+steps:
+  - run: |
+      pip install --upgrade uv
+      uv sync
+  - run: |
+      cd frontend && npm ci

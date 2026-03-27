@@ -1,0 +1,13 @@
+{
+  "servers": {
+    "Azure MCP Server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@azure/mcp@latest", "server", "start"]
+    },
+    "Learn MCP Server": {
+      "type": "sse",
+      "url": "https://learn.microsoft.com/api/mcp"
+    }
+  }
+}
