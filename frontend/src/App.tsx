@@ -5,6 +5,7 @@ import { ErrorRetry } from './components/ErrorRetry'
 import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
+import { MarkdownView } from './components/MarkdownView'
 import { MetricsBar } from './components/MetricsBar'
 import { PipelineStepper } from './components/PipelineStepper'
 import { PlanApproval } from './components/PlanApproval'
@@ -13,14 +14,14 @@ import { RegulationResults } from './components/RegulationResults'
 import { SafetyBadge } from './components/SafetyBadge'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ToolEventBadges } from './components/ToolEventBadges'
-import { MarkdownView } from './components/MarkdownView'
+import { VersionSelector } from './components/VersionSelector'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
-import { exportPlanMarkdown, exportBrochureHtml, exportAllAsJson } from './lib/export'
+import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 
 function App() {
-  const { state, sendMessage, approve, reset } = useSSE()
+  const { state, sendMessage, approve, reset, restoreVersion } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
 
@@ -108,7 +109,13 @@ function App() {
 
             {/* エクスポートボタン群 */}
             {state.status === 'completed' && (
-              <div className="mt-4 flex flex-wrap gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+              <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-gray-200 pt-4 dark:border-gray-700">
+                <VersionSelector
+                  versions={state.versions.map((_, i) => i + 1)}
+                  current={state.currentVersion}
+                  onChange={restoreVersion}
+                />
+                <div className="ml-auto flex gap-2">
                 <button
                   onClick={() => exportPlanMarkdown(state.textContents)}
                   className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-700 dark:text-gray-400 dark:hover:bg-gray-800"
@@ -127,6 +134,7 @@ function App() {
                 >
                   📦 一括エクスポート (.json)
                 </button>
+                </div>
               </div>
             )}
             </>

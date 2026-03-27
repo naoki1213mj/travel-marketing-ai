@@ -57,6 +57,11 @@ export interface ErrorData {
 
 export type PipelineStatus = 'idle' | 'running' | 'approval' | 'completed' | 'error'
 
+export interface ArtifactSnapshot {
+  textContents: TextContent[]
+  images: ImageContent[]
+}
+
 export interface PipelineState {
   status: PipelineStatus
   conversationId: string | null
@@ -68,6 +73,8 @@ export interface PipelineState {
   safetyResult: SafetyResult | null
   metrics: PipelineMetrics | null
   error: ErrorData | null
+  versions: ArtifactSnapshot[]
+  currentVersion: number
 }
 
 const initialState: PipelineState = {
@@ -81,6 +88,8 @@ const initialState: PipelineState = {
   safetyResult: null,
   metrics: null,
   error: null,
+  versions: [],
+  currentVersion: 0,
 }
 
 export function useSSE() {
@@ -139,19 +148,34 @@ export function useSSE() {
     },
     done: (data) => {
       const doneData = data as { conversation_id: string; metrics: PipelineMetrics }
-      setState(prev => ({
-        ...prev,
-        metrics: doneData.metrics,
-        status: 'completed',
-        conversationId: doneData.conversation_id,
-      }))
+      setState(prev => {
+        const snapshot: ArtifactSnapshot = {
+          textContents: prev.textContents,
+          images: prev.images,
+        }
+        const newVersions = [...prev.versions, snapshot]
+        return {
+          ...prev,
+          metrics: doneData.metrics,
+          status: 'completed',
+          conversationId: doneData.conversation_id,
+          versions: newVersions,
+          currentVersion: newVersions.length,
+        }
+      })
     },
   }), [])
 
   const sendMessage = useCallback(async (message: string) => {
-    setState({ ...initialState, status: 'running' })
+    const existingConversationId = conversationIdRef.current
+    setState(prev => ({
+      ...prev,
+      status: 'running',
+      error: null,
+      approvalRequest: null,
+    }))
     const handlers = createHandlers()
-    await connectSSE(message, handlers)
+    await connectSSE(message, handlers, existingConversationId || undefined)
   }, [createHandlers])
 
   const approve = useCallback(async (response: string) => {
@@ -167,5 +191,18 @@ export function useSSE() {
     conversationIdRef.current = null
   }, [])
 
-  return { state, sendMessage, approve, reset }
+  const restoreVersion = useCallback((version: number) => {
+    setState(prev => {
+      const snapshot = prev.versions[version - 1]
+      if (!snapshot) return prev
+      return {
+        ...prev,
+        textContents: snapshot.textContents,
+        images: snapshot.images,
+        currentVersion: version,
+      }
+    })
+  }, [])
+
+  return { state, sendMessage, approve, reset, restoreVersion }
 }
