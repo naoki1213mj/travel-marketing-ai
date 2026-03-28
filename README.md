@@ -1,10 +1,12 @@
-# 旅行マーケティング AI マルチエージェントパイプライン
+# Travel Marketing AI Multi-Agent Pipeline
 
-> Team D ハッカソン — 自然言語指示から企画書・販促物・バナー画像を全自動生成
+[日本語版 README はこちら](README.ja.md)
 
-## 概要
+> Team D Hackathon — Auto-generate marketing plans, brochures, banner images, and promotional videos from natural language instructions
 
-旅行会社のマーケ担当者が自然言語で指示すると、4 つの AI エージェントが順次処理し、**企画書 (Markdown)・販促ブローシャ (HTML)・バナー画像 (PNG)** を全自動で生成するパイプライン。
+## Overview
+
+A multi-agent pipeline where travel company marketing staff give natural language instructions and 4 AI agents sequentially produce **marketing plans (Markdown), promotional brochures (HTML), banner images (PNG), and promotional videos (MP4)**.
 
 ## アーキテクチャ
 
