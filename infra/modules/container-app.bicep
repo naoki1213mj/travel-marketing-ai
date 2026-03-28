@@ -67,10 +67,30 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'travel-agents'
           image: imageName
           resources: {
-            cpu: json('0.5')
-            memory: '1Gi'
+            cpu: json('1.0')
+            memory: '2Gi'
           }
           env: containerEnv
+          probes: [
+            {
+              type: 'Liveness'
+              httpGet: {
+                path: '/api/health'
+                port: 8000
+              }
+              periodSeconds: 30
+              failureThreshold: 3
+            }
+            {
+              type: 'Readiness'
+              httpGet: {
+                path: '/api/health'
+                port: 8000
+              }
+              initialDelaySeconds: 10
+              periodSeconds: 10
+            }
+          ]
         }
       ]
       scale: {

@@ -19,7 +19,7 @@ resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   properties: {
     allowProjectManagement: true
     customSubDomainName: toLower(name)
-    disableLocalAuth: false
+    disableLocalAuth: true
     publicNetworkAccess: 'Enabled'
   }
 }
@@ -29,7 +29,7 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   parent: aiFoundry
   name: modelDeploymentName
   sku: {
-    capacity: 10
+    capacity: 30
     name: 'GlobalStandard'
   }
   properties: {

@@ -47,10 +47,12 @@
 6. **Web Search のデータ境界**: DPA 対象外。クエリデータが Azure の geo boundary 外に流れる可能性がある
 7. **Photo Avatar の位置づけ**: 「AI アシスタントの顔」ではなく「販促素材の一部」として使う。マーケ担当者が作る成果物に組み込む
 8. **付加価値機能は独立設計**: §14 の 6 機能はコアパイプラインと独立しており、個別に有効化・無効化できる
+9. **ACR ビルド**: Docker Desktop は使わず、`az acr build` でリモートビルドする。ローカルに Docker Engine は不要。CI/CD の deploy.yml でも `az acr build` を使う
+10. **Foundry リソースモデル**: Hub+Project ではなく、新しい Foundry リソースモデル（`CognitiveServices/accounts` + `accounts/projects@2025-06-01`、`allowProjectManagement: true`）を使う
 
 ## Resources
 
-- 要件定義書: `docs/requirements_v3.md`
+- 要件定義書: `docs/requirements_v3.5.md`
 - Agent Framework パターン: `.github/skills/agent-framework-patterns/SKILL.md`
 - Hosted Agent デプロイ: `.github/skills/foundry-hosted-agent/SKILL.md`
 - SSE + Content Safety: `.github/skills/sse-content-safety/SKILL.md`

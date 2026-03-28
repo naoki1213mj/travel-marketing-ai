@@ -589,12 +589,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
         from src.workflows import create_pipeline_workflow
 
         workflow = create_pipeline_workflow()
-    except Exception as exc:
+    except Exception:
         logger.exception("Workflow 構築に失敗")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": f"Workflow の構築に失敗しました: {exc}",
+                "message": "Workflow の構築に失敗しました。再試行してください。",
                 "code": "WORKFLOW_BUILD_ERROR",
             },
         )
@@ -643,12 +643,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
             },
         )
 
-    except Exception as exc:
+    except Exception:
         logger.exception("Workflow 実行中にエラーが発生")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": f"パイプライン実行中にエラーが発生しました: {exc}",
+                "message": "パイプライン実行中にエラーが発生しました。再試行してください。",
                 "code": "WORKFLOW_RUNTIME_ERROR",
             },
         )
@@ -736,9 +736,17 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 @router.post("/chat/{thread_id}/approve")
 async def approve(thread_id: str, request: ApproveRequest) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
+    # 入力 Content Safety チェック（承認レスポンスにも適用）
+    shield_result = await check_prompt_shield(request.response)
     is_approved = "承認" in request.response
 
     async def approval_event_generator():
+        if not shield_result.is_safe:
+            yield format_sse(
+                SSEEventType.ERROR,
+                {"message": "入力が安全性チェックに失敗しました", "code": "PROMPT_SHIELD_BLOCKED"},
+            )
+            return
         if is_approved:
             async for event in _post_approval_events(request.response, thread_id):
                 yield event

@@ -25,9 +25,14 @@ def _get_openai_client():
     settings = get_settings()
     endpoint = settings["project_endpoint"].split("/api/projects/")[0]
     credential = DefaultAzureCredential()
+    # get_token は同期呼び出しだが、OpenAI クライアント初期化時にのみ使われるため許容する
     token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    # Foundry endpoint を OpenAI 互換の endpoint に変換
+    azure_endpoint = endpoint
+    if ".services.ai.azure.com" in azure_endpoint:
+        azure_endpoint = azure_endpoint.replace(".services.ai.azure.com", ".openai.azure.com")
     return AzureOpenAI(
-        azure_endpoint=endpoint.replace(".services.ai.azure.com", ".openai.azure.com"),
+        azure_endpoint=azure_endpoint,
         api_version="2025-04-01-preview",
         azure_ad_token=token.token,
     )
