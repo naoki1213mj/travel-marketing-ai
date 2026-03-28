@@ -19,6 +19,11 @@
 - **デプロイ**: Azure Container Apps / Docker マルチステージ / azd
 - **CI/CD**: GitHub Actions (DevSecOps: Ruff + pytest + tsc → ACR → Container Apps)
 - **パッケージ管理**: uv（pip ではなく uv を使う）
+- **音声入力**: Voice Live API (Preview, Foundry Agent Service 統合)
+- **文書解析**: Content Understanding (GA, 既存パンフレット PDF 解析)
+- **販促動画**: Photo Avatar + Voice Live (Preview, 紹介動画自動生成)
+- **ワークフロー自動化**: Azure Logic Apps (承認後の Teams 通知 + SharePoint 保存)
+- **配信チャネル**: Microsoft Teams (Foundry から直接公開)
 
 ## Coding Guidelines
 
@@ -40,6 +45,8 @@
 4. **Content Safety 4 層**: 入力(Prompt Shield) → モデル(Content Filter) → ツール応答(Prompt Shield for tool response) → 出力(Text Analysis)
 5. **East US 2 推奨**: Code Interpreter のリージョン可用性の制約により Japan East ではなく East US 2 または Sweden Central を使う
 6. **Web Search のデータ境界**: DPA 対象外。クエリデータが Azure の geo boundary 外に流れる可能性がある
+7. **Photo Avatar の位置づけ**: 「AI アシスタントの顔」ではなく「販促素材の一部」として使う。マーケ担当者が作る成果物に組み込む
+8. **付加価値機能は独立設計**: §14 の 6 機能はコアパイプラインと独立しており、個別に有効化・無効化できる
 
 ## Resources
 

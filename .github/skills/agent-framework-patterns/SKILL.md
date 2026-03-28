@@ -13,7 +13,7 @@ description: >-
 
 ```python
 from azure.identity import DefaultAzureCredential
-from agent_framework import AzureOpenAIResponsesClient
+from agent_framework.azure import AzureOpenAIResponsesClient
 
 # クライアント作成
 client = AzureOpenAIResponsesClient(
@@ -58,7 +58,7 @@ async def search_sales_history(
 ## Sequential Workflow
 
 ```python
-from agent_framework.workflows import SequentialBuilder
+from agent_framework.orchestrations import SequentialBuilder
 
 workflow = SequentialBuilder(
     participants=[

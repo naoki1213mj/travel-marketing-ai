@@ -4,7 +4,8 @@ import csv
 import json
 from pathlib import Path
 
-from agent_framework import AzureOpenAIResponsesClient, tool
+from agent_framework import tool
+from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
@@ -161,10 +162,10 @@ def create_data_search_agent():
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
+        deployment_name=settings["model_name"],
     )
     return client.as_agent(
         name="data-search-agent",
         instructions=INSTRUCTIONS,
         tools=[search_sales_history, search_customer_reviews],
-        model=settings["model_name"],
     )

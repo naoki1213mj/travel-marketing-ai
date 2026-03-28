@@ -23,6 +23,7 @@
   "files.exclude": {
     "**/__pycache__": true,
     "**/.pytest_cache": true,
+    "**/.testagent": true,
     "**/node_modules": true,
     "**/.ruff_cache": true
   },

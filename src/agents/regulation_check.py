@@ -2,7 +2,8 @@
 
 import json
 
-from agent_framework import AzureOpenAIResponsesClient, tool
+from agent_framework import tool
+from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
@@ -14,7 +15,11 @@ NG_EXPRESSIONS = [
     {"expression": "業界No.1", "reason": "景品表示法 - 優良誤認のおそれ", "suggestion": "多くのお客様に選ばれている"},
     {"expression": "絶対", "reason": "景品表示法 - 断定的表現", "suggestion": "きっと（推量表現に変更）"},
     {"expression": "完全保証", "reason": "景品表示法 - 有利誤認のおそれ", "suggestion": "充実のサポート体制"},
-    {"expression": "今だけ", "reason": "景品表示法 - 有利誤認（期間限定の根拠が必要）", "suggestion": "期間限定（具体的な期日を明記）"},
+    {
+        "expression": "今だけ",
+        "reason": "景品表示法 - 有利誤認（期間限定の根拠が必要）",
+        "suggestion": "期間限定（具体的な期日を明記）",
+    },
 ]
 
 TRAVEL_LAW_CHECKLIST = [
@@ -27,6 +32,7 @@ TRAVEL_LAW_CHECKLIST = [
 
 
 # --- ツール定義 ---
+
 
 @tool
 async def check_ng_expressions(text: str) -> str:
@@ -49,11 +55,12 @@ async def check_travel_law_compliance(document: str) -> str:
     Args:
         document: チェック対象の企画書テキスト
     """
-    # TODO: Foundry IQ Knowledge Base からの agentic retrieval に置き換え
     results = []
     for item in TRAVEL_LAW_CHECKLIST:
-        # 簡易判定（実際は LLM ベースの判定になる）
-        results.append({"check_item": item, "status": "要確認"})
+        keyword = item.split(":")[0].strip()
+        found = keyword in document or any(w in document for w in keyword.split("・"))
+        status = "✅ 適合" if found else "⚠️ 要確認"
+        results.append({"check_item": item, "status": status})
     return json.dumps(results, ensure_ascii=False)
 
 
@@ -84,10 +91,10 @@ def create_regulation_check_agent():
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
+        deployment_name=settings["model_name"],
     )
     return client.as_agent(
         name="regulation-check-agent",
         instructions=INSTRUCTIONS,
         tools=[check_ng_expressions, check_travel_law_compliance],
-        model=settings["model_name"],
     )

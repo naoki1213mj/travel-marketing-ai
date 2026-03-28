@@ -17,15 +17,18 @@
 ## アーキテクチャ
 
 ```
-ユーザー → React (Vite/Tailwind/i18n) → FastAPI (SSE)
+ユーザー → React (Vite/Tailwind/i18n) + 🎤 Voice Live → FastAPI (SSE)
   → APIM AI Gateway → Content Safety (Prompt Shield)
   → Foundry Agent Service Workflows (Sequential + HiTL)
     → Agent1 (データ検索: Fabric Lakehouse + Code Interpreter)
     → Agent2 (施策生成: Web Search)
     → [承認ステップ]
     → Agent3 (規制チェック: Foundry IQ + Web Search)
-    → Agent4 (販促物生成: GPT Image 1.5 + Azure Functions MCP)
+    → Agent4 (販促物生成: GPT Image 1.5 + Content Understanding + Photo Avatar)
   → Content Safety (Text Analysis) → 成果物表示
+  → Logic Apps (Teams 通知 + SharePoint 保存)
+  → Foundry Evaluations (品質ダッシュボード)
+  → Teams 公開
 ```
 
 ## 技術スタック
@@ -45,6 +48,11 @@
 | AI Gateway | Azure API Management | GA |
 | デプロイ | Azure Container Apps + azd | GA |
 | CI/CD | GitHub Actions (DevSecOps) | — |
+| 音声入力 | Voice Live API | Preview |
+| 文書解析 | Content Understanding | GA |
+| 販促動画 | Photo Avatar + Voice Live | Preview |
+| ワークフロー自動化 | Azure Logic Apps | GA |
+| 配信チャネル | Microsoft Teams | GA |
 
 ## 間違えやすい API / 設定
 

@@ -5,6 +5,11 @@
       "command": "npx",
       "args": ["-y", "@azure/mcp@latest", "server", "start"]
     },
+    "Playwright MCP Server": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@playwright/mcp@latest", "--caps=vision"]
+    },
     "Learn MCP Server": {
       "type": "sse",
       "url": "https://learn.microsoft.com/api/mcp"

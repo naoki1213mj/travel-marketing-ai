@@ -16,6 +16,9 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 3. **FastAPI + SSE**: リアルタイムストリーミング API の実装
 4. **Content Safety**: Prompt Shield + Content Filter + Text Analysis の多層防御
 5. **Azure Functions MCP**: Flex Consumption プランでの MCP サーバー実装
+6. **Voice Live**: 音声入力チャネルの統合（WebSocket 接続）
+7. **Content Understanding**: 既存パンフレット PDF の解析と Agent4 への参考入力
+8. **Photo Avatar + Voice Live**: 販促紹介動画の自動生成
 
 ## Always do
 
@@ -61,3 +64,4 @@ async def search_sales_history(query: str, season: str | None = None) -> str:
 
 ### Agent4: 販促物生成 (Matsumoto)
 ツール: GPT Image 1.5, Azure Functions MCP（PDF 変換, テンプレート適用）
+追加: Content Understanding（既存パンフレット解析）, Voice Live + Photo Avatar（販促動画生成）

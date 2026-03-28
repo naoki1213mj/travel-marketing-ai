@@ -1,6 +1,6 @@
 """Agent2: マーケ施策作成エージェント。分析結果をもとに企画書を生成する。"""
 
-from agent_framework import AzureOpenAIResponsesClient
+from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
@@ -35,11 +35,11 @@ def create_marketing_plan_agent():
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
+        deployment_name=settings["model_name"],
     )
     # Web Search ツールは Foundry Agent Service 組み込みで提供される
     # Hosted Agent デプロイ時に自動接続されるため、ローカルではツールなしで動作
     return client.as_agent(
         name="marketing-plan-agent",
         instructions=INSTRUCTIONS,
-        model=settings["model_name"],
     )

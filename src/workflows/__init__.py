@@ -2,7 +2,7 @@
 
 import logging
 
-from agent_framework.workflows import SequentialBuilder
+from agent_framework.orchestrations import SequentialBuilder
 
 from src.agents import (
     create_brochure_gen_agent,

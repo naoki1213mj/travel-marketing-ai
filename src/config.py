@@ -28,7 +28,7 @@ _ENV_MAP: dict[str, str] = {
 
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
-    "model_name": "gpt-5.4-mini",
+    "model_name": "gpt-5-4-mini",
 }
 
 

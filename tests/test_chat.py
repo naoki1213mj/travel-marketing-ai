@@ -70,4 +70,5 @@ def test_chat_refine_with_conversation_id():
     assert response.status_code == 200
     content = response.text
     assert "event: agent_progress" in content
-    assert "event: done" in content
+    # 修正対話はモック経路で approval_request を返す（再承認フロー）
+    assert "event: text" in content or "event: approval_request" in content

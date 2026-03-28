@@ -454,10 +454,76 @@ async def _mock_revision_events(revision_text: str, conversation_id: str):
     )
 
 
-async def _mock_refine_events(refine_text: str, conversation_id: str):
-    """完了後のマルチターン修正リクエストを処理するモック SSE イベント"""
+async def _run_single_agent(agent_name: str, agent_step: int, user_input: str, conversation_id: str):
+    """個別エージェントを実行して SSE イベントを生成する"""
+    from src.agents import (
+        create_brochure_gen_agent,
+        create_marketing_plan_agent,
+        create_regulation_check_agent,
+    )
 
-    # 修正対象を判定（簡易）
+    start_time = time.monotonic()
+    agent_map = {
+        "marketing-plan-agent": (create_marketing_plan_agent, 2),
+        "regulation-check-agent": (create_regulation_check_agent, 3),
+        "brochure-gen-agent": (create_brochure_gen_agent, 4),
+    }
+    create_fn, step = agent_map.get(agent_name, (create_marketing_plan_agent, 2))
+    step = agent_step or step
+
+    yield format_sse(
+        SSEEventType.AGENT_PROGRESS,
+        {"agent": agent_name, "status": "running", "step": step, "total_steps": 4},
+    )
+
+    try:
+        agent = create_fn()
+        result = await agent.run(user_input)
+        result_text = str(result) if result else ""
+
+        yield format_sse(SSEEventType.TEXT, {"content": result_text, "agent": agent_name})
+    except Exception:
+        logger.exception("エージェント(%s)の実行に失敗", agent_name)
+        yield format_sse(
+            SSEEventType.ERROR,
+            {"message": f"{agent_name} の実行に失敗しました。", "code": "AGENT_RUNTIME_ERROR"},
+        )
+        return
+
+    yield format_sse(
+        SSEEventType.AGENT_PROGRESS,
+        {"agent": agent_name, "status": "completed", "step": step, "total_steps": 4},
+    )
+
+    safety_scores = await analyze_content(result_text)
+    yield format_sse(
+        SSEEventType.SAFETY,
+        {
+            "hate": safety_scores.hate,
+            "self_harm": safety_scores.self_harm,
+            "sexual": safety_scores.sexual,
+            "violence": safety_scores.violence,
+            "status": "safe"
+            if all(
+                v == 0
+                for v in [safety_scores.hate, safety_scores.self_harm, safety_scores.sexual, safety_scores.violence]
+            )
+            else "warning",
+        },
+    )
+
+    elapsed = time.monotonic() - start_time
+    yield format_sse(
+        SSEEventType.DONE,
+        {
+            "conversation_id": conversation_id,
+            "metrics": {"latency_seconds": round(elapsed, 1), "tool_calls": 0, "total_tokens": 0},
+        },
+    )
+
+
+async def _refine_events(refine_text: str, conversation_id: str):
+    """完了後のマルチターン修正リクエストを処理する SSE イベント"""
     text_lower = refine_text.lower()
     if any(k in text_lower for k in ["画像", "バナー", "イメージ", "色", "明るく"]):
         target_agent = "brochure-gen-agent"
@@ -469,77 +535,45 @@ async def _mock_refine_events(refine_text: str, conversation_id: str):
         target_agent = "marketing-plan-agent"
         step = 2
 
-    yield format_sse(
-        SSEEventType.AGENT_PROGRESS,
-        {
-            "agent": target_agent,
-            "status": "running",
-            "step": step,
-            "total_steps": 4,
-        },
-    )
-    await asyncio.sleep(0.5)
+    from src.config import get_settings
 
-    if target_agent == "marketing-plan-agent":
-        yield format_sse(
-            SSEEventType.TEXT,
-            {
-                "content": f"# 企画書（修正版）\n\n> 修正指示: {refine_text}\n\n"
-                "## キャッチコピー案（修正後）\n"
-                "1. 「ポップに弾ける！春の沖縄ファミリー旅」\n"
-                "2. 「笑顔 100% 沖縄スプリング」\n\n"
-                "## プラン概要\n"
-                "- 3 泊 4 日　那覇 → 美ら海 → 古宇利島\n"
-                "- 価格帯: 1 人あたり 89,800 円〜（税込）\n",
-                "agent": "marketing-plan-agent",
-            },
-        )
-    elif target_agent == "brochure-gen-agent":
-        yield format_sse(
-            SSEEventType.TEXT,
-            {
-                "content": f"画像を修正しました: {refine_text}",
-                "agent": "brochure-gen-agent",
-            },
-        )
+    settings = get_settings()
+
+    if settings["project_endpoint"]:
+        async for event in _run_single_agent(target_agent, step, refine_text, conversation_id):
+            yield event
     else:
-        yield format_sse(
-            SSEEventType.TEXT,
-            {
-                "content": f"規制チェックを再実行しました: {refine_text}\n\n✅ 全項目適合",
-                "agent": "regulation-check-agent",
-            },
-        )
-    await asyncio.sleep(0.3)
+        async for event in _mock_revision_events(refine_text, conversation_id):
+            yield event
 
-    yield format_sse(
-        SSEEventType.AGENT_PROGRESS,
-        {
-            "agent": target_agent,
-            "status": "completed",
-            "step": step,
-            "total_steps": 4,
-        },
-    )
 
-    yield format_sse(
-        SSEEventType.SAFETY,
-        {
-            "hate": 0,
-            "self_harm": 0,
-            "sexual": 0,
-            "violence": 0,
-            "status": "safe",
-        },
-    )
+async def _post_approval_events(user_response: str, conversation_id: str):
+    """承認後に Agent3 → Agent4 を実行する SSE イベント"""
+    from src.config import get_settings
 
-    yield format_sse(
-        SSEEventType.DONE,
-        {
-            "conversation_id": conversation_id,
-            "metrics": {"latency_seconds": 1.5, "tool_calls": 2, "total_tokens": 1200},
-        },
-    )
+    settings = get_settings()
+
+    if not settings["project_endpoint"]:
+        async for event in _mock_post_approval_events(conversation_id):
+            yield event
+        return
+
+    # Agent3: 規制チェック
+    agent3_result = ""
+    async for event in _run_single_agent("regulation-check-agent", 3, user_response, conversation_id):
+        yield event
+        # text イベントの content を取得
+        if '"agent": "regulation-check-agent"' in event and '"content"' in event:
+            try:
+                data_line = [line for line in event.split("\n") if line.startswith("data: ")][0]
+                data = json.loads(data_line[len("data: ") :])
+                agent3_result = data.get("content", "")
+            except IndexError, json.JSONDecodeError:
+                pass
+
+    # Agent4: 販促物生成
+    async for event in _run_single_agent("brochure-gen-agent", 4, agent3_result or user_response, conversation_id):
+        yield event
 
 
 # --- エンドポイント ---
@@ -555,12 +589,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
         from src.workflows import create_pipeline_workflow
 
         workflow = create_pipeline_workflow()
-    except Exception:
+    except Exception as exc:
         logger.exception("Workflow 構築に失敗")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": "Workflow の構築に失敗しました。再試行してください。",
+                "message": f"Workflow の構築に失敗しました: {exc}",
                 "code": "WORKFLOW_BUILD_ERROR",
             },
         )
@@ -579,7 +613,27 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
         )
 
         result = await workflow.run(user_input)
-        result_text = str(result) if result else ""
+
+        # Workflow 結果から最終エージェントのテキスト出力を抽出する
+        result_text = ""
+        if result is not None:
+            # AgentOrchestrationOutput の場合、messages から content を取得
+            if hasattr(result, "messages"):
+                for msg in reversed(result.messages):
+                    if hasattr(msg, "content") and isinstance(msg.content, str) and msg.content.strip():
+                        result_text = msg.content
+                        break
+            # list の場合
+            elif isinstance(result, list):
+                for item in reversed(result):
+                    if hasattr(item, "content") and isinstance(item.content, str):
+                        result_text = item.content
+                        break
+                    elif hasattr(item, "agent_response") and hasattr(item.agent_response, "content"):
+                        result_text = str(item.agent_response.content)
+                        break
+            if not result_text:
+                result_text = str(result)
 
         yield format_sse(
             SSEEventType.TEXT,
@@ -589,12 +643,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
             },
         )
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Workflow 実行中にエラーが発生")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": "パイプライン実行中にエラーが発生しました。再試行してください。",
+                "message": f"パイプライン実行中にエラーが発生しました: {exc}",
                 "code": "WORKFLOW_RUNTIME_ERROR",
             },
         )
@@ -654,7 +708,7 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
         # conversation_id が既存 = マルチターン修正
         if request.conversation_id:
-            async for event in _mock_refine_events(request.message, conversation_id):
+            async for event in _refine_events(request.message, conversation_id):
                 yield event
             return
 
@@ -686,12 +740,10 @@ async def approve(thread_id: str, request: ApproveRequest) -> StreamingResponse:
 
     async def approval_event_generator():
         if is_approved:
-            # 承認 → Agent3(規制チェック) → Agent4(販促物生成) を実行
-            async for event in _mock_post_approval_events(thread_id):
+            async for event in _post_approval_events(request.response, thread_id):
                 yield event
         else:
-            # 修正 → Agent2 を再実行して修正版を生成 → 再度承認要求
-            async for event in _mock_revision_events(request.response, thread_id):
+            async for event in _refine_events(request.response, thread_id):
                 yield event
 
     return StreamingResponse(

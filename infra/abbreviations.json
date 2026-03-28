@@ -4,6 +4,8 @@
   "appInsights": "appi-",
   "containerRegistry": "cr",
   "keyVault": "kv-",
+  "aiFoundry": "ais",
+  "aiProject": "aip-",
   "containerAppsEnv": "cae-",
   "containerApp": "ca-"
 }

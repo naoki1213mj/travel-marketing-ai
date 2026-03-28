@@ -8,9 +8,30 @@ param containerRegistryName string
 param imageName string
 param keyVaultName string
 param appInsightsConnectionString string
+param modelName string = 'gpt-5-4-mini'
+param projectEndpoint string = ''
 
 // ACR イメージを使う場合のみ registry 参照が必要
 var isAcrImage = contains(imageName, '.azurecr.io')
+var containerEnv = concat([
+  {
+    name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+    value: appInsightsConnectionString
+  }
+  {
+    name: 'SERVE_STATIC'
+    value: 'true'
+  }
+  {
+    name: 'MODEL_NAME'
+    value: modelName
+  }
+], !empty(projectEndpoint) ? [
+  {
+    name: 'AZURE_AI_PROJECT_ENDPOINT'
+    value: projectEndpoint
+  }
+] : [])
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
   name: containerRegistryName
@@ -49,16 +70,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             cpu: json('0.5')
             memory: '1Gi'
           }
-          env: [
-            {
-              name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
-              value: appInsightsConnectionString
-            }
-            {
-              name: 'SERVE_STATIC'
-              value: 'true'
-            }
-          ]
+          env: containerEnv
         }
       ]
       scale: {
@@ -108,3 +120,4 @@ resource acrPullRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-
 output id string = containerApp.id
 output name string = containerApp.name
 output uri string = 'https://${containerApp.properties.configuration.ingress.fqdn}'
+output principalId string = containerApp.identity.principalId

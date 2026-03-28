@@ -20,6 +20,7 @@ var resourceToken = toLower(uniqueString(subscription().id, environmentName, loc
 var tags = {
   'azd-env-name': environmentName
 }
+var defaultModelDeploymentName = 'gpt-5-4-mini'
 
 // リソースグループ
 resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
@@ -73,6 +74,32 @@ module keyVault 'modules/key-vault.bicep' = {
   }
 }
 
+// Microsoft Foundry リソース（AI Services + model deployment）
+module aiFoundry 'modules/ai-services.bicep' = {
+  name: 'ai-foundry'
+  scope: rg
+  params: {
+    name: '${abbrs.aiFoundry}${resourceToken}'
+    location: location
+    tags: tags
+    modelDeploymentName: defaultModelDeploymentName
+  }
+}
+
+// Foundry Project
+module aiProject 'modules/ai-project.bicep' = {
+  name: 'ai-project'
+  scope: rg
+  params: {
+    name: '${abbrs.aiProject}${resourceToken}'
+    location: location
+    tags: tags
+    aiFoundryName: aiFoundry.outputs.name
+  }
+}
+
+var aiProjectEndpoint = 'https://${aiFoundry.outputs.name}.services.ai.azure.com/api/projects/${aiProject.outputs.name}'
+
 // Container Apps Environment
 module containerAppsEnv 'modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
@@ -98,6 +125,18 @@ module containerApp 'modules/container-app.bicep' = {
     imageName: !empty(imageName) ? imageName : 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
     keyVaultName: keyVault.outputs.name
     appInsightsConnectionString: appInsights.outputs.connectionString
+    modelName: defaultModelDeploymentName
+    projectEndpoint: aiProjectEndpoint
+  }
+}
+
+// Allow the application managed identity to call the Foundry resource
+module aiFoundryAppAccess 'modules/ai-project-app-access.bicep' = {
+  name: 'ai-foundry-app-access'
+  scope: rg
+  params: {
+    aiFoundryName: aiFoundry.outputs.name
+    principalId: containerApp.outputs.principalId
   }
 }
 
@@ -105,5 +144,9 @@ module containerApp 'modules/container-app.bicep' = {
 output AZURE_CONTAINER_REGISTRY_ENDPOINT string = acr.outputs.loginServer
 output AZURE_CONTAINER_REGISTRY_NAME string = acr.outputs.name
 output AZURE_CONTAINER_APP_NAME string = containerApp.outputs.name
+output AZURE_AI_PROJECT_ENDPOINT string = aiProjectEndpoint
+output AZURE_AI_PROJECT_NAME string = aiProject.outputs.name
+output AZURE_AI_FOUNDRY_NAME string = aiFoundry.outputs.name
+output MODEL_NAME string = defaultModelDeploymentName
 output AZURE_RESOURCE_GROUP string = rg.name
 output SERVICE_WEB_ENDPOINTS array = [containerApp.outputs.uri]

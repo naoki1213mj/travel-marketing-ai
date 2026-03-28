@@ -1,11 +1,59 @@
 """Agent4: ブローシャ＆画像生成エージェント。HTML ブローシャとバナー画像を生成する。"""
 
-from agent_framework import AzureOpenAIResponsesClient, tool
+import logging
+
+from agent_framework import tool
+from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
 
+logger = logging.getLogger(__name__)
+
+# 1x1 透明 PNG（フォールバック用）
+_FALLBACK_IMAGE = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
+    "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
+)
+
+
+def _get_openai_client():
+    """画像生成用の OpenAI クライアントを返す"""
+    from openai import AzureOpenAI
+
+    settings = get_settings()
+    endpoint = settings["project_endpoint"].split("/api/projects/")[0]
+    credential = DefaultAzureCredential()
+    token = credential.get_token("https://cognitiveservices.azure.com/.default")
+    return AzureOpenAI(
+        azure_endpoint=endpoint.replace(".services.ai.azure.com", ".openai.azure.com"),
+        api_version="2025-04-01-preview",
+        azure_ad_token=token.token,
+    )
+
+
+async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
+    """OpenAI Images API で画像を生成し、data URI を返す"""
+    try:
+        client = _get_openai_client()
+        settings = get_settings()
+        response = client.images.generate(
+            model=settings["model_name"],
+            prompt=prompt,
+            n=1,
+            size=size,
+            response_format="b64_json",
+        )
+        b64_data = response.data[0].b64_json
+        return f"data:image/png;base64,{b64_data}"
+    except Exception:
+        logger.exception("画像生成に失敗。フォールバック画像を返します")
+        return _FALLBACK_IMAGE
+
+
 # --- ツール定義 ---
+
 
 @tool
 async def generate_hero_image(
@@ -13,20 +61,15 @@ async def generate_hero_image(
     destination: str,
     style: str = "photorealistic",
 ) -> str:
-    """GPT Image 1.5 でヒーロー画像を生成する。
+    """旅行先のヒーロー画像を生成する。
 
     Args:
         prompt: 画像生成プロンプト（英語推奨）
         destination: 旅行先の地名
         style: 画像スタイル（photorealistic/illustration/watercolor）
     """
-    # TODO: GPT Image 1.5 API 呼び出しに置き換え
-    # 現在はプレースホルダーの 1x1 PNG を返す
-    return (
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
-        "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
-    )
+    full_prompt = f"{style} travel photo of {destination}. {prompt}"
+    return await _generate_image(full_prompt, "1792x1024")
 
 
 @tool
@@ -34,18 +77,14 @@ async def generate_banner_image(
     prompt: str,
     platform: str = "instagram",
 ) -> str:
-    """GPT Image 1.5 で SNS バナー画像を生成する。
+    """SNS バナー画像を生成する。
 
     Args:
         prompt: 画像生成プロンプト（英語推奨）
         platform: SNS プラットフォーム（instagram/twitter/facebook）
     """
-    # TODO: GPT Image 1.5 API 呼び出しに置き換え
-    return (
-        "data:image/png;base64,"
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
-        "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
-    )
+    size = "1024x1024" if platform == "instagram" else "1792x1024"
+    return await _generate_image(prompt, size)
 
 
 INSTRUCTIONS = """\
@@ -81,10 +120,10 @@ def create_brochure_gen_agent():
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
+        deployment_name=settings["model_name"],
     )
     return client.as_agent(
         name="brochure-gen-agent",
         instructions=INSTRUCTIONS,
         tools=[generate_hero_image, generate_banner_image],
-        model=settings["model_name"],
     )
