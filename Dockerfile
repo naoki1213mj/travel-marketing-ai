@@ -23,6 +23,10 @@ COPY src/ ./src/
 # フロントエンドビルド成果物
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
+# 非 root ユーザーで実行（セキュリティベストプラクティス）
+RUN adduser --disabled-password --no-create-home appuser
+USER appuser
+
 # 環境変数
 ENV SERVE_STATIC=true
 ENV PORT=8000
@@ -30,6 +34,6 @@ ENV PORT=8000
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
+  CMD uv run python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 
 CMD ["uv", "run", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

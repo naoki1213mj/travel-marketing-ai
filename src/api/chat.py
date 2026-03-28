@@ -9,7 +9,7 @@ from enum import StrEnum
 
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.middleware import analyze_content, check_prompt_shield
 
@@ -44,15 +44,15 @@ def format_sse(event_type: str, data: dict) -> str:
 class ChatRequest(BaseModel):
     """チャットリクエスト"""
 
-    message: str
-    conversation_id: str | None = None
+    message: str = Field(..., min_length=1, max_length=5000)
+    conversation_id: str | None = Field(None, max_length=100)
 
 
 class ApproveRequest(BaseModel):
     """承認/修正リクエスト"""
 
-    conversation_id: str
-    response: str
+    conversation_id: str = Field(..., max_length=100)
+    response: str = Field(..., min_length=1, max_length=5000)
 
 
 # --- モック SSE ジェネレーター（Phase 1: Azure 未接続のデモ用） ---
@@ -555,12 +555,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
         from src.workflows import create_pipeline_workflow
 
         workflow = create_pipeline_workflow()
-    except Exception as e:
+    except Exception:
         logger.exception("Workflow 構築に失敗")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": f"Workflow の構築に失敗しました: {e}",
+                "message": "Workflow の構築に失敗しました。再試行してください。",
                 "code": "WORKFLOW_BUILD_ERROR",
             },
         )
@@ -589,12 +589,12 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
             },
         )
 
-    except Exception as e:
+    except Exception:
         logger.exception("Workflow 実行中にエラーが発生")
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": f"パイプライン実行中にエラーが発生しました: {e}",
+                "message": "パイプライン実行中にエラーが発生しました。再試行してください。",
                 "code": "WORKFLOW_RUNTIME_ERROR",
             },
         )

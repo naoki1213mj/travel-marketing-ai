@@ -47,17 +47,15 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
             output_type="FourSeverityLevels",
         )
         shield_response = client.detect_jailbreak(text=user_input)
-        is_safe = (
-            all(c.severity == 0 for c in response.categories_analysis)
-            and not shield_response.jailbreak_detected
-        )
+        is_safe = all(c.severity == 0 for c in response.categories_analysis) and not shield_response.jailbreak_detected
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
     except ImportError:
         logger.warning("azure-ai-contentsafety がインストールされていません")
         return ShieldResult(is_safe=True)
     except Exception:
         logger.exception("Prompt Shield チェックでエラーが発生")
-        return ShieldResult(is_safe=True)
+        # fail-closed: チェック不能時は安全側に倒す
+        return ShieldResult(is_safe=False)
 
 
 async def analyze_content(text: str) -> SafetyScores:

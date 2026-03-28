@@ -10,9 +10,9 @@ param environmentName string
 
 @minLength(1)
 @description('Azure リージョン')
-param location string = 'eastus2'
+param location string
 
-@description('コンテナイメージ名')
+@description('コンテナイメージ名（azd が自動設定する）')
 param imageName string = ''
 
 var abbrs = loadJsonContent('abbreviations.json')
