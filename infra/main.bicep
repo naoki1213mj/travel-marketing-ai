@@ -141,6 +141,7 @@ module containerApp 'modules/container-app.bicep' = {
     projectEndpoint: aiProjectEndpoint
     contentSafetyEndpoint: aiFoundry.outputs.endpoint
     cosmosDbEndpoint: cosmosDb.outputs.endpoint
+    apimGatewayUrl: apim.outputs.gatewayUrl
   }
 }
 
@@ -164,6 +165,7 @@ module apim 'modules/api-management.bicep' = {
     tags: tags
     appInsightsId: appInsights.outputs.id
     appInsightsInstrumentationKey: appInsights.outputs.instrumentationKey
+    foundryEndpoint: aiFoundry.outputs.endpoint
   }
 }
 

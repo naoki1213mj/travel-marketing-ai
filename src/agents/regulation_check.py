@@ -1,12 +1,15 @@
 """Agent3: レギュレーションチェックエージェント。企画書の法令・規制適合性を確認する。"""
 
 import json
+import logging
 
 from agent_framework import tool
 from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 # --- NG 表現リスト（Foundry IQ 未接続時のフォールバック） ---
 
@@ -64,6 +67,29 @@ async def check_travel_law_compliance(document: str) -> str:
     return json.dumps(results, ensure_ascii=False)
 
 
+@tool
+async def search_safety_info(destination: str) -> str:
+    """目的地の外務省安全情報・気象警報を確認する。
+
+    Args:
+        destination: 旅行先の地域名（例: 「沖縄」「バリ島」）
+    """
+    # Foundry Agent Service の Web Search ツールが利用可能な場合はそちらが優先される
+    # ローカル開発時はフォールバックとして静的データを返す
+    logger.info("安全情報検索フォールバック: %s", destination)
+    return json.dumps(
+        {
+            "destination": destination,
+            "safety_level": "レベル1（十分注意）",
+            "warnings": [],
+            "weather_alerts": [],
+            "source": "フォールバックデータ（Web Search 未接続時）",
+            "note": "Foundry Agent Service の Web Search ツール接続後は実データを取得します",
+        },
+        ensure_ascii=False,
+    )
+
+
 INSTRUCTIONS = """\
 あなたは旅行業界の法規制チェックエージェントです。
 Agent2（施策生成エージェント）が作成した企画書を受け取り、以下の観点でレギュレーションチェックを行ってください。
@@ -96,5 +122,5 @@ def create_regulation_check_agent():
     return client.as_agent(
         name="regulation-check-agent",
         instructions=INSTRUCTIONS,
-        tools=[check_ng_expressions, check_travel_law_compliance],
+        tools=[check_ng_expressions, check_travel_law_compliance, search_safety_info],
     )

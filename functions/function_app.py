@@ -1,4 +1,8 @@
-"""Azure Functions MCP サーバー — 旅行マーケティング AI パイプラインのカスタムツール群"""
+"""Azure Functions MCP サーバー — 旅行マーケティング AI パイプラインのカスタムツール群
+
+Foundry Agent Service の Remote MCP ツールとして登録する。
+Flex Consumption プラン + Python 3.13 で実行。
+"""
 
 import json
 import logging

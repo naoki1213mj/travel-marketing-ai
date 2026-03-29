@@ -754,7 +754,9 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     lines = event.strip().split("\n")
                     ev_type = lines[0].replace("event: ", "") if lines else ""
                     ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
-                    collected_events.append({"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data})
+                    collected_events.append(
+                        {"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data}
+                    )
                 except Exception:
                     pass
                 yield event

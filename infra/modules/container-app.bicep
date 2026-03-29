@@ -12,6 +12,7 @@ param modelName string = 'gpt-5-4-mini'
 param projectEndpoint string = ''
 param contentSafetyEndpoint string = ''
 param cosmosDbEndpoint string = ''
+param apimGatewayUrl string = ''
 
 // ACR イメージを使う場合のみ registry 参照が必要
 var isAcrImage = contains(imageName, '.azurecr.io')
@@ -46,6 +47,11 @@ var containerEnv = concat([
   {
     name: 'COSMOS_DB_ENDPOINT'
     value: cosmosDbEndpoint
+  }
+] : [], !empty(apimGatewayUrl) ? [
+  {
+    name: 'APIM_GATEWAY_URL'
+    value: apimGatewayUrl
   }
 ] : [])
 

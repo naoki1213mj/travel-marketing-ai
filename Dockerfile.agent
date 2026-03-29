@@ -1,0 +1,26 @@
+# Hosted Agent Dockerfile — Foundry Agent Service デプロイ用
+# 4 エージェントを Hosted Agent として Foundry にデプロイする
+
+FROM python:3.14-slim
+WORKDIR /app
+
+# uv インストール
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# 依存関係インストール
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev
+
+# アプリケーションコード + データ
+COPY src/ ./src/
+COPY data/ ./data/
+COPY regulations/ ./regulations/
+
+# 非 root ユーザー
+RUN adduser --disabled-password --no-create-home agentuser \
+    && chown -R agentuser:agentuser /app
+USER agentuser
+
+# Hosted Agent エントリポイント
+# Foundry Agent Service がこのコンテナを起動してエージェントを実行する
+CMD [".venv/bin/python", "-m", "src.hosted_agent"]

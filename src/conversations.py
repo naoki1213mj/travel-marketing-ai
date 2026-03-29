@@ -94,8 +94,14 @@ async def list_conversations(limit: int = 20) -> list[dict]:
     container = _get_container()
     if container:
         try:
-            query = "SELECT c.id, c.input, c.status, c.created_at FROM c ORDER BY c.created_at DESC OFFSET 0 LIMIT @limit"
-            items = list(container.query_items(query=query, parameters=[{"name": "@limit", "value": limit}], partition_key="demo-user"))
+            query = (
+                "SELECT c.id, c.input, c.status, c.created_at FROM c ORDER BY c.created_at DESC OFFSET 0 LIMIT @limit"
+            )
+            items = list(
+                container.query_items(
+                    query=query, parameters=[{"name": "@limit", "value": limit}], partition_key="demo-user"
+                )
+            )
             return items
         except Exception:
             logger.exception("Cosmos DB からの一覧取得に失敗")

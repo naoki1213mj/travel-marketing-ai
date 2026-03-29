@@ -5,7 +5,8 @@ import json
 import pytest
 
 from src.agents.data_search import search_customer_reviews, search_sales_history
-from src.agents.regulation_check import check_ng_expressions, check_travel_law_compliance
+from src.agents.marketing_plan import search_market_trends
+from src.agents.regulation_check import check_ng_expressions, check_travel_law_compliance, search_safety_info
 
 
 class TestDataSearchTools:
@@ -87,6 +88,42 @@ class TestConfigSettings:
         settings = get_settings()
         assert "project_endpoint" in settings
         assert "model_name" in settings
+
+
+class TestMarketingPlanTools:
+    """Agent2 の市場トレンドツールテスト"""
+
+    @pytest.mark.asyncio
+    async def test_search_market_trends_returns_string(self):
+        """市場トレンド検索が文字列を返すこと"""
+        result = await search_market_trends(query="沖縄旅行 トレンド 2026")
+        assert isinstance(result, str)
+        assert "トレンド" in result
+
+    @pytest.mark.asyncio
+    async def test_search_market_trends_contains_info(self):
+        """市場トレンド検索が情報を含むこと"""
+        result = await search_market_trends(query="test")
+        assert len(result) > 50
+
+
+class TestSafetyInfoTool:
+    """Agent3 の安全情報ツールテスト"""
+
+    @pytest.mark.asyncio
+    async def test_search_safety_info_returns_json(self):
+        """安全情報検索が JSON 文字列を返すこと"""
+        result = await search_safety_info(destination="沖縄")
+        parsed = json.loads(result)
+        assert parsed["destination"] == "沖縄"
+        assert "safety_level" in parsed
+
+    @pytest.mark.asyncio
+    async def test_search_safety_info_different_destination(self):
+        """異なる目的地でも動作すること"""
+        result = await search_safety_info(destination="バリ島")
+        parsed = json.loads(result)
+        assert parsed["destination"] == "バリ島"
 
     def test_default_model_name(self, monkeypatch):
         """MODEL_NAME 未設定時のデフォルト値"""
