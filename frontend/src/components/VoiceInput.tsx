@@ -55,13 +55,9 @@ function getSpeechRecognition(): SpeechRecognitionConstructor | null {
 
 export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProps) {
   const [voiceState, setVoiceState] = useState<VoiceState>('idle')
-  const [isSupported, setIsSupported] = useState(true)
+  const [isSupported] = useState(() => getSpeechRecognition() !== null)
   const [interimText, setInterimText] = useState('')
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
-
-  useEffect(() => {
-    setIsSupported(getSpeechRecognition() !== null)
-  }, [])
 
   // アンマウント時にクリーンアップ
   useEffect(() => {

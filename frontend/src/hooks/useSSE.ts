@@ -106,8 +106,10 @@ export function useSSE() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const stateRef = useRef<PipelineState>(initialState)
 
-  // stateRef を常に最新に保つ
-  stateRef.current = state
+  // stateRef を常に最新に保つ（effect 内で更新）
+  useEffect(() => {
+    stateRef.current = state
+  })
 
   // アンマウント時に SSE 接続を中断する
   useEffect(() => {

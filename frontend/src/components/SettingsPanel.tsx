@@ -12,6 +12,7 @@ export interface ModelSettings {
   iqScoreThreshold: number
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const DEFAULT_SETTINGS: ModelSettings = {
   temperature: 0.7,
   maxTokens: 4096,
