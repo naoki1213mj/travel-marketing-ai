@@ -38,7 +38,7 @@ resource flexPlan 'Microsoft.Web/serverfarms@2024-04-01' = {
   }
 }
 
-// Function App
+// Function App (Flex Consumption 向け設定)
 resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   name: name
   location: location
@@ -50,7 +50,6 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
   properties: {
     serverFarmId: flexPlan.id
     siteConfig: {
-      linuxFxVersion: 'Python|3.12'
       appSettings: [
         {
           name: 'AzureWebJobsStorage__accountName'
@@ -64,12 +63,39 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'FUNCTIONS_EXTENSION_VERSION'
           value: '~4'
         }
-        {
-          name: 'FUNCTIONS_WORKER_RUNTIME'
-          value: 'python'
-        }
       ]
     }
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${funcStorage.properties.primaryEndpoints.blob}deployments'
+          authentication: {
+            type: 'StorageAccountConnectionString'
+            storageAccountConnectionStringName: 'AzureWebJobsStorage'
+          }
+        }
+      }
+      runtime: {
+        name: 'python'
+        version: '3.12'
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: 40
+        instanceMemoryMB: 2048
+      }
+    }
+  }
+}
+
+// Storage 接続文字列が必要
+resource funcStorageConnectionString 'Microsoft.Web/sites/config@2024-04-01' = {
+  parent: functionApp
+  name: 'appsettings'
+  properties: {
+    AzureWebJobsStorage: 'DefaultEndpointsProtocol=https;AccountName=${funcStorage.name};AccountKey=${funcStorage.listKeys().keys[0].value}'
+    FUNCTIONS_EXTENSION_VERSION: '~4'
+    APPLICATIONINSIGHTS_CONNECTION_STRING: appInsightsConnectionString
   }
 }
 

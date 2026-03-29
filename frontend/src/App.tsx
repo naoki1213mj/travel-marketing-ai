@@ -15,6 +15,7 @@ import { SafetyBadge } from './components/SafetyBadge'
 import { ThemeToggle } from './components/ThemeToggle'
 import { ToolEventBadges } from './components/ToolEventBadges'
 import { VersionSelector } from './components/VersionSelector'
+import { VoiceInput } from './components/VoiceInput'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
@@ -76,11 +77,16 @@ function App() {
           </div>
 
           <div className="border-t border-gray-200 p-4 dark:border-gray-800">
-            {state.status === 'completed' ? (
-              <RefineChat onSubmit={sendMessage} disabled={isRunning} placeholder={t('refine.placeholder')} sendLabel={t('input.send')} />
-            ) : (
-              <InputForm onSubmit={sendMessage} disabled={isRunning} placeholder={t('input.placeholder')} sendLabel={t('input.send')} />
-            )}
+            <div className="flex items-center gap-2">
+              <div className="flex-1">
+                {state.status === 'completed' ? (
+                  <RefineChat onSubmit={sendMessage} disabled={isRunning} placeholder={t('refine.placeholder')} sendLabel={t('input.send')} />
+                ) : (
+                  <InputForm onSubmit={sendMessage} disabled={isRunning} placeholder={t('input.placeholder')} sendLabel={t('input.send')} />
+                )}
+              </div>
+              <VoiceInput onTranscript={sendMessage} disabled={isRunning} />
+            </div>
           </div>
         </div>
 
@@ -105,6 +111,15 @@ function App() {
               },
               { key: 'brochure', label: `🎨 ${t('tab.brochure')}`, content: <BrochurePreview contents={state.textContents} /> },
               { key: 'images', label: `🖼️ ${t('tab.images')}`, content: <ImageGallery images={state.images} /> },
+              { key: 'video', label: `🎬 ${t('tab.video') || '動画'}`, content: (
+                <div className="flex items-center justify-center rounded-lg border-2 border-dashed border-gray-300 p-12 dark:border-gray-700">
+                  <div className="text-center">
+                    <p className="text-3xl">🎬</p>
+                    <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">販促紹介動画 (Photo Avatar + Voice Live)</p>
+                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">Preview 機能</p>
+                  </div>
+                </div>
+              )},
             ]} />
 
             {/* エクスポートボタン群 */}

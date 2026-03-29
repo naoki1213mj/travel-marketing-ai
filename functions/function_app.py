@@ -96,11 +96,13 @@ async def save_to_sharepoint(req: func.HttpRequest) -> func.HttpResponse:
         # SharePoint 保存のプレースホルダー（Microsoft Graph API 経由）
         logger.info("SharePoint 保存: filename=%s, folder=%s, size=%d", filename, folder, len(content))
         return func.HttpResponse(
-            json.dumps({
-                "status": "success",
-                "message": f"SharePoint に保存しました: {folder}/{filename}",
-                "path": f"{folder}/{filename}",
-            }),
+            json.dumps(
+                {
+                    "status": "success",
+                    "message": f"SharePoint に保存しました: {folder}/{filename}",
+                    "path": f"{folder}/{filename}",
+                }
+            ),
             mimetype="application/json",
         )
     except ValueError:
