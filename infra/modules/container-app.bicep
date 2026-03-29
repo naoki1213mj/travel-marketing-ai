@@ -10,6 +10,7 @@ param keyVaultName string
 param appInsightsConnectionString string
 param modelName string = 'gpt-5-4-mini'
 param projectEndpoint string = ''
+param contentSafetyEndpoint string = ''
 
 // ACR イメージを使う場合のみ registry 参照が必要
 var isAcrImage = contains(imageName, '.azurecr.io')
@@ -26,10 +27,19 @@ var containerEnv = concat([
     name: 'MODEL_NAME'
     value: modelName
   }
+  {
+    name: 'ENVIRONMENT'
+    value: 'production'
+  }
 ], !empty(projectEndpoint) ? [
   {
     name: 'AZURE_AI_PROJECT_ENDPOINT'
     value: projectEndpoint
+  }
+] : [], !empty(contentSafetyEndpoint) ? [
+  {
+    name: 'CONTENT_SAFETY_ENDPOINT'
+    value: contentSafetyEndpoint
   }
 ] : [])
 
@@ -84,7 +94,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               type: 'Readiness'
               httpGet: {
-                path: '/api/health'
+                path: '/api/ready'
                 port: 8000
               }
               initialDelaySeconds: 10

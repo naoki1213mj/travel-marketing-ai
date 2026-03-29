@@ -17,8 +17,10 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
-# アプリケーションコード
+# アプリケーションコード + データ
 COPY src/ ./src/
+COPY data/ ./data/
+COPY regulations/ ./regulations/
 
 # フロントエンドビルド成果物
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist

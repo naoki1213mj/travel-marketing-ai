@@ -45,19 +45,19 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
 
     try:
         from azure.ai.contentsafety import ContentSafetyClient
+        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
         from azure.identity import DefaultAzureCredential
 
         client = ContentSafetyClient(
             endpoint=endpoint,
             credential=DefaultAzureCredential(),
         )
-        response = client.analyze_text(
+        options = AnalyzeTextOptions(
             text=user_input,
-            categories=["Hate", "SelfHarm", "Sexual", "Violence"],
-            output_type="FourSeverityLevels",
+            categories=[TextCategory.HATE, TextCategory.SELF_HARM, TextCategory.SEXUAL, TextCategory.VIOLENCE],
         )
-        shield_response = client.detect_jailbreak(text=user_input)
-        is_safe = all(c.severity == 0 for c in response.categories_analysis) and not shield_response.jailbreak_detected
+        response = client.analyze_text(options)
+        is_safe = all(c.severity == 0 for c in response.categories_analysis)
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
     except ImportError:
         logger.warning("azure-ai-contentsafety がインストールされていません")
@@ -82,17 +82,18 @@ async def analyze_content(text: str) -> SafetyScores:
 
     try:
         from azure.ai.contentsafety import ContentSafetyClient
+        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
         from azure.identity import DefaultAzureCredential
 
         client = ContentSafetyClient(
             endpoint=endpoint,
             credential=DefaultAzureCredential(),
         )
-        response = client.analyze_text(
+        options = AnalyzeTextOptions(
             text=text,
-            categories=["Hate", "SelfHarm", "Sexual", "Violence"],
-            output_type="FourSeverityLevels",
+            categories=[TextCategory.HATE, TextCategory.SELF_HARM, TextCategory.SEXUAL, TextCategory.VIOLENCE],
         )
+        response = client.analyze_text(options)
         scores = SafetyScores()
         for cat in response.categories_analysis:
             if cat.category == "Hate":
