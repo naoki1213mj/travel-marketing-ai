@@ -9,3 +9,4 @@ frontend/dist/
 .azure/
 data/*.csv
 .testagent/
+.coverage

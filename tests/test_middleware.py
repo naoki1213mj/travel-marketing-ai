@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.middleware import SafetyScores, ShieldResult, analyze_content, check_prompt_shield
+from src.middleware import SafetyScores, ShieldResult, analyze_content, check_prompt_shield, check_tool_response
 
 
 class TestShieldResult:
@@ -77,6 +77,35 @@ class TestAnalyzeContent:
         assert scores.sexual == 0
         assert scores.violence == 0
         assert scores.check_failed is False
+
+
+class TestCheckToolResponse:
+    """ツール応答 Prompt Shield チェック関数のテスト（層3）"""
+
+    @pytest.mark.asyncio
+    async def test_returns_safe_when_endpoint_not_set_in_development(self, monkeypatch):
+        """開発環境では CONTENT_SAFETY_ENDPOINT 未設定時に is_safe=True を返す"""
+        monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        result = await check_tool_response("web search result: normal content")
+        assert result.is_safe is True
+
+    @pytest.mark.asyncio
+    async def test_returns_unsafe_when_endpoint_not_set_in_production(self, monkeypatch):
+        """本番環境では CONTENT_SAFETY_ENDPOINT 未設定時にブロックする"""
+        monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        result = await check_tool_response("tool output")
+        assert result.is_safe is False
+
+    @pytest.mark.asyncio
+    async def test_accepts_long_text(self, monkeypatch):
+        """長いテキストも受け付けること（4000文字に切り詰め）"""
+        monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
+        monkeypatch.setenv("ENVIRONMENT", "development")
+        long_text = "x" * 10000
+        result = await check_tool_response(long_text)
+        assert isinstance(result, ShieldResult)
 
     @pytest.mark.asyncio
     async def test_returns_check_failed_when_endpoint_not_set_in_production(self, monkeypatch):

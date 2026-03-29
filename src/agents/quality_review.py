@@ -1,8 +1,7 @@
-"""品質レビューエージェント（GitHub Copilot SDK 統合）。
+"""品質レビューエージェント。
 
-Agent4 の成果物生成後に非同期で実行し、品質チェックを行う。
-Copilot SDK が利用可能なら GitHubCopilotAgent を使い、
-未設定の場合は Agent Framework の自前レビューにフォールバックする。
+Agent4 の成果物生成後に実行し、品質チェックを行う。
+Agent Framework の AzureOpenAIResponsesClient でレビューを実施する。
 """
 
 import logging
@@ -14,15 +13,6 @@ from azure.identity import DefaultAzureCredential
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
-
-# Copilot SDK のオプショナルインポート
-_copilot_available = False
-try:
-    from agent_framework.github import GitHubCopilotAgent
-
-    _copilot_available = True
-except ImportError:
-    logger.info("GitHubCopilotAgent 未利用可能。自前レビューにフォールバック")
 
 
 @tool
@@ -95,31 +85,12 @@ INSTRUCTIONS = """\
 
 
 def create_review_agent():
-    """品質レビューエージェントを作成する。
-
-    Copilot SDK が利用可能な場合は GitHubCopilotAgent を優先し、
-    失敗時は Agent Framework の自前レビューにフォールバックする。
-    """
+    """品質レビューエージェントを作成する。"""
     settings = get_settings()
     if not settings["project_endpoint"]:
         logger.info("Project endpoint 未設定のためレビューエージェントはスキップ")
         return None
 
-    # Copilot SDK が利用可能な場合
-    if _copilot_available:
-        try:
-            return GitHubCopilotAgent(
-                default_options={
-                    "instructions": INSTRUCTIONS,
-                },
-            )
-        except Exception:
-            logger.warning(
-                "GitHubCopilotAgent 作成失敗、自前レビューにフォールバック",
-                exc_info=True,
-            )
-
-    # フォールバック: Agent Framework で自前レビュー
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),

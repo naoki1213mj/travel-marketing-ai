@@ -23,34 +23,49 @@ _FALLBACK_IMAGE = (
     "z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
 )
 
+# 画像生成モデル名（Foundry にデプロイ済み）
+_IMAGE_MODEL = "gpt-image-1.5"
 
-def _get_openai_client():
-    """画像生成用の OpenAI クライアントを返す"""
-    from openai import AzureOpenAI
+# AIProjectClient シングルトン（画像生成用）
+_image_project_client: object | None = None
+_image_client_initialized: bool = False
 
-    settings = get_settings()
-    endpoint = settings["project_endpoint"].split("/api/projects/")[0]
-    credential = DefaultAzureCredential()
-    # get_token は同期呼び出しだが、OpenAI クライアント初期化時にのみ使われるため許容する
-    token = credential.get_token("https://cognitiveservices.azure.com/.default")
-    # Foundry endpoint を OpenAI 互換の endpoint に変換
-    azure_endpoint = endpoint
-    if ".services.ai.azure.com" in azure_endpoint:
-        azure_endpoint = azure_endpoint.replace(".services.ai.azure.com", ".openai.azure.com")
-    return AzureOpenAI(
-        azure_endpoint=azure_endpoint,
-        api_version="2025-04-01-preview",
-        azure_ad_token=token.token,
-    )
+
+def _get_image_openai_client():
+    """AIProjectClient 経由で画像生成用 OpenAI クライアントを返す"""
+    global _image_project_client, _image_client_initialized
+    if not _image_client_initialized:
+        _image_client_initialized = True
+        settings = get_settings()
+        endpoint = settings["project_endpoint"]
+        if not endpoint:
+            logger.info("project_endpoint 未設定、画像生成は無効")
+            _image_project_client = None
+            return None
+        try:
+            from azure.ai.projects import AIProjectClient
+
+            _image_project_client = AIProjectClient(
+                endpoint=endpoint,
+                credential=DefaultAzureCredential(),
+            )
+        except Exception:
+            logger.exception("AIProjectClient 初期化失敗")
+            _image_project_client = None
+    if _image_project_client is None:
+        return None
+    return _image_project_client.get_openai_client()
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
     """OpenAI Images API で画像を生成し、data URI を返す"""
     try:
-        client = _get_openai_client()
-        settings = get_settings()
+        client = _get_image_openai_client()
+        if client is None:
+            logger.info("OpenAI クライアント未初期化。フォールバック画像を返します")
+            return _FALLBACK_IMAGE
         response = client.images.generate(
-            model=settings["model_name"],
+            model=_IMAGE_MODEL,
             prompt=prompt,
             n=1,
             size=size,
@@ -110,10 +125,7 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
     """
     endpoint = os.environ.get("CONTENT_UNDERSTANDING_ENDPOINT", "")
     if not endpoint:
-        return (
-            "⚠️ PDF 解析は現在利用できません。"
-            "CONTENT_UNDERSTANDING_ENDPOINT 環境変数を設定してください。"
-        )
+        return "⚠️ PDF 解析は現在利用できません。CONTENT_UNDERSTANDING_ENDPOINT 環境変数を設定してください。"
 
     # PDF ファイルを読み込む
     try:
@@ -220,10 +232,7 @@ async def generate_promo_video(
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
         # バッチ合成ジョブを作成する
-        batch_url = (
-            f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses"
-            f"?api-version=2024-08-01"
-        )
+        batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses?api-version=2024-08-01"
 
         job_id = f"promo-{int(time.time())}"
         payload = json.dumps(
@@ -261,8 +270,7 @@ async def generate_promo_video(
                 "status": "submitted",
                 "job_id": result.get("id", job_id),
                 "message": (
-                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。"
-                    f"アバター: {character}, スタイル: {avatar_style}"
+                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_style}"
                 ),
             },
             ensure_ascii=False,
@@ -326,10 +334,24 @@ def create_brochure_gen_agent(model_settings: dict | None = None):
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
+
+    agent_tools: list = [
+        generate_hero_image,
+        generate_banner_image,
+        analyze_existing_brochure,
+        generate_promo_video,
+        # Foundry 組み込み Image Generation ツール（gpt-image-1.5 デプロイ済み）
+        client.get_image_generation_tool(
+            model=_IMAGE_MODEL,
+            quality="medium",
+            size="auto",
+        ),
+    ]
+
     agent_kwargs: dict = {
         "name": "brochure-gen-agent",
         "instructions": INSTRUCTIONS,
-        "tools": [generate_hero_image, generate_banner_image, analyze_existing_brochure, generate_promo_video],
+        "tools": agent_tools,
     }
     if model_settings:
         if "temperature" in model_settings:

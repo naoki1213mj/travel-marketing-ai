@@ -1,6 +1,5 @@
 """config モジュールのユニットテスト"""
 
-
 from src.config import AppSettings, get_missing_required_settings, get_settings, is_production_environment
 
 
@@ -16,6 +15,10 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "COSMOS_DB_ENDPOINT",
         "FABRIC_SQL_ENDPOINT",
         "ALLOWED_ORIGINS",
+        "CONTENT_UNDERSTANDING_ENDPOINT",
+        "SPEECH_SERVICE_ENDPOINT",
+        "SPEECH_SERVICE_REGION",
+        "LOGIC_APP_CALLBACK_URL",
     ]:
         monkeypatch.delenv(key, raising=False)
 

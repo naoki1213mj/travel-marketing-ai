@@ -54,12 +54,12 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
         <>
           {/* 背景オーバーレイ（クリックで閉じる） */}
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0 z-[60] bg-black/20 backdrop-blur-sm"
             onClick={() => setIsOpen(false)}
             aria-hidden="true"
           />
-          <div className="absolute right-0 top-full z-50 mt-2 w-80 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4 shadow-2xl"
-               style={{ background: 'var(--panel-strong)' }}>
+          <div className="fixed right-4 top-20 z-[70] w-80 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4 shadow-2xl sm:absolute sm:right-0 sm:top-full sm:mt-2 sm:fixed-auto"
+               style={{ background: 'var(--panel-bg)' }}>
             <h3 className="mb-3 text-sm font-semibold text-[var(--text-primary)]">{t('history.title')}</h3>
             {conversations.length === 0 ? (
               <p className="text-xs text-[var(--text-muted)]">{t('history.empty')}</p>

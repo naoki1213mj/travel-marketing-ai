@@ -23,6 +23,7 @@ class AppSettings(TypedDict):
     content_understanding_endpoint: str
     speech_service_endpoint: str
     speech_service_region: str
+    logic_app_callback_url: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -38,6 +39,7 @@ _ENV_MAP: dict[str, str] = {
     "CONTENT_UNDERSTANDING_ENDPOINT": "content_understanding_endpoint",
     "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
     "SPEECH_SERVICE_REGION": "speech_service_region",
+    "LOGIC_APP_CALLBACK_URL": "logic_app_callback_url",
 }
 
 # デフォルト値（オプショナルな設定のみ）

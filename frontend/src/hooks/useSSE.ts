@@ -80,6 +80,7 @@ export interface PipelineState {
   versions: ArtifactSnapshot[]
   currentVersion: number
   settings: ModelSettings
+  userMessages: string[]
 }
 
 const initialState: PipelineState = {
@@ -96,6 +97,7 @@ const initialState: PipelineState = {
   versions: [],
   currentVersion: 0,
   settings: { ...DEFAULT_SETTINGS },
+  userMessages: [],
 }
 
 export function useSSE() {
@@ -194,6 +196,7 @@ export function useSSE() {
       status: 'running',
       error: null,
       approvalRequest: null,
+      userMessages: [...prev.userMessages, message],
     }))
     const handlers = createHandlers()
     const currentSettings = stateRef.current.settings

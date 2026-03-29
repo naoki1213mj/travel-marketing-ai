@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import time
+import urllib.request
 import uuid
 from enum import StrEnum
 
@@ -16,7 +17,7 @@ from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import save_conversation
-from src.middleware import analyze_content, check_prompt_shield
+from src.middleware import analyze_content, check_prompt_shield, check_tool_response
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -532,6 +533,19 @@ async def _run_single_agent(agent_name: str, agent_step: int, user_input: str, c
         result = await agent.run(user_input)
         result_text = str(result) if result else ""
 
+        # 層3: ツール応答に対する Prompt Shield チェック
+        tool_shield = await check_tool_response(result_text)
+        if not tool_shield.is_safe:
+            yield format_sse(
+                SSEEventType.SAFETY,
+                {"status": "blocked", "reason": "tool_response_unsafe", "details": tool_shield.details},
+            )
+            yield format_sse(
+                SSEEventType.ERROR,
+                {"message": "ツール応答が安全性チェックに失敗しました", "code": "TOOL_RESPONSE_BLOCKED"},
+            )
+            return
+
         yield format_sse(SSEEventType.TEXT, {"content": result_text, "agent": agent_name})
     except Exception:
         logger.exception("エージェント(%s)の実行に失敗", agent_name)
@@ -622,6 +636,43 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     async for event in _run_single_agent("brochure-gen-agent", 4, agent3_result or user_response, conversation_id):
         yield event
 
+    # 承認後アクション: Logic Apps にコールバック（Teams 通知 + SharePoint 保存）
+    await _trigger_logic_app(conversation_id, agent3_result)
+
+
+async def _trigger_logic_app(conversation_id: str, result_summary: str) -> None:
+    """Logic Apps の HTTP トリガーを呼び出して承認後アクションを実行する。
+
+    Teams チャネルへの通知と SharePoint への成果物保存を Logic Apps 側で処理する。
+    """
+    settings = get_settings()
+    callback_url = settings["logic_app_callback_url"]
+    if not callback_url:
+        logger.info("LOGIC_APP_CALLBACK_URL 未設定。承認後アクションをスキップ")
+        return
+
+    payload = json.dumps(
+        {
+            "conversation_id": conversation_id,
+            "status": "approved",
+            "summary": result_summary[:2000] if result_summary else "",
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+
+    try:
+        req = urllib.request.Request(
+            callback_url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
+        logger.info("Logic Apps コールバック送信完了: conversation_id=%s", conversation_id)
+    except Exception:
+        logger.warning("Logic Apps コールバック送信に失敗（非致命的）", exc_info=True)
+
 
 # --- エンドポイント ---
 
@@ -702,12 +753,14 @@ async def workflow_event_generator(user_input: str, conversation_id: str):
             },
         )
 
-    except Exception:
+    except Exception as exc:
         logger.exception("Workflow 実行中にエラーが発生")
+        # エラー詳細をサニタイズして返す（内部情報は含めない）
+        error_type = type(exc).__name__
         yield format_sse(
             SSEEventType.ERROR,
             {
-                "message": "パイプライン実行中にエラーが発生しました。再試行してください。",
+                "message": f"パイプライン実行中にエラーが発生しました（{error_type}）。再試行してください。",
                 "code": "WORKFLOW_RUNTIME_ERROR",
             },
         )

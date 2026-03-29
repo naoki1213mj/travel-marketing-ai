@@ -37,7 +37,7 @@ function App() {
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
       <div className="mx-auto flex min-h-screen max-w-[1600px] flex-col px-4 py-4 sm:px-6 lg:px-8">
-      <header className="rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-5 py-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
+      <header className="relative z-20 rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-5 py-5 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-[0.28em] text-[var(--text-muted)]">{t('app.kicker')}</p>
@@ -66,8 +66,29 @@ function App() {
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">
+            {/* ユーザーメッセージの会話表示 */}
+            {state.userMessages.length > 0 && (
+              <div className="space-y-3">
+                {state.userMessages.map((msg, i) => (
+                  <div key={i} className="flex justify-end">
+                    <div className="max-w-[85%] rounded-[20px] rounded-br-md bg-[var(--accent)] px-4 py-3 text-sm text-white shadow-sm">
+                      <p className="whitespace-pre-wrap">{msg}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {state.status !== 'idle' && (
               <PipelineStepper progress={state.agentProgress} t={t} />
+            )}
+
+            {/* 処理中のローディング表示 */}
+            {isRunning && !state.agentProgress && (
+              <div className="flex items-center gap-3 rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-strong)] px-5 py-4">
+                <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+                <span className="text-sm text-[var(--text-secondary)]">{t('status.running')}</span>
+              </div>
             )}
             <ToolEventBadges events={state.toolEvents} t={t} />
             <AnalysisView contents={state.textContents} t={t} />

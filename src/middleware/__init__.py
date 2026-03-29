@@ -33,9 +33,28 @@ def _content_safety_required() -> bool:
     return is_production_environment()
 
 
+def _get_content_safety_client():
+    """Content Safety クライアントを返す。利用不可なら None。"""
+    endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
+    if not endpoint:
+        return None, endpoint
+    try:
+        from azure.ai.contentsafety import ContentSafetyClient
+        from azure.identity import DefaultAzureCredential
+
+        client = ContentSafetyClient(
+            endpoint=endpoint,
+            credential=DefaultAzureCredential(),
+        )
+        return client, endpoint
+    except ImportError:
+        logger.warning("azure-ai-contentsafety がインストールされていません")
+        return None, endpoint
+
+
 async def check_prompt_shield(user_input: str) -> ShieldResult:
     """Prompt Shield でユーザー入力をチェックする（層1）"""
-    endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
+    client, endpoint = _get_content_safety_client()
     if not endpoint:
         if _content_safety_required():
             logger.error("CONTENT_SAFETY_ENDPOINT が未設定のため Prompt Shield をブロック")
@@ -43,21 +62,14 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         logger.warning("CONTENT_SAFETY_ENDPOINT が未設定のため Prompt Shield をスキップ")
         return ShieldResult(is_safe=True, details={"reason": "skipped_local"})
 
-    try:
-        from azure.ai.contentsafety import ContentSafetyClient
-        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
-        from azure.identity import DefaultAzureCredential
-    except ImportError:
-        logger.warning("azure-ai-contentsafety がインストールされていません")
+    if client is None:
         if _content_safety_required():
             return ShieldResult(is_safe=False, details={"reason": "client_unavailable"})
         return ShieldResult(is_safe=True, details={"reason": "client_unavailable"})
 
     try:
-        client = ContentSafetyClient(
-            endpoint=endpoint,
-            credential=DefaultAzureCredential(),
-        )
+        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
+
         options = AnalyzeTextOptions(
             text=user_input,
             categories=[TextCategory.HATE, TextCategory.SELF_HARM, TextCategory.SEXUAL, TextCategory.VIOLENCE],
@@ -70,13 +82,50 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         if _content_safety_required():
             logger.error("本番環境: Prompt Shield 障害のため入力をブロック (fail-close)")
             return ShieldResult(is_safe=False, details={"reason": "check_failed"})
-        # 開発環境でも安全側に倒す
         return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+
+
+async def check_tool_response(tool_output: str) -> ShieldResult:
+    """ツール応答に対する Prompt Shield チェック（層3）
+
+    Web Search や MCP ツールから返された外部データに対して、
+    プロンプトインジェクション攻撃が含まれていないかを検証する。
+    """
+    client, endpoint = _get_content_safety_client()
+    if not endpoint:
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "missing_endpoint"})
+        return ShieldResult(is_safe=True, details={"reason": "skipped_local"})
+
+    if client is None:
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "client_unavailable"})
+        return ShieldResult(is_safe=True, details={"reason": "client_unavailable"})
+
+    try:
+        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
+
+        # ツール応答は短く切り詰めてチェック（コスト最適化）
+        truncated = tool_output[:4000] if len(tool_output) > 4000 else tool_output
+        options = AnalyzeTextOptions(
+            text=truncated,
+            categories=[TextCategory.HATE, TextCategory.SELF_HARM, TextCategory.SEXUAL, TextCategory.VIOLENCE],
+        )
+        response = client.analyze_text(options)
+        is_safe = all(c.severity == 0 for c in response.categories_analysis)
+        if not is_safe:
+            logger.warning("ツール応答に安全でないコンテンツを検出しました")
+        return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
+    except Exception:
+        logger.exception("ツール応答 Prompt Shield でエラーが発生")
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+        return ShieldResult(is_safe=True, details={"reason": "check_failed_dev"})
 
 
 async def analyze_content(text: str) -> SafetyScores:
     """Text Analysis で出力コンテンツをチェックする（層4）"""
-    endpoint = os.environ.get("CONTENT_SAFETY_ENDPOINT", "")
+    client, endpoint = _get_content_safety_client()
     if not endpoint:
         if _content_safety_required():
             logger.error("CONTENT_SAFETY_ENDPOINT が未設定のため Text Analysis をブロック")
@@ -84,21 +133,14 @@ async def analyze_content(text: str) -> SafetyScores:
         logger.warning("CONTENT_SAFETY_ENDPOINT が未設定のため Text Analysis をスキップ")
         return SafetyScores()
 
-    try:
-        from azure.ai.contentsafety import ContentSafetyClient
-        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
-        from azure.identity import DefaultAzureCredential
-    except ImportError:
-        logger.warning("azure-ai-contentsafety がインストールされていません")
+    if client is None:
         if _content_safety_required():
             return SafetyScores(check_failed=True)
         return SafetyScores()
 
     try:
-        client = ContentSafetyClient(
-            endpoint=endpoint,
-            credential=DefaultAzureCredential(),
-        )
+        from azure.ai.contentsafety.models import AnalyzeTextOptions, TextCategory
+
         options = AnalyzeTextOptions(
             text=text,
             categories=[TextCategory.HATE, TextCategory.SELF_HARM, TextCategory.SEXUAL, TextCategory.VIOLENCE],
