@@ -117,11 +117,13 @@ def create_review_agent():
     # GitHubCopilotAgent を優先的に試行
     try:
         from agent_framework.github import GitHubCopilotAgent
+        from agent_framework.github import PermissionHandler
 
         review_agent = GitHubCopilotAgent(
             name="quality-review-agent",
             instructions=INSTRUCTIONS,
             tools=_REVIEW_TOOLS,
+            on_permission_request=PermissionHandler.approve_all,
         )
         logger.info("GitHubCopilotAgent で品質レビューエージェントを作成しました")
         return review_agent

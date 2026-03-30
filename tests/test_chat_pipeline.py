@@ -85,18 +85,18 @@ class TestExtractBrochureHtml:
     """_extract_brochure_html のテスト"""
 
     def test_code_block_html(self):
-        text = '```html\n<html><body>Hello</body></html>\n```'
+        text = "```html\n<html><body>Hello</body></html>\n```"
         result = chat_module._extract_brochure_html(text)
         assert result is not None
         assert result.startswith("<html>")
 
     def test_code_block_html_case_insensitive(self):
-        text = '```HTML\n<div>content</div>\n```'
+        text = "```HTML\n<div>content</div>\n```"
         result = chat_module._extract_brochure_html(text)
         assert result is not None
 
     def test_doctype_html_fallback(self):
-        text = 'Some text before\n<!DOCTYPE html>\n<html><body>Content</body></html>'
+        text = "Some text before\n<!DOCTYPE html>\n<html><body>Content</body></html>"
         result = chat_module._extract_brochure_html(text)
         assert result is not None
         assert result.startswith("<!DOCTYPE html>")
@@ -142,8 +142,7 @@ class TestExtractInlineImages:
 
     def test_multiple_images(self):
         html = (
-            '<img src="data:image/png;base64,aaa" alt="First" />'
-            '<img src="data:image/jpeg;base64,bbb" alt="Second" />'
+            '<img src="data:image/png;base64,aaa" alt="First" /><img src="data:image/jpeg;base64,bbb" alt="Second" />'
         )
         images = chat_module._extract_inline_images(html)
         assert len(images) == 2
@@ -226,21 +225,37 @@ class TestExtractCodeInterpreterImages:
 class TestIsApprovalResponse:
     """_is_approval_response のテスト"""
 
-    @pytest.mark.parametrize("text", [
-        "承認", "了承", "進めて", "批准", "同意",
-        "approve", "approved", "ok", "yes", "go",
-        "  承認  ", "APPROVE", "OK",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "承認",
+            "了承",
+            "進めて",
+            "批准",
+            "同意",
+            "approve",
+            "approved",
+            "ok",
+            "yes",
+            "go",
+            "  承認  ",
+            "APPROVE",
+            "OK",
+        ],
+    )
     def test_approval_keywords(self, text):
         assert chat_module._is_approval_response(text) is True
 
-    @pytest.mark.parametrize("text", [
-        "キャッチコピーを修正して",
-        "もっと詳しく",
-        "却下",
-        "no",
-        "",
-    ])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "キャッチコピーを修正して",
+            "もっと詳しく",
+            "却下",
+            "no",
+            "",
+        ],
+    )
     def test_non_approval_keywords(self, text):
         assert chat_module._is_approval_response(text) is False
 
@@ -359,7 +374,7 @@ class TestBuildContentEvents:
     """_build_content_events のテスト"""
 
     def test_brochure_agent_with_html(self):
-        text = '```html\n<html><body>Content</body></html>\n```'
+        text = "```html\n<html><body>Content</body></html>\n```"
         events = chat_module._build_content_events("brochure-gen-agent", text)
         assert len(events) >= 1
         _, payload = _parse_sse(events[0])
@@ -679,7 +694,7 @@ class TestMaybeRunQualityReview:
         def mock_create():
             return None
 
-        monkeypatch.setattr("src.agents.quality_review.create_review_agent", mock_create)
+        monkeypatch.setattr("src.agents.create_review_agent", mock_create)
         result = await chat_module._maybe_run_quality_review("some content")
         assert result == []
 
@@ -690,7 +705,7 @@ class TestMaybeRunQualityReview:
         def mock_create():
             raise RuntimeError("fail")
 
-        monkeypatch.setattr("src.agents.quality_review.create_review_agent", mock_create)
+        monkeypatch.setattr("src.agents.create_review_agent", mock_create)
         result = await chat_module._maybe_run_quality_review("content")
         assert result == []
 
@@ -770,9 +785,7 @@ async def test_workflow_event_generator_agent1_failure(monkeypatch) -> None:
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
     chat_module._pending_approvals.clear()
 
-    events = [
-        event async for event in chat_module.workflow_event_generator("テスト", "conv-fail", None)
-    ]
+    events = [event async for event in chat_module.workflow_event_generator("テスト", "conv-fail", None)]
     parsed = [_parse_sse(event) for event in events]
 
     assert any(event_name == "error" for event_name, _ in parsed)
