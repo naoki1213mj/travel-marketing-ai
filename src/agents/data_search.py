@@ -427,10 +427,13 @@ def create_data_search_agent(model_settings: dict | None = None):
         "tools": agent_tools,
     }
     if model_settings:
+        opts: dict = {}
         if "temperature" in model_settings:
-            agent_kwargs["temperature"] = model_settings["temperature"]
+            opts["temperature"] = model_settings["temperature"]
         if "max_tokens" in model_settings:
-            agent_kwargs["max_output_tokens"] = model_settings["max_tokens"]
+            opts["max_output_tokens"] = model_settings["max_tokens"]
         if "top_p" in model_settings:
-            agent_kwargs["top_p"] = model_settings["top_p"]
+            opts["top_p"] = model_settings["top_p"]
+        if opts:
+            agent_kwargs["default_options"] = opts
     return client.as_agent(**agent_kwargs)

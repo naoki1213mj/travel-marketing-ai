@@ -341,9 +341,10 @@ class TestBrochureGenTools:
 
         bg.create_brochure_gen_agent(model_settings={"temperature": 0.5, "max_tokens": 2000, "top_p": 0.9})
         call_kwargs = mock_client.as_agent.call_args.kwargs
-        assert call_kwargs["temperature"] == 0.5
-        assert call_kwargs["max_output_tokens"] == 2000
-        assert call_kwargs["top_p"] == 0.9
+        opts = call_kwargs["default_options"]
+        assert opts["temperature"] == 0.5
+        assert opts["max_output_tokens"] == 2000
+        assert opts["top_p"] == 0.9
 
 
 class TestMarketingPlanAgent:
@@ -397,8 +398,9 @@ class TestMarketingPlanAgent:
 
         mp.create_marketing_plan_agent(model_settings={"temperature": 0.3})
         call_kwargs = mock_client.as_agent.call_args.kwargs
-        assert call_kwargs["temperature"] == 0.3
-        assert "max_output_tokens" not in call_kwargs
+        opts = call_kwargs["default_options"]
+        assert opts["temperature"] == 0.3
+        assert "max_output_tokens" not in opts
 
     def test_instructions_contains_required_sections(self):
         """INSTRUCTIONS に必要な構成要素が含まれること"""
