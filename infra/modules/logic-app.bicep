@@ -53,5 +53,6 @@ resource logicApp 'Microsoft.Logic/workflows@2019-05-01' = {
 
 output id string = logicApp.id
 output name string = logicApp.name
-output callbackUrl string = listCallbackUrl(logicApp.id, '2019-05-01').value
+@secure()
+output callbackUrl string = logicApp.listCallbackUrl().value
 output principalId string = logicApp.identity.principalId

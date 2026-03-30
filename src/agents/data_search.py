@@ -134,15 +134,17 @@ def _get_sales_data_from_fabric(
         params.append(f"%{region}%")
 
     if season:
-        season_months = {
-            "spring": "(3, 4, 5)",
-            "summer": "(6, 7, 8)",
-            "autumn": "(9, 10, 11)",
-            "winter": "(12, 1, 2)",
+        season_months: dict[str, tuple[int, ...]] = {
+            "spring": (3, 4, 5),
+            "summer": (6, 7, 8),
+            "autumn": (9, 10, 11),
+            "winter": (12, 1, 2),
         }
         months = season_months.get(season)
         if months:
-            where_clauses.append(f"MONTH(departure_date) IN {months}")
+            placeholders = ", ".join("?" for _ in months)
+            where_clauses.append(f"MONTH(departure_date) IN ({placeholders})")
+            params.extend(months)
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 

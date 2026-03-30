@@ -33,6 +33,38 @@ async def test_save_conversation_to_memory():
     assert _memory_store["test-conv-1"]["input"] == "沖縄プラン作って"
 
 
+async def test_save_conversation_preserves_status():
+    """明示した status が保存される"""
+    await save_conversation(
+        conversation_id="test-conv-status",
+        user_input="承認待ちプラン",
+        events=[],
+        status="awaiting_approval",
+    )
+    assert _memory_store["test-conv-status"]["status"] == "awaiting_approval"
+
+
+async def test_save_conversation_preserves_created_at_on_update():
+    """同一 conversation_id の更新でも created_at は維持される"""
+    await save_conversation(
+        conversation_id="test-conv-update",
+        user_input="初回",
+        events=[],
+        status="awaiting_approval",
+    )
+    created_at = _memory_store["test-conv-update"]["created_at"]
+
+    await save_conversation(
+        conversation_id="test-conv-update",
+        user_input="更新後",
+        events=[{"event": "done", "data": {}}],
+        status="completed",
+    )
+
+    assert _memory_store["test-conv-update"]["created_at"] == created_at
+    assert _memory_store["test-conv-update"]["status"] == "completed"
+
+
 async def test_get_conversation_from_memory():
     """保存した会話をインメモリストアから取得できる"""
     await save_conversation(

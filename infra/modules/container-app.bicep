@@ -13,6 +13,11 @@ param projectEndpoint string = ''
 param contentSafetyEndpoint string = ''
 param cosmosDbEndpoint string = ''
 param apimGatewayUrl string = ''
+param contentUnderstandingEndpoint string = ''
+param speechServiceEndpoint string = ''
+param speechServiceRegion string = ''
+@secure()
+param logicAppCallbackUrl string = ''
 
 // ACR イメージを使う場合のみ registry 参照が必要
 var isAcrImage = contains(imageName, '.azurecr.io')
@@ -53,6 +58,26 @@ var containerEnv = concat([
     name: 'APIM_GATEWAY_URL'
     value: apimGatewayUrl
   }
+] : [], !empty(contentUnderstandingEndpoint) ? [
+  {
+    name: 'CONTENT_UNDERSTANDING_ENDPOINT'
+    value: contentUnderstandingEndpoint
+  }
+] : [], !empty(speechServiceEndpoint) ? [
+  {
+    name: 'SPEECH_SERVICE_ENDPOINT'
+    value: speechServiceEndpoint
+  }
+] : [], !empty(speechServiceRegion) ? [
+  {
+    name: 'SPEECH_SERVICE_REGION'
+    value: speechServiceRegion
+  }
+] : [], !empty(logicAppCallbackUrl) ? [
+  {
+    name: 'LOGIC_APP_CALLBACK_URL'
+    secretRef: 'logic-app-callback-url'
+  }
 ] : [])
 
 resource acr 'Microsoft.ContainerRegistry/registries@2023-11-01-preview' existing = {
@@ -71,6 +96,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
   properties: {
     managedEnvironmentId: containerAppsEnvironmentId
     configuration: {
+      secrets: !empty(logicAppCallbackUrl) ? [
+        {
+          name: 'logic-app-callback-url'
+          value: logicAppCallbackUrl
+        }
+      ] : []
       ingress: {
         external: true
         targetPort: 8000

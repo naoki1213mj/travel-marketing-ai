@@ -13,27 +13,26 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
   const [mode, setMode] = useState<'view' | 'revise'>('view')
 
   return (
-    <div className="space-y-4 rounded-[24px] border border-amber-200 bg-amber-50 p-5 dark:border-amber-900 dark:bg-amber-950/60">
-      <h3 className="text-sm font-medium text-amber-800 dark:text-amber-300">
+    <div className="space-y-4 rounded-[24px] border border-[var(--warning-border)] bg-[var(--warning-surface)] p-5">
+      <h3 className="text-sm font-medium text-[var(--warning-text)]">
         ✅ {t('approval.title')}
       </h3>
 
       {request.plan_markdown && (
-        <div className="rounded-[20px] bg-white p-4 dark:bg-gray-800">
+        <div className="rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
           <MarkdownView content={request.plan_markdown} />
         </div>
       )}
 
-      <p className="text-sm text-gray-700 dark:text-gray-300">{request.prompt}</p>
+      <p className="text-sm text-[var(--text-secondary)]">{request.prompt}</p>
 
       {mode === 'view' ? (
         <div className="flex gap-3">
           <button
             onClick={() => setMode('revise')}
             type="button"
-            className="rounded-full border border-gray-300 bg-white px-4 py-2 text-sm font-medium
-                       text-gray-700 hover:bg-gray-50
-                       dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+            className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-4 py-2 text-sm font-medium
+                       text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
             autoFocus
           >
             {t('approval.revise')}
@@ -54,17 +53,16 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
             onChange={e => setRevision(e.target.value)}
             placeholder={t('approval.prompt')}
             rows={3}
-            className="w-full resize-none rounded-[20px] border border-gray-200 bg-white px-3 py-2
+            className="w-full resize-none rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-2
                        text-sm focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-soft)]
-                       dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+                       text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
             autoFocus
           />
           <div className="flex gap-2">
             <button
               type="button"
               onClick={() => setMode('view')}
-              className="rounded-full border border-gray-300 px-3 py-1.5 text-sm text-gray-600
-                         dark:border-gray-600 dark:text-gray-400"
+              className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-sm text-[var(--text-secondary)]"
             >
               {t('approval.back')}
             </button>

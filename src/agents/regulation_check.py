@@ -108,21 +108,27 @@ async def search_knowledge_base(query: str) -> str:
         if conn is None:
             raise ValueError("Azure AI Search 接続が未構成です")
 
-        # Azure AI Search REST API — DefaultAzureCredential (MI) で認証
-        search_endpoint = conn.endpoint_url.rstrip("/")
+        # Azure AI Search REST API — Managed Identity を優先し、接続に API key があればフォールバックで使う
+        search_endpoint = getattr(conn, "target", "") or getattr(conn, "endpoint_url", "")
+        search_endpoint = search_endpoint.rstrip("/")
         search_url = f"{search_endpoint}/indexes/{_KB_INDEX_NAME}/docs/search?api-version=2024-07-01"
         body = json.dumps({"search": query, "top": 5, "queryType": "simple"}).encode()
 
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://search.azure.com/.default")
+        headers: dict[str, str] = {"Content-Type": "application/json"}
+        credentials = getattr(conn, "credentials", None)
+        # ApiKeyCredentials は dict-like だが isinstance(dict) は False なので hasattr で判定
+        api_key = credentials.get("key", "") if credentials is not None and hasattr(credentials, "get") else ""
+        if api_key:
+            headers["api-key"] = api_key
+        else:
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://search.azure.com/.default")
+            headers["Authorization"] = f"Bearer {token.token}"
 
         req = urllib.request.Request(
             search_url,
             data=body,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token.token}",
-            },
+            headers=headers,
             method="POST",
         )
         response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)

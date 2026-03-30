@@ -9,18 +9,18 @@ interface ErrorRetryProps {
 
 export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
   return (
-    <div className="rounded-[24px] border border-red-200 bg-red-50 p-5 dark:border-red-900 dark:bg-red-950/60">
+    <div className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-surface)] p-5">
       <div className="flex items-start gap-3">
         <span className="text-lg">⚠️</span>
         <div className="flex-1">
-          <p className="text-sm font-medium text-red-800 dark:text-red-300">
+          <p className="text-sm font-medium text-[var(--danger-text)]">
             {t('error.title')}
           </p>
-          <p className="mt-1 text-sm text-red-600 dark:text-red-400">
+          <p className="mt-1 text-sm text-[var(--danger-text)]/90">
             {error.message}
           </p>
           {error.code && (
-            <p className="mt-1 text-xs text-red-400 dark:text-red-500">
+            <p className="mt-1 text-xs text-[var(--danger-text)]/70">
               Code: {error.code}
             </p>
           )}
@@ -28,8 +28,7 @@ export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-lg bg-red-100 px-3 py-1.5 text-sm text-red-700
-                     hover:bg-red-200 dark:bg-red-900 dark:text-red-300 dark:hover:bg-red-800"
+          className="rounded-lg border border-[var(--danger-border)] bg-[var(--panel-bg)] px-3 py-1.5 text-sm text-[var(--danger-text)]"
         >
           {retryLabel}
         </button>

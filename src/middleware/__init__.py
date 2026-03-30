@@ -77,10 +77,15 @@ async def check_prompt_shield(user_input: str) -> ShieldResult:
         response = client.analyze_text(options)
         is_safe = all(c.severity == 0 for c in response.categories_analysis)
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
-    except Exception:
-        logger.exception("Prompt Shield チェックでエラーが発生")
+    except (ImportError, ValueError, OSError) as exc:
+        logger.exception("Prompt Shield チェックでエラーが発生: %s", exc)
         if _content_safety_required():
             logger.error("本番環境: Prompt Shield 障害のため入力をブロック (fail-close)")
+            return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+        return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+    except Exception:
+        logger.exception("Prompt Shield で予期しないエラー")
+        if _content_safety_required():
             return ShieldResult(is_safe=False, details={"reason": "check_failed"})
         return ShieldResult(is_safe=False, details={"reason": "check_failed"})
 
@@ -116,8 +121,13 @@ async def check_tool_response(tool_output: str) -> ShieldResult:
         if not is_safe:
             logger.warning("ツール応答に安全でないコンテンツを検出しました")
         return ShieldResult(is_safe=is_safe, details={"categories": str(response.categories_analysis)})
+    except (ImportError, ValueError, OSError) as exc:
+        logger.exception("ツール応答 Prompt Shield でエラーが発生: %s", exc)
+        if _content_safety_required():
+            return ShieldResult(is_safe=False, details={"reason": "check_failed"})
+        return ShieldResult(is_safe=True, details={"reason": "check_failed_dev"})
     except Exception:
-        logger.exception("ツール応答 Prompt Shield でエラーが発生")
+        logger.exception("ツール応答チェックで予期しないエラー")
         if _content_safety_required():
             return ShieldResult(is_safe=False, details={"reason": "check_failed"})
         return ShieldResult(is_safe=True, details={"reason": "check_failed_dev"})
@@ -157,8 +167,13 @@ async def analyze_content(text: str) -> SafetyScores:
             elif cat.category == "Violence":
                 scores.violence = cat.severity
         return scores
+    except (ImportError, ValueError, OSError) as exc:
+        logger.exception("Text Analysis でエラーが発生: %s", exc)
+        if _content_safety_required():
+            logger.error("本番環境: Text Analysis 障害のためチェック失敗扱い (fail-close)")
+        return SafetyScores(check_failed=True)
     except Exception:
-        logger.exception("Text Analysis でエラーが発生")
+        logger.exception("Text Analysis で予期しないエラー")
         if _content_safety_required():
             logger.error("本番環境: Text Analysis 障害のためチェック失敗扱い (fail-close)")
         return SafetyScores(check_failed=True)

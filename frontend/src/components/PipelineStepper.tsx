@@ -30,19 +30,19 @@ export function PipelineStepper({ progress, t }: PipelineStepperProps) {
         return (
           <div key={step.key} className="flex items-center gap-1">
             {i > 0 && (
-              <div className={`h-0.5 w-6 ${isCompleted ? 'bg-blue-500' : 'bg-gray-200 dark:bg-gray-700'}`} />
+              <div className={`h-0.5 w-6 ${isCompleted ? 'bg-[var(--accent)]' : 'bg-[var(--panel-border)]'}`} />
             )}
             <div className="flex flex-col items-center gap-1">
               <div
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-sm
-                  ${isCompleted ? 'bg-blue-500 text-white' : ''}
-                  ${isActive ? 'bg-blue-100 text-blue-700 ring-2 ring-blue-400 animate-pulse dark:bg-blue-900 dark:text-blue-300' : ''}
-                  ${isPending ? 'bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500' : ''}`}
+                  ${isCompleted ? 'bg-[var(--accent)] text-white' : ''}
+                  ${isActive ? 'animate-pulse bg-[var(--accent-soft)] text-[var(--accent-strong)] ring-2 ring-[var(--accent)]/40' : ''}
+                  ${isPending ? 'bg-[var(--panel-strong)] text-[var(--text-muted)]' : ''}`}
               >
                 {isCompleted ? '✓' : step.icon}
               </div>
               <span className={`text-xs whitespace-nowrap
-                ${isActive ? 'text-blue-600 font-medium dark:text-blue-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                ${isActive ? 'font-medium text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>
                 {t(step.label)}
               </span>
             </div>

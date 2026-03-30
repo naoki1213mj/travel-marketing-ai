@@ -11,8 +11,8 @@ export function RegulationResults({ contents, t }: RegulationResultsProps) {
   if (!regulationContent) return null
 
   return (
-    <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-5 dark:border-emerald-900 dark:bg-emerald-950/60">
-      <h3 className="mb-3 text-sm font-medium text-emerald-800 dark:text-emerald-300">
+    <div className="rounded-[24px] border border-[var(--success-border)] bg-[var(--success-surface)] p-5">
+      <h3 className="mb-3 text-sm font-medium text-[var(--success-text)]">
         {t('section.regulation')}
       </h3>
       <MarkdownView content={regulationContent.content} />

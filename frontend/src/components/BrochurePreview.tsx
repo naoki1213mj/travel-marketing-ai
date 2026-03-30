@@ -16,12 +16,12 @@ export function BrochurePreview({ contents, t }: BrochurePreviewProps) {
       <h3 className="text-sm font-semibold text-[var(--text-primary)]">
         {t('section.brochure')}
       </h3>
-      <div className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-white">
+      <div className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-bg)]">
         <iframe
           srcDoc={htmlContent.content}
           title={t('section.brochure')}
           className="h-[28rem] w-full bg-white"
-          sandbox="allow-same-origin"
+          sandbox=""
         />
       </div>
     </div>

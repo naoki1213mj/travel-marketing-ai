@@ -4,6 +4,7 @@ param name string
 param location string
 param tags object = {}
 param modelDeploymentName string = 'gpt-5-4-mini'
+param imageModelDeploymentName string = 'gpt-image-1.5'
 
 resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' = {
   name: name
@@ -29,7 +30,7 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
   parent: aiFoundry
   name: modelDeploymentName
   sku: {
-    capacity: 30
+    capacity: 100
     name: 'GlobalStandard'
   }
   properties: {
@@ -37,6 +38,23 @@ resource modelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-
       name: 'gpt-5.4-mini'
       format: 'OpenAI'
       version: '2026-03-17'
+    }
+  }
+}
+
+// GPT Image 1.5 モデルデプロイメント
+resource imageModelDeployment 'Microsoft.CognitiveServices/accounts/deployments@2025-06-01' = {
+  parent: aiFoundry
+  name: imageModelDeploymentName
+  sku: {
+    capacity: 9
+    name: 'GlobalStandard'
+  }
+  properties: {
+    model: {
+      name: 'gpt-image-1.5'
+      format: 'OpenAI'
+      version: '2025-12-16'
     }
   }
 }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ import urllib.request
 
 from agent_framework import tool
 from agent_framework.azure import AzureOpenAIResponsesClient
-from azure.identity import DefaultAzureCredential
+from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
 from src.config import get_settings
 
@@ -26,56 +27,101 @@ _FALLBACK_IMAGE = (
 # 画像生成モデル名（Foundry にデプロイ済み）
 _IMAGE_MODEL = "gpt-image-1.5"
 
-# AIProjectClient シングルトン（画像生成用）
-_image_project_client: object | None = None
+# Responses API ベースの画像生成クライアント（シングルトン）
+_image_openai_client: object | None = None
 _image_client_initialized: bool = False
+
+# Azure AD token provider — caching + auto-refresh
+_AZURE_AI_SCOPE = "https://ai.azure.com/.default"
 
 
 def _get_image_openai_client():
-    """AIProjectClient 経由で画像生成用 OpenAI クライアントを返す"""
-    global _image_project_client, _image_client_initialized
+    """Responses API 経由で画像生成する OpenAI クライアントを返す。
+
+    Foundry project endpoint は legacy images.generate() をサポートしないため、
+    Responses API + image_generation ツールを使う。
+    x-ms-oai-image-generation-deployment ヘッダでデプロイ先を指定する。
+    """
+    global _image_openai_client, _image_client_initialized
     if not _image_client_initialized:
         _image_client_initialized = True
         settings = get_settings()
         endpoint = settings["project_endpoint"]
         if not endpoint:
             logger.info("project_endpoint 未設定、画像生成は無効")
-            _image_project_client = None
+            _image_openai_client = None
             return None
         try:
-            from azure.ai.projects import AIProjectClient
+            from openai import OpenAI
 
-            _image_project_client = AIProjectClient(
-                endpoint=endpoint,
-                credential=DefaultAzureCredential(),
+            # Responses API の base URL を構築
+            base_url = endpoint.rstrip("/")
+            if not base_url.endswith("/openai/v1"):
+                base_url = f"{base_url}/openai/v1"
+
+            credential = DefaultAzureCredential()
+            token_provider = get_bearer_token_provider(credential, _AZURE_AI_SCOPE)
+
+            _image_openai_client = OpenAI(
+                base_url=base_url,
+                api_key=token_provider,
+                default_headers={
+                    "x-ms-oai-image-generation-deployment": _IMAGE_MODEL,
+                },
             )
+            logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, _IMAGE_MODEL)
         except Exception:
-            logger.exception("AIProjectClient 初期化失敗")
-            _image_project_client = None
-    if _image_project_client is None:
-        return None
-    return _image_project_client.get_openai_client()
+            logger.exception("画像クライアント初期化失敗")
+            _image_openai_client = None
+    return _image_openai_client
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
-    """OpenAI Images API で画像を生成し、data URI を返す"""
+    """Responses API の image_generation ツールで画像を生成し、data URI を返す。"""
     try:
         client = _get_image_openai_client()
         if client is None:
             logger.info("OpenAI クライアント未初期化。フォールバック画像を返します")
             return _FALLBACK_IMAGE
-        response = client.images.generate(
-            model=_IMAGE_MODEL,
-            prompt=prompt,
-            n=1,
-            size=size,
-            response_format="b64_json",
-        )
-        b64_data = response.data[0].b64_json
+
+        settings = get_settings()
+        model_name = settings["model_name"]
+
+        def _sync_generate():
+            return client.responses.create(
+                model=model_name,
+                input=prompt,
+                tools=[{"type": "image_generation", "size": size, "quality": "medium"}],
+            )
+
+        response = await asyncio.to_thread(_sync_generate)
+
+        # Responses API の出力から画像データを抽出
+        image_items = [item for item in (response.output or []) if item.type == "image_generation_call"]
+        if not image_items or not getattr(image_items[0], "result", None):
+            out_types = [i.type for i in (response.output or [])]
+            logger.warning("画像データなし。出力タイプ: %s", out_types)
+            return _FALLBACK_IMAGE
+
+        b64_data = image_items[0].result
         return f"data:image/png;base64,{b64_data}"
     except Exception:
         logger.exception("画像生成に失敗。フォールバック画像を返します")
         return _FALLBACK_IMAGE
+
+
+# --- Side-channel 画像ストア ---
+# 画像の base64 をツール出力に含めるとコンテキストウインドウを超過するため、
+# side-channel で保存し、パイプライン完了後に別途取得する（social-ai-studio パターン）
+_pending_images: dict[str, str] = {}
+
+
+def pop_pending_images() -> dict[str, str]:
+    """保存済み画像を取得しクリアする。"""
+    global _pending_images
+    images = _pending_images.copy()
+    _pending_images = {}
+    return images
 
 
 # --- ツール定義 ---
@@ -95,7 +141,11 @@ async def generate_hero_image(
         style: 画像スタイル（photorealistic/illustration/watercolor）
     """
     full_prompt = f"{style} travel photo of {destination}. {prompt}"
-    return await _generate_image(full_prompt, "1792x1024")
+    data_uri = await _generate_image(full_prompt, "1536x1024")
+    _pending_images["hero"] = data_uri
+    return json.dumps(
+        {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
+    )
 
 
 @tool
@@ -109,8 +159,18 @@ async def generate_banner_image(
         prompt: 画像生成プロンプト（英語推奨）
         platform: SNS プラットフォーム（instagram/twitter/facebook）
     """
-    size = "1024x1024" if platform == "instagram" else "1792x1024"
-    return await _generate_image(prompt, size)
+    size = "1024x1024" if platform == "instagram" else "1536x1024"
+    data_uri = await _generate_image(prompt, size)
+    _pending_images[f"banner_{platform}"] = data_uri
+    return json.dumps(
+        {
+            "status": "generated",
+            "type": "banner",
+            "platform": platform,
+            "size": size,
+            "message": f"{platform}用バナーを生成しました。",
+        }
+    )
 
 
 @tool
@@ -291,38 +351,12 @@ async def generate_promo_video(
 
 
 INSTRUCTIONS = """\
-あなたは旅行販促物の制作エージェントです。
-Agent3（規制チェック）でチェック済みの企画書を受け取り、以下の成果物を生成してください。
-
-## 生成する成果物
-
-### 1. HTML ブローシャ
-- レスポンシブデザインの HTML で販促ブローシャを作成
-- 企画書の内容をビジュアル豊かに表現
-- 旅行条件（取引条件・旅行会社登録番号等）をフッターに自動挿入
-- Tailwind CSS のクラスを使ったスタイリング
-
-### 2. ヒーロー画像
-- `generate_hero_image` ツールで旅行先のメインビジュアルを生成
-- プロンプトは英語で記述し、旅行先の魅力を表現
-
-### 3. SNS バナー画像
-- `generate_banner_image` ツールで SNS 用バナーを生成
-- Instagram / Twitter 用のサイズを考慮
-
-### 4. 既存パンフレット参考（任意）
-- `analyze_existing_brochure` ツールで既存 PDF のレイアウト・トーンを参考にできる
-- ユーザーが PDF パスを指定した場合のみ使用
-
-### 5. 販促紹介動画（任意）
-- `generate_promo_video` ツールで Photo Avatar を使った紹介動画を生成
-- 企画書サマリのテキストをアバターが読み上げる動画
-- アバタースタイル: concierge（コンシェルジュ）/ guide（ガイド）/ presenter（プレゼンター）
+あなたは旅行販促物の制作エージェントです。企画書を受け取り、HTML ブローシャ・ヒーロー画像・SNS バナーを生成してください。
 
 ## 出力ルール
-- HTML ブローシャのコードは ```html で囲んで出力
-- 画像は生成ツールを使い、base64 データを返す
-- 旅行業法の必須記載事項（取引条件・登録番号）をフッターに含める
+- HTML ブローシャは ```html で囲んで出力。Tailwind CSS 使用。レスポンシブ対応
+- `generate_hero_image` でメインビジュアル、`generate_banner_image` で SNS バナーを生成
+- フッターに旅行業登録番号と取引条件を挿入
 """
 
 
@@ -338,14 +372,6 @@ def create_brochure_gen_agent(model_settings: dict | None = None):
     agent_tools: list = [
         generate_hero_image,
         generate_banner_image,
-        analyze_existing_brochure,
-        generate_promo_video,
-        # Foundry 組み込み Image Generation ツール（gpt-image-1.5 デプロイ済み）
-        client.get_image_generation_tool(
-            model=_IMAGE_MODEL,
-            quality="medium",
-            size="auto",
-        ),
     ]
 
     agent_kwargs: dict = {

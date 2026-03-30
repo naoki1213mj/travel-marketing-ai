@@ -48,15 +48,17 @@ async def save_conversation(
     events: list[dict],
     artifacts: dict | None = None,
     metrics: dict | None = None,
+    status: str = "completed",
 ) -> None:
     """会話をストアに保存する。"""
     now = datetime.now(timezone.utc).isoformat()
+    existing = await get_conversation(conversation_id)
     doc = {
         "id": conversation_id,
         "user_id": "demo-user",
-        "created_at": now,
+        "created_at": existing.get("created_at", now) if existing else now,
         "updated_at": now,
-        "status": "completed",
+        "status": status,
         "input": user_input,
         "messages": events,
         "artifacts": artifacts or {},

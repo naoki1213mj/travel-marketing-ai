@@ -21,6 +21,8 @@ var tags = {
   'azd-env-name': environmentName
 }
 var defaultModelDeploymentName = 'gpt-5-4-mini'
+var defaultImageModelDeploymentName = 'gpt-image-1.5'
+var aiServicesApiBase = 'https://${abbrs.aiFoundry}${resourceToken}.services.ai.azure.com'
 
 // リソースグループ
 resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
@@ -85,6 +87,7 @@ module aiFoundry 'modules/ai-services.bicep' = {
     location: location
     tags: tags
     modelDeploymentName: defaultModelDeploymentName
+    imageModelDeploymentName: defaultImageModelDeploymentName
   }
 }
 
@@ -146,6 +149,10 @@ module containerApp 'modules/container-app.bicep' = {
     contentSafetyEndpoint: aiFoundry.outputs.endpoint
     cosmosDbEndpoint: cosmosDb.outputs.endpoint
     apimGatewayUrl: apim.outputs.gatewayUrl
+    contentUnderstandingEndpoint: aiServicesApiBase
+    speechServiceEndpoint: aiFoundry.outputs.endpoint
+    speechServiceRegion: location
+    logicAppCallbackUrl: logicApp.outputs.callbackUrl
   }
 }
 
@@ -238,6 +245,7 @@ output AZURE_AI_PROJECT_ENDPOINT string = aiProjectEndpoint
 output AZURE_AI_PROJECT_NAME string = aiProject.outputs.name
 output AZURE_AI_FOUNDRY_NAME string = aiFoundry.outputs.name
 output MODEL_NAME string = defaultModelDeploymentName
+output IMAGE_MODEL_NAME string = defaultImageModelDeploymentName
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
 output AZURE_FUNCTION_APP_NAME string = functionApp.outputs.name
 output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name

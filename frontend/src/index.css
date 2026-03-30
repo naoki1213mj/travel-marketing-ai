@@ -15,6 +15,15 @@
   --accent: #0f766e;
   --accent-strong: #115e59;
   --accent-soft: rgba(15, 118, 110, 0.14);
+  --warning-surface: #fff7ed;
+  --warning-border: #fdba74;
+  --warning-text: #9a3412;
+  --success-surface: #ecfdf5;
+  --success-border: #86efac;
+  --success-text: #166534;
+  --danger-surface: #fef2f2;
+  --danger-border: #fca5a5;
+  --danger-text: #b91c1c;
 }
 
 :root.dark {
@@ -31,6 +40,15 @@
   --accent: #5eead4;
   --accent-strong: #99f6e4;
   --accent-soft: rgba(45, 212, 191, 0.16);
+  --warning-surface: rgba(120, 53, 15, 0.28);
+  --warning-border: rgba(251, 191, 36, 0.3);
+  --warning-text: #fde68a;
+  --success-surface: rgba(6, 78, 59, 0.34);
+  --success-border: rgba(74, 222, 128, 0.24);
+  --success-text: #bbf7d0;
+  --danger-surface: rgba(127, 29, 29, 0.3);
+  --danger-border: rgba(248, 113, 113, 0.26);
+  --danger-text: #fecaca;
 }
 
 body {

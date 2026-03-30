@@ -1,11 +1,12 @@
 {
   "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
+  "languageVersion": "2.0",
   "contentVersion": "1.0.0.0",
   "metadata": {
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "14172934966670202543"
+      "templateHash": "3056805078194359325"
     }
   },
   "parameters": {
@@ -54,17 +55,19 @@
     "tags": {
       "azd-env-name": "[parameters('environmentName')]"
     },
-    "defaultModelDeploymentName": "gpt-5-4-mini"
+    "defaultModelDeploymentName": "gpt-5-4-mini",
+    "defaultImageModelDeploymentName": "gpt-image-1.5",
+    "aiServicesApiBase": "[format('https://{0}{1}.services.ai.azure.com', variables('abbrs').aiFoundry, variables('resourceToken'))]"
   },
-  "resources": [
-    {
+  "resources": {
+    "rg": {
       "type": "Microsoft.Resources/resourceGroups",
       "apiVersion": "2024-07-01",
       "name": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
       "location": "[parameters('location')]",
       "tags": "[variables('tags')]"
     },
-    {
+    "logAnalytics": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "log-analytics",
@@ -135,10 +138,10 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "rg"
       ]
     },
-    {
+    "appInsights": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "app-insights",
@@ -159,7 +162,7 @@
             "value": "[variables('tags')]"
           },
           "logAnalyticsWorkspaceId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
+            "value": "[reference('logAnalytics').outputs.id.value]"
           }
         },
         "template": {
@@ -222,11 +225,11 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "logAnalytics",
+        "rg"
       ]
     },
-    {
+    "acr": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-registry",
@@ -301,10 +304,10 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "rg"
       ]
     },
-    {
+    "keyVault": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "key-vault",
@@ -325,10 +328,10 @@
             "value": "[variables('tags')]"
           },
           "privateEndpointsSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.privateEndpointsSubnetId.value]"
+            "value": "[reference('vnet').outputs.privateEndpointsSubnetId.value]"
           },
           "vnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.id.value]"
+            "value": "[reference('vnet').outputs.id.value]"
           }
         },
         "template": {
@@ -466,11 +469,11 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+        "rg",
+        "vnet"
       ]
     },
-    {
+    "aiFoundry": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "ai-foundry",
@@ -492,6 +495,9 @@
           },
           "modelDeploymentName": {
             "value": "[variables('defaultModelDeploymentName')]"
+          },
+          "imageModelDeploymentName": {
+            "value": "[variables('defaultImageModelDeploymentName')]"
           }
         },
         "template": {
@@ -501,7 +507,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "10206990167426751027"
+              "templateHash": "8844004625735544365"
             }
           },
           "parameters": {
@@ -518,6 +524,10 @@
             "modelDeploymentName": {
               "type": "string",
               "defaultValue": "gpt-5-4-mini"
+            },
+            "imageModelDeploymentName": {
+              "type": "string",
+              "defaultValue": "gpt-image-1.5"
             }
           },
           "resources": [
@@ -559,6 +569,25 @@
               "dependsOn": [
                 "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
               ]
+            },
+            {
+              "type": "Microsoft.CognitiveServices/accounts/deployments",
+              "apiVersion": "2025-06-01",
+              "name": "[format('{0}/{1}', parameters('name'), parameters('imageModelDeploymentName'))]",
+              "sku": {
+                "capacity": 9,
+                "name": "GlobalStandard"
+              },
+              "properties": {
+                "model": {
+                  "name": "gpt-image-1.5",
+                  "format": "OpenAI",
+                  "version": "2025-12-16"
+                }
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('name'))]"
+              ]
             }
           ],
           "outputs": {
@@ -582,10 +611,10 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "rg"
       ]
     },
-    {
+    "aiProject": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "ai-project",
@@ -606,7 +635,7 @@
             "value": "[variables('tags')]"
           },
           "aiFoundryName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('aiFoundry').outputs.name.value]"
           }
         },
         "template": {
@@ -616,7 +645,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "7517824754693881030"
+              "templateHash": "15155420901916457085"
             }
           },
           "parameters": {
@@ -640,6 +669,7 @@
               "apiVersion": "2025-06-01",
               "name": "[format('{0}/{1}', parameters('aiFoundryName'), parameters('name'))]",
               "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
               "identity": {
                 "type": "SystemAssigned"
               },
@@ -663,11 +693,11 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "aiFoundry",
+        "rg"
       ]
     },
-    {
+    "vnet": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "vnet",
@@ -769,10 +799,10 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "rg"
       ]
     },
-    {
+    "containerAppsEnv": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-apps-env",
@@ -793,10 +823,7 @@
             "value": "[variables('tags')]"
           },
           "logAnalyticsWorkspaceId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics'), '2025-04-01').outputs.id.value]"
-          },
-          "subnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.containerAppsSubnetId.value]"
+            "value": "[reference('logAnalytics').outputs.id.value]"
           }
         },
         "template": {
@@ -860,12 +887,11 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'log-analytics')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+        "logAnalytics",
+        "rg"
       ]
     },
-    {
+    "containerApp": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "container-app",
@@ -886,32 +912,44 @@
             "value": "[variables('tags')]"
           },
           "containerAppsEnvironmentId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-apps-env'), '2025-04-01').outputs.id.value]"
+            "value": "[reference('containerAppsEnv').outputs.id.value]"
           },
           "containerRegistryName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('acr').outputs.name.value]"
           },
           "imageName": "[if(not(empty(parameters('imageName'))), createObject('value', parameters('imageName')), createObject('value', 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'))]",
           "keyVaultName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'key-vault'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('keyVault').outputs.name.value]"
           },
           "appInsightsConnectionString": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.connectionString.value]"
+            "value": "[reference('appInsights').outputs.connectionString.value]"
           },
           "modelName": {
             "value": "[variables('defaultModelDeploymentName')]"
           },
           "projectEndpoint": {
-            "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value)]"
+            "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.name.value, reference('aiProject').outputs.name.value)]"
           },
           "contentSafetyEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference('aiFoundry').outputs.endpoint.value]"
           },
           "cosmosDbEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference('cosmosDb').outputs.endpoint.value]"
           },
           "apimGatewayUrl": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.gatewayUrl.value]"
+            "value": "[reference('apim').outputs.gatewayUrl.value]"
+          },
+          "contentUnderstandingEndpoint": {
+            "value": "[variables('aiServicesApiBase')]"
+          },
+          "speechServiceEndpoint": {
+            "value": "[reference('aiFoundry').outputs.endpoint.value]"
+          },
+          "speechServiceRegion": {
+            "value": "[parameters('location')]"
+          },
+          "logicAppCallbackUrl": {
+            "value": "[listOutputsWithSecureValues('logicApp', '2025-04-01').callbackUrl]"
           }
         },
         "template": {
@@ -921,7 +959,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "10995135198904412735"
+              "templateHash": "16090562433499655831"
             }
           },
           "parameters": {
@@ -969,11 +1007,27 @@
             "apimGatewayUrl": {
               "type": "string",
               "defaultValue": ""
+            },
+            "contentUnderstandingEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "speechServiceEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "speechServiceRegion": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "logicAppCallbackUrl": {
+              "type": "securestring",
+              "defaultValue": ""
             }
           },
           "variables": {
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('apimGatewayUrl'))), createArray(createObject('name', 'APIM_GATEWAY_URL', 'value', parameters('apimGatewayUrl'))), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('apimGatewayUrl'))), createArray(createObject('name', 'APIM_GATEWAY_URL', 'value', parameters('apimGatewayUrl'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()))]"
           },
           "resources": [
             {
@@ -988,6 +1042,7 @@
               "properties": {
                 "managedEnvironmentId": "[parameters('containerAppsEnvironmentId')]",
                 "configuration": {
+                  "secrets": "[if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'logic-app-callback-url', 'value', parameters('logicAppCallbackUrl'))), createArray())]",
                   "ingress": {
                     "external": true,
                     "targetPort": 8000,
@@ -1094,18 +1149,19 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-apps-env')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'key-vault')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "acr",
+        "aiFoundry",
+        "aiProject",
+        "apim",
+        "appInsights",
+        "containerAppsEnv",
+        "cosmosDb",
+        "keyVault",
+        "logicApp",
+        "rg"
       ]
     },
-    {
+    "aiFoundryAppAccess": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "ai-foundry-app-access",
@@ -1117,10 +1173,10 @@
         "mode": "Incremental",
         "parameters": {
           "aiFoundryName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('aiFoundry').outputs.name.value]"
           },
           "principalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.principalId.value]"
+            "value": "[reference('containerApp').outputs.principalId.value]"
           }
         },
         "template": {
@@ -1201,12 +1257,12 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "aiFoundry",
+        "containerApp",
+        "rg"
       ]
     },
-    {
+    "apim": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "api-management",
@@ -1227,13 +1283,13 @@
             "value": "[variables('tags')]"
           },
           "appInsightsId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.id.value]"
+            "value": "[reference('appInsights').outputs.id.value]"
           },
           "appInsightsInstrumentationKey": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.instrumentationKey.value]"
+            "value": "[reference('appInsights').outputs.instrumentationKey.value]"
           },
           "foundryEndpoint": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+            "value": "[reference('aiFoundry').outputs.endpoint.value]"
           }
         },
         "template": {
@@ -1243,7 +1299,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "16053205156675117859"
+              "templateHash": "9618497849549309624"
             }
           },
           "parameters": {
@@ -1272,6 +1328,10 @@
               "type": "string"
             },
             "foundryEndpoint": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "aiServicesId": {
               "type": "string",
               "defaultValue": ""
             }
@@ -1337,12 +1397,14 @@
               "name": "[format('{0}/{1}', parameters('name'), 'foundry-ai-gateway')]",
               "properties": {
                 "displayName": "Foundry AI Gateway",
+                "description": "Microsoft Foundry AI Gateway — モデルデプロイメントの一元管理",
                 "path": "ai",
                 "protocols": [
                   "https"
                 ],
-                "subscriptionRequired": false,
-                "serviceUrl": "[parameters('foundryEndpoint')]"
+                "subscriptionRequired": true,
+                "serviceUrl": "[parameters('foundryEndpoint')]",
+                "type": "http"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
@@ -1355,10 +1417,39 @@
               "name": "[format('{0}/{1}/{2}', parameters('name'), 'foundry-ai-gateway', 'policy')]",
               "properties": {
                 "format": "xml",
-                "value": "<policies><inbound><base /><rate-limit calls=\"60\" renewal-period=\"60\" /><set-header name=\"X-Request-Id\" exists-action=\"skip\"><value>@(context.RequestId.ToString())</value></set-header><llm-content-safety><input><text threshold=\"Medium\" categories=\"Hate,SelfHarm,Sexual,Violence\" /><jailbreak enabled=\"true\" /><indirect-attack enabled=\"true\" /></input></llm-content-safety></inbound><backend><base /></backend><outbound><base /><set-header name=\"X-Gateway\" exists-action=\"override\"><value>travel-marketing-ai-gateway</value></set-header><llm-content-safety><output><text threshold=\"Medium\" categories=\"Hate,SelfHarm,Sexual,Violence\" /></output></llm-content-safety></outbound><on-error><base /></on-error></policies>"
+                "value": "<policies>\n  <inbound>\n    <base />\n    <!-- AI Gateway: トークンベースのレート制限（TPM） -->\n    <azure-openai-token-limit\n      tokens-per-minute=\"80000\"\n      counter-key=\"@(context.Subscription.Id)\"\n      estimate-prompt-tokens=\"true\"\n      remaining-tokens-header-name=\"x-ratelimit-remaining-tokens\" />\n    <!-- リクエスト追跡用ヘッダー -->\n    <set-header name=\"X-Request-Id\" exists-action=\"skip\">\n      <value>@(context.RequestId.ToString())</value>\n    </set-header>\n    <!-- Managed Identity でバックエンド認証 -->\n    <authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" />\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n    <!-- AI Gateway: トークン使用量メトリクスの発行 -->\n    <azure-openai-emit-token-metric>\n      <dimension name=\"Subscription ID\" />\n      <dimension name=\"API ID\" />\n    </azure-openai-emit-token-metric>\n    <set-header name=\"X-Gateway\" exists-action=\"override\">\n      <value>travel-marketing-ai-gateway</value>\n    </set-header>\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.ApiManagement/service/apis', parameters('name'), 'foundry-ai-gateway')]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('foundryEndpoint')))]",
+              "type": "Microsoft.ApiManagement/service/subscriptions",
+              "apiVersion": "2024-06-01-preview",
+              "name": "[format('{0}/{1}', parameters('name'), 'ai-gateway-subscription')]",
+              "properties": {
+                "displayName": "AI Gateway Access",
+                "scope": "[format('/apis/{0}', 'foundry-ai-gateway')]",
+                "state": "active"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('name'), 'foundry-ai-gateway')]",
+                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
+              ]
+            },
+            {
+              "condition": "[not(empty(parameters('aiServicesId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "name": "[guid(resourceId('Microsoft.ApiManagement/service', parameters('name')), 'CognitiveServicesUser', parameters('aiServicesId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')]",
+                "principalId": "[reference(resourceId('Microsoft.ApiManagement/service', parameters('name')), '2024-06-01-preview', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
               ]
             }
           ],
@@ -1383,12 +1474,12 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "aiFoundry",
+        "appInsights",
+        "rg"
       ]
     },
-    {
+    "aiFoundryApimAccess": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "ai-foundry-apim-access",
@@ -1400,10 +1491,10 @@
         "mode": "Incremental",
         "parameters": {
           "aiFoundryName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('aiFoundry').outputs.name.value]"
           },
           "principalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.principalId.value]"
+            "value": "[reference('apim').outputs.principalId.value]"
           }
         },
         "template": {
@@ -1484,12 +1575,12 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "aiFoundry",
+        "apim",
+        "rg"
       ]
     },
-    {
+    "functionApp": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "function-app",
@@ -1513,7 +1604,7 @@
             "value": "[format('{0}{1}', variables('abbrs').funcStorage, variables('resourceToken'))]"
           },
           "appInsightsConnectionString": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights'), '2025-04-01').outputs.connectionString.value]"
+            "value": "[reference('appInsights').outputs.connectionString.value]"
           }
         },
         "template": {
@@ -1523,7 +1614,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "12478197362021228826"
+              "templateHash": "541979357475706105"
             }
           },
           "parameters": {
@@ -1557,7 +1648,7 @@
               },
               "properties": {
                 "allowBlobPublicAccess": false,
-                "allowSharedKeyAccess": false,
+                "allowSharedKeyAccess": true,
                 "minimumTlsVersion": "TLS1_2",
                 "supportsHttpsTrafficOnly": true
               }
@@ -1685,11 +1776,11 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'app-insights')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "appInsights",
+        "rg"
       ]
     },
-    {
+    "logicApp": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "logic-app",
@@ -1712,12 +1803,13 @@
         },
         "template": {
           "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "languageVersion": "2.0",
           "contentVersion": "1.0.0.0",
           "metadata": {
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "6360476594237281197"
+              "templateHash": "10402476633102678141"
             }
           },
           "parameters": {
@@ -1732,8 +1824,8 @@
               "defaultValue": {}
             }
           },
-          "resources": [
-            {
+          "resources": {
+            "logicApp": {
               "type": "Microsoft.Logic/workflows",
               "apiVersion": "2019-05-01",
               "name": "[parameters('name')]",
@@ -1788,7 +1880,7 @@
                 }
               }
             }
-          ],
+          },
           "outputs": {
             "id": {
               "type": "string",
@@ -1799,21 +1891,21 @@
               "value": "[parameters('name')]"
             },
             "callbackUrl": {
-              "type": "string",
-              "value": "[listCallbackUrl(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01').value]"
+              "type": "securestring",
+              "value": "[listCallbackUrl('logicApp', '2019-05-01').value]"
             },
             "principalId": {
               "type": "string",
-              "value": "[reference(resourceId('Microsoft.Logic/workflows', parameters('name')), '2019-05-01', 'full').identity.principalId]"
+              "value": "[reference('logicApp', '2019-05-01', 'full').identity.principalId]"
             }
           }
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "rg"
       ]
     },
-    {
+    "cosmosDb": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "cosmos-db",
@@ -1834,10 +1926,10 @@
             "value": "[variables('tags')]"
           },
           "privateEndpointsSubnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.privateEndpointsSubnetId.value]"
+            "value": "[reference('vnet').outputs.privateEndpointsSubnetId.value]"
           },
           "vnetId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet'), '2025-04-01').outputs.id.value]"
+            "value": "[reference('vnet').outputs.id.value]"
           }
         },
         "template": {
@@ -2038,11 +2130,11 @@
         }
       },
       "dependsOn": [
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'vnet')]"
+        "rg",
+        "vnet"
       ]
     },
-    {
+    "cosmosDbAccess": {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
       "name": "cosmos-db-access",
@@ -2054,10 +2146,10 @@
         "mode": "Incremental",
         "parameters": {
           "cosmosAccountName": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.name.value]"
+            "value": "[reference('cosmosDb').outputs.name.value]"
           },
           "principalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.principalId.value]"
+            "value": "[reference('containerApp').outputs.principalId.value]"
           }
         },
         "template": {
@@ -2096,52 +2188,56 @@
         }
       },
       "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app')]",
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db')]",
-        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName')))]"
+        "containerApp",
+        "cosmosDb",
+        "rg"
       ]
     }
-  ],
+  },
   "outputs": {
     "AZURE_CONTAINER_REGISTRY_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.loginServer.value]"
+      "value": "[reference('acr').outputs.loginServer.value]"
     },
     "AZURE_CONTAINER_REGISTRY_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-registry'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('acr').outputs.name.value]"
     },
     "AZURE_CONTAINER_APP_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('containerApp').outputs.name.value]"
     },
     "AZURE_AI_PROJECT_ENDPOINT": {
       "type": "string",
-      "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value, reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value)]"
+      "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.name.value, reference('aiProject').outputs.name.value)]"
     },
     "AZURE_AI_PROJECT_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-project'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('aiProject').outputs.name.value]"
     },
     "AZURE_AI_FOUNDRY_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('aiFoundry').outputs.name.value]"
     },
     "MODEL_NAME": {
       "type": "string",
       "value": "[variables('defaultModelDeploymentName')]"
     },
+    "IMAGE_MODEL_NAME": {
+      "type": "string",
+      "value": "[variables('defaultImageModelDeploymentName')]"
+    },
     "AZURE_APIM_GATEWAY_URL": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'api-management'), '2025-04-01').outputs.gatewayUrl.value]"
+      "value": "[reference('apim').outputs.gatewayUrl.value]"
     },
     "AZURE_FUNCTION_APP_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'function-app'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('functionApp').outputs.name.value]"
     },
     "AZURE_LOGIC_APP_NAME": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'logic-app'), '2025-04-01').outputs.name.value]"
+      "value": "[reference('logicApp').outputs.name.value]"
     },
     "AZURE_RESOURCE_GROUP": {
       "type": "string",
@@ -2149,16 +2245,16 @@
     },
     "CONTENT_SAFETY_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'ai-foundry'), '2025-04-01').outputs.endpoint.value]"
+      "value": "[reference('aiFoundry').outputs.endpoint.value]"
     },
     "COSMOS_DB_ENDPOINT": {
       "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'cosmos-db'), '2025-04-01').outputs.endpoint.value]"
+      "value": "[reference('cosmosDb').outputs.endpoint.value]"
     },
     "SERVICE_WEB_ENDPOINTS": {
       "type": "array",
       "value": [
-        "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))), 'Microsoft.Resources/deployments', 'container-app'), '2025-04-01').outputs.uri.value]"
+        "[reference('containerApp').outputs.uri.value]"
       ]
     }
   }
