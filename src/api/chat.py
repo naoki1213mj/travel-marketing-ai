@@ -209,6 +209,42 @@ def _extract_inline_images(html_content: str) -> list[dict[str, str]]:
     return parser.images
 
 
+def _inject_images_into_html(html: str, images: dict[str, str]) -> str:
+    """生成画像をブローシャ HTML に埋め込む。"""
+    hero = images.get("hero", "")
+
+    # HERO_IMAGE プレースホルダーを置換
+    if hero and "HERO_IMAGE" in html:
+        html = html.replace("HERO_IMAGE", hero)
+
+    # プレースホルダーがない場合、最初の <main> または <body> タグの直後に挿入
+    if hero and "HERO_IMAGE" not in html and hero not in html:
+        img_tag = f'<img src="{hero}" alt="メインビジュアル" class="w-full rounded-lg mb-6" />'
+        for insert_point in ["<main", "<body"]:
+            idx = html.lower().find(insert_point)
+            if idx >= 0:
+                close = html.find(">", idx)
+                if close >= 0:
+                    html = html[:close + 1] + "\n" + img_tag + "\n" + html[close + 1:]
+                    break
+
+    # バナー画像も埋め込む（あれば）
+    for key, uri in images.items():
+        if key.startswith("banner_") and uri and uri not in html:
+            footer_idx = html.lower().find("<footer")
+            if footer_idx >= 0:
+                banner_tag = f'<img src="{uri}" alt="SNSバナー ({key})" class="w-full rounded-lg my-4" />'
+                html = html[:footer_idx] + banner_tag + "\n" + html[footer_idx:]
+            else:
+                # footer がなければ </body> の前に挿入
+                body_end = html.lower().find("</body")
+                if body_end >= 0:
+                    banner_tag = f'<img src="{uri}" alt="SNSバナー ({key})" class="w-full rounded-lg my-4" />'
+                    html = html[:body_end] + banner_tag + "\n" + html[body_end:]
+
+    return html
+
+
 def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
     """Code Interpreter の出力から画像データを抽出する。
 
@@ -686,6 +722,24 @@ async def _execute_agent(
         from src.agents.brochure_gen import pop_pending_images, pop_pending_video_job
 
         pending = pop_pending_images()
+
+        # ブローシャ HTML に画像を埋め込む
+        if pending:
+            for i, evt in enumerate(events):
+                if '"content_type": "html"' in evt and '"brochure-gen-agent"' in evt:
+                    data_match = re.search(r"data: ({.*})", evt)
+                    if data_match:
+                        try:
+                            data = json.loads(data_match.group(1))
+                            html_content = data.get("content", "")
+                            if "<html" in html_content.lower() or "<!doctype" in html_content.lower():
+                                data["content"] = _inject_images_into_html(html_content, pending)
+                                events[i] = f"event: {SSEEventType.TEXT.value}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+                    break
+
+        # IMAGE イベントも別途送出（Images タブ用）
         for img_key, img_data_uri in pending.items():
             events.append(
                 format_sse(
