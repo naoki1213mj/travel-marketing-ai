@@ -19,6 +19,7 @@ dependencies = [
     "pyodbc>=5.2.0",
     "agent-framework-github-copilot==1.0.0b260319",
     "python-multipart>=0.0.20",
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]

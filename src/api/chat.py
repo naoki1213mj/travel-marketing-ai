@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 import urllib.request
@@ -172,7 +173,7 @@ def _extract_result_text(result: object) -> str:
     except (AttributeError, TypeError) as exc:
         logger.debug("get_outputs() 失敗: %s", exc)
         outputs = []
-    except Exception as exc:
+    except (RuntimeError, OSError) as exc:
         logger.debug("get_outputs() で予期しないエラー: %s", exc)
         outputs = []
 
@@ -189,6 +190,25 @@ def _extract_result_text(result: object) -> str:
             return message_text
 
     return str(result).strip()
+
+
+def _extract_total_tokens(result: object) -> int:
+    """agent.run() の返り値からトークン使用量を取り出す。"""
+    if result is None:
+        return 0
+    # Responses API は usage 属性を返す
+    usage = getattr(result, "usage", None)
+    if usage is not None:
+        return getattr(usage, "total_tokens", 0) or 0
+    # get_outputs() 経由で最後の output の usage を探す
+    try:
+        for output in result.get_outputs() if hasattr(result, "get_outputs") else []:
+            out_usage = getattr(output, "usage", None)
+            if out_usage:
+                return getattr(out_usage, "total_tokens", 0) or 0
+    except AttributeError, TypeError, RuntimeError:
+        pass
+    return 0
 
 
 def _extract_brochure_html(result_text: str) -> str | None:
@@ -622,6 +642,29 @@ async def _execute_agent(
         create_regulation_check_agent,
     )
 
+    # OpenTelemetry スパン（計測用）
+    span = None
+    try:
+        from opentelemetry import trace
+
+        tracer = trace.get_tracer("travel-marketing-agents")
+        span = tracer.start_span(
+            f"agent.{agent_name}",
+            attributes={
+                "agent.name": agent_name,
+                "agent.step": agent_step,
+                "conversation.id": conversation_id,
+            },
+        )
+    except ImportError, RuntimeError:
+        pass
+
+    # brochure-gen-agent の場合、side-channel の conversation_id を設定
+    if agent_name == "brochure-gen-agent":
+        from src.agents.brochure_gen import set_current_conversation_id
+
+        set_current_conversation_id(conversation_id)
+
     start_time = time.monotonic()
     agent_map = {
         "data-search-agent": (create_data_search_agent, 1),
@@ -696,9 +739,10 @@ async def _execute_agent(
                 exc,
             )
             await asyncio.sleep(delay_seconds)
-            delay_seconds *= 2
+            delay_seconds = delay_seconds * 2 + random.uniform(0, delay_seconds * 0.3)
 
     result_text = _extract_result_text(result)
+    total_tokens = _extract_total_tokens(result)
     safety_input = _truncate_for_safety(_sanitize_artifact_payload(result_text))
 
     tool_shield = await check_tool_response(safety_input)
@@ -735,9 +779,10 @@ async def _execute_agent(
 
     # Side-channel 画像の取得（brochure-gen-agent のツールが画像を side-channel に保存する）
     if agent_name == "brochure-gen-agent":
-        from src.agents.brochure_gen import pop_pending_images
+        from src.agents.brochure_gen import pop_pending_images, set_current_conversation_id
 
-        pending = pop_pending_images()
+        set_current_conversation_id(conversation_id)
+        pending = pop_pending_images(conversation_id)
 
         # ブローシャ HTML に画像を埋め込む
         if pending:
@@ -817,6 +862,18 @@ async def _execute_agent(
 
     elapsed = round(time.monotonic() - start_time, 1)
     tool_calls = len(_TOOL_EVENT_HINTS.get(agent_name, []))
+
+    # OpenTelemetry スパンに結果を記録
+    if span:
+        try:
+            span.set_attribute("agent.latency_seconds", elapsed)
+            span.set_attribute("agent.total_tokens", total_tokens)
+            span.set_attribute("agent.tool_calls", tool_calls)
+            span.set_attribute("agent.success", True)
+            span.end()
+        except (RuntimeError, ValueError):
+            pass
+
     if include_done:
         events.append(
             format_sse(
@@ -826,7 +883,7 @@ async def _execute_agent(
                     "metrics": {
                         "latency_seconds": elapsed,
                         "tool_calls": tool_calls,
-                        "total_tokens": 0,
+                        "total_tokens": total_tokens,
                     },
                 },
             )
@@ -838,6 +895,7 @@ async def _execute_agent(
         "success": True,
         "latency_seconds": elapsed,
         "tool_calls": tool_calls,
+        "total_tokens": total_tokens,
     }
 
 

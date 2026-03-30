@@ -138,15 +138,22 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 # --- Side-channel 画像ストア ---
 # 画像の base64 をツール出力に含めるとコンテキストウインドウを超過するため、
 # side-channel で保存し、パイプライン完了後に別途取得する（social-ai-studio パターン）
+# conversation_id でスコープし、並行リクエスト間の競合を防止する
 _images_lock = threading.Lock()
-_pending_images: dict[str, str] = {}
+_pending_images: dict[str, dict[str, str]] = {}
+_current_conversation_id: str = ""
 
 
-def pop_pending_images() -> dict[str, str]:
+def set_current_conversation_id(conversation_id: str) -> None:
+    """現在実行中の conversation_id を設定する。"""
+    global _current_conversation_id
+    _current_conversation_id = conversation_id
+
+
+def pop_pending_images(conversation_id: str) -> dict[str, str]:
     """保存済み画像を取得しクリアする（スレッドセーフ）。"""
     with _images_lock:
-        images = _pending_images.copy()
-        _pending_images.clear()
+        images = _pending_images.pop(conversation_id, {})
         return images
 
 
@@ -242,7 +249,7 @@ async def generate_hero_image(
     full_prompt = f"{style} travel photo of {destination}. {prompt}"
     data_uri = await _generate_image(full_prompt, "1536x1024")
     with _images_lock:
-        _pending_images["hero"] = data_uri
+        _pending_images.setdefault(_current_conversation_id, {})["hero"] = data_uri
     return json.dumps(
         {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
     )
@@ -262,7 +269,7 @@ async def generate_banner_image(
     size = "1024x1024" if platform == "instagram" else "1536x1024"
     data_uri = await _generate_image(prompt, size)
     with _images_lock:
-        _pending_images[f"banner_{platform}"] = data_uri
+        _pending_images.setdefault(_current_conversation_id, {})[f"banner_{platform}"] = data_uri
     return json.dumps(
         {
             "status": "generated",
@@ -494,9 +501,16 @@ INSTRUCTIONS = """\
 - レスポンシブ対応（モバイル・タブレット・デスクトップ）
 - `lang="ja"` を html タグに設定
 - フッターに**旅行業登録番号**と**取引条件**を必ず挿入
-- 企画書のキャッチコピー・ターゲット・プラン概要を反映
+- 企画書のキャッチコピー・プラン概要を反映
 - **`generate_hero_image` で生成した画像のプレースホルダーとして、HTML 内に `<img src="HERO_IMAGE" alt="メインビジュアル" class="w-full rounded-lg" />` を配置すること**
 - 視覚的に魅力的なデザイン（旅行の雰囲気が伝わるように）
+
+## ブローシャの対象読者: 旅行を検討している一般顧客
+**ブローシャは顧客向けの販促資料**です。以下のルールを厳守してください:
+- **含めるべき情報**: プラン名、キャッチコピー、旅行先の魅力、日程・価格帯、含まれるサービス、予約方法、お問い合わせ先
+- **含めてはいけない情報（社内向け）**: KPI、目標予約数、売上目標、前年比、セグメント分析、ターゲットペルソナの詳細分析、改善ポイント、販促チャネル戦略、競合分析
+- トーンは「お客様への提案」であり、「社内企画書の転載」ではありません
+- 価格は「○○円〜（税込）」のように顧客にわかりやすく表記すること
 
 ## 画像生成のガイドライン
 - 入力の企画書から**旅行先（目的地）**を必ず抽出してください
