@@ -116,8 +116,7 @@ def create_review_agent():
     """
     # GitHubCopilotAgent を優先的に試行
     try:
-        from agent_framework.github import GitHubCopilotAgent
-        from agent_framework.github import PermissionHandler
+        from agent_framework.github import GitHubCopilotAgent, PermissionHandler
 
         review_agent = GitHubCopilotAgent(
             name="quality-review-agent",
@@ -128,13 +127,9 @@ def create_review_agent():
         logger.info("GitHubCopilotAgent で品質レビューエージェントを作成しました")
         return review_agent
     except (ImportError, ValueError, OSError) as exc:
-        logger.info(
-            "GitHubCopilotAgent 未設定のため従来エージェントにフォールバック: %s", exc
-        )
+        logger.info("GitHubCopilotAgent 未設定のため従来エージェントにフォールバック: %s", exc)
     except Exception as exc:
-        logger.warning(
-            "GitHubCopilotAgent の初期化で予期しないエラー: %s", exc
-        )
+        logger.warning("GitHubCopilotAgent の初期化で予期しないエラー: %s", exc)
 
     # フォールバック: AzureOpenAIResponsesClient ベースのエージェント
     settings = get_settings()
