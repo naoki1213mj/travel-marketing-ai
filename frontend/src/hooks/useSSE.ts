@@ -238,5 +238,67 @@ export function useSSE() {
     setState(prev => ({ ...prev, settings }))
   }, [])
 
-  return { state, sendMessage, approve, reset, restoreVersion, updateSettings }
+  /** 保存済み会話を復元する（新規推論を実行しない） */
+  const restoreConversation = useCallback(async (conversationId: string) => {
+    try {
+      const resp = await fetch(`/api/conversations/${conversationId}`)
+      if (!resp.ok) return
+      const doc = await resp.json()
+
+      const events: Array<{ event?: string; data?: Record<string, unknown> }> = doc.messages || []
+
+      const textContents: TextContent[] = []
+      const images: ImageContent[] = []
+      const toolEvents: ToolEvent[] = []
+      let safetyResult: SafetyResult | null = null
+      let metrics: PipelineMetrics | null = null
+      const userMessages: string[] = doc.input ? [doc.input] : []
+
+      for (const evt of events) {
+        const data = evt.data || {}
+        switch (evt.event) {
+          case 'text':
+            textContents.push({ content: (data.content as string) || '', agent: (data.agent as string) || '', content_type: (data.content_type as string) || undefined })
+            break
+          case 'image':
+            images.push({ url: (data.url as string) || '', alt: (data.alt as string) || '', agent: (data.agent as string) || '' })
+            break
+          case 'tool_event':
+            toolEvents.push({ tool: (data.tool as string) || '', status: (data.status as string) || '', agent: (data.agent as string) || '' })
+            break
+          case 'safety':
+            safetyResult = { hate: (data.hate as number) || 0, self_harm: (data.self_harm as number) || 0, sexual: (data.sexual as number) || 0, violence: (data.violence as number) || 0, status: (data.status as SafetyResult['status']) || 'safe' }
+            break
+          case 'done':
+            metrics = (data.metrics as PipelineMetrics) || null
+            break
+        }
+      }
+
+      const snapshot: ArtifactSnapshot = { textContents, images }
+
+      setState(prev => ({
+        ...prev,
+        status: 'completed',
+        conversationId,
+        textContents,
+        images,
+        toolEvents,
+        safetyResult,
+        metrics,
+        userMessages,
+        error: null,
+        approvalRequest: null,
+        agentProgress: null,
+        versions: [snapshot],
+        currentVersion: 1,
+      }))
+
+      conversationIdRef.current = conversationId
+    } catch (err) {
+      console.warn('会話の復元に失敗:', err)
+    }
+  }, [])
+
+  return { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation }
 }

@@ -35,7 +35,7 @@ export function PipelineStepper({ progress, t }: PipelineStepperProps) {
             <div className="flex flex-col items-center gap-1">
               <div
                 className={`flex h-8 w-8 items-center justify-center rounded-full text-sm
-                  ${isCompleted ? 'bg-[var(--accent)] text-white' : ''}
+                  ${isCompleted ? 'bg-[var(--accent)] text-white dark:bg-teal-700' : ''}
                   ${isActive ? 'animate-pulse bg-[var(--accent-soft)] text-[var(--accent-strong)] ring-2 ring-[var(--accent)]/40' : ''}
                   ${isPending ? 'bg-[var(--panel-strong)] text-[var(--text-muted)]' : ''}`}
               >

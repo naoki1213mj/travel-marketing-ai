@@ -486,6 +486,7 @@ INSTRUCTIONS = """\
 1. **HTML ブローシャ**: Tailwind CSS を使用したレスポンシブ HTML
 2. **ヒーロー画像**: `generate_hero_image` でメインビジュアルを生成（1536x1024px）
 3. **SNS バナー**: `generate_banner_image` で Instagram/Twitter 用バナーを生成
+4. **販促動画**: `generate_promo_video` で企画書サマリの紹介動画を生成（SPEECH_SERVICE_ENDPOINT 設定時のみ）
 
 ## HTML ブローシャのルール
 - ```html で囲んで出力すること
@@ -512,6 +513,7 @@ INSTRUCTIONS = """\
 ## ツール使用ルール
 - `generate_hero_image`: 目的地のメインビジュアルを生成（英語プロンプト推奨）
 - `generate_banner_image`: SNS 向けバナーを生成（platform パラメータで対応）
+- `generate_promo_video`: 企画書のサマリテキスト（100〜200文字）で紹介動画を生成。必ず最後に呼び出すこと
 - 入力に [参考パンフレット: ...] が含まれていれば `analyze_existing_brochure` を呼び出す
 
 ## 販促紹介動画

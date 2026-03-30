@@ -103,7 +103,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                 <span className="text-lg">{step.icon}</span>
                 <span className="text-sm font-medium">{t(step.labelKey)}</span>
                 {status === 'completed' && (
-                  <span className="rounded-full bg-green-100 dark:bg-green-900/40 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-300">
+                  <span className="rounded-full bg-green-100 dark:bg-green-900/60 px-2 py-0.5 text-xs font-medium text-green-700 dark:text-green-200">
                     ✓
                   </span>
                 )}

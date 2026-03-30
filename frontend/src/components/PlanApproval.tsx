@@ -41,7 +41,7 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
             type="button"
             onClick={() => onApprove(t('approval.approve'))}
             className="rounded-full bg-green-600 px-4 py-2 text-sm font-medium text-white
-                       hover:bg-green-700 dark:bg-green-500 dark:hover:bg-green-600"
+                       hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800"
           >
             {t('approval.approve')}
           </button>
@@ -71,7 +71,7 @@ export function PlanApproval({ request, onApprove, t }: PlanApprovalProps) {
               onClick={() => { if (revision.trim()) onApprove(revision.trim()) }}
               disabled={!revision.trim()}
               className="rounded-full bg-[var(--accent)] px-3 py-1.5 text-sm text-white
-                         dark:bg-teal-600 dark:text-white
+                         dark:bg-teal-700 dark:text-white
                          hover:bg-blue-700 disabled:opacity-40
               "
             >

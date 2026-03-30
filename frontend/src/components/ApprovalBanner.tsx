@@ -33,7 +33,7 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
           </button>
           <button
             onClick={() => onApprove(t('approval.approve'))}
-            className="rounded-full bg-green-600 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-green-600/25 hover:bg-green-700 ring-2 ring-green-600/20 ring-offset-2 dark:ring-offset-gray-900 transition-all"
+            className="rounded-full bg-green-600 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-green-600/25 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800 ring-2 ring-green-600/20 ring-offset-2 dark:ring-offset-gray-900 transition-all"
             autoFocus
           >
             ✅ {t('approval.approve')}

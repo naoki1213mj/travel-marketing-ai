@@ -45,7 +45,7 @@ const AGENT_STEP_KEY: Record<string, string> = {
 }
 
 function App() {
-  const { state, sendMessage, approve, reset, restoreVersion, updateSettings } = useSSE()
+  const { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
 
@@ -93,7 +93,7 @@ function App() {
 
           {/* 会話履歴（インラインパネル） */}
           <div className="px-5 pt-3">
-            <ConversationHistory onSelect={(id) => sendMessage(`前回の会話 ${id} を参照`)} t={t} />
+            <ConversationHistory onSelect={restoreConversation} t={t} />
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">

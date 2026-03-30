@@ -47,7 +47,7 @@ export function RefineChat({ onSubmit, disabled, placeholder, sendLabel, label }
           type="submit"
           disabled={!canSubmit}
           className="rounded-full bg-[var(--accent-strong)] px-4 py-2 text-sm text-white
-                     dark:bg-teal-600 dark:text-white
+                     dark:bg-teal-700 dark:text-white
                      hover:opacity-90 disabled:opacity-40"
         >
           {sendLabel}
