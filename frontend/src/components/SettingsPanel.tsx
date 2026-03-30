@@ -18,7 +18,7 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   maxTokens: 4096,
   topP: 1.0,
   iqSearchResults: 5,
-  iqScoreThreshold: 0.7,
+  iqScoreThreshold: 0.0,
 }
 
 interface SettingsPanelProps {

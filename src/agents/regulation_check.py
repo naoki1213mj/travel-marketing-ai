@@ -25,6 +25,23 @@ _search_endpoint: str | None = None
 _search_api_key: str | None = None
 _search_initialized: bool = False
 
+# Foundry IQ 検索パラメータ（UI から設定可能）
+_iq_top_k: int = 5
+_iq_score_threshold: float = 0.0
+_iq_reasoning_effort: str = "low"
+
+
+def set_iq_search_params(
+    top_k: int = 5,
+    score_threshold: float = 0.0,
+    reasoning_effort: str = "low",
+) -> None:
+    """Foundry IQ 検索パラメータを設定する（エージェント作成時に呼ばれる）。"""
+    global _iq_top_k, _iq_score_threshold, _iq_reasoning_effort
+    _iq_top_k = top_k
+    _iq_score_threshold = score_threshold
+    _iq_reasoning_effort = reasoning_effort
+
 
 def _get_search_credentials() -> tuple[str, str]:
     """Azure AI Search のエンドポイントと API key を取得する。"""
@@ -125,7 +142,7 @@ async def search_knowledge_base(query: str) -> str:
                 "role": "user",
                 "content": [{"type": "text", "text": query}],
             }],
-            "retrievalReasoningEffort": {"kind": "low"},
+            "retrievalReasoningEffort": {"kind": _iq_reasoning_effort},
             "includeActivity": True,
         }
 
@@ -152,13 +169,13 @@ async def search_knowledge_base(query: str) -> str:
                     if text.strip():
                         results.append({"content": text[:2000], "source": "Foundry IQ Agentic Retrieval"})
 
-        # 参照情報を追加
+        # 参照情報を追加（IQ パラメータでフィルタリング）
         references = data.get("references", [])
         ref_summaries = []
-        for ref in references[:5]:
+        for ref in references[:_iq_top_k]:
             title = ref.get("title", "")
             score = ref.get("rerankerScore", 0)
-            if title:
+            if title and score >= _iq_score_threshold:
                 ref_summaries.append({"title": title, "score": score})
 
         if not results:
@@ -191,7 +208,7 @@ async def _fallback_index_search(query: str, search_endpoint: str, api_key: str)
     """KB が未作成の場合に直接 Index を検索するフォールバック。"""
     try:
         url = f"{search_endpoint}/indexes/regulations-index/docs/search?api-version=2024-07-01"
-        body = json.dumps({"search": query, "top": 5, "queryType": "simple"}).encode()
+        body = json.dumps({"search": query, "top": _iq_top_k, "queryType": "simple"}).encode()
         headers: dict[str, str] = {"Content-Type": "application/json", "api-key": api_key}
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=15)
@@ -270,6 +287,13 @@ def create_regulation_check_agent(model_settings: dict | None = None):
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
+
+    # Foundry IQ 検索パラメータを設定
+    if model_settings:
+        set_iq_search_params(
+            top_k=int(model_settings.get("iq_search_results", 5)),
+            score_threshold=float(model_settings.get("iq_score_threshold", 0.0)),
+        )
 
     # Foundry 組み込み Web Search（安全情報検索用 — Bing リソース不要）
     agent_tools: list = [
