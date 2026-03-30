@@ -190,7 +190,9 @@ class TestBrochureGenTools:
         """pop_pending_images が保存済み画像を返しクリアする"""
         import src.agents.brochure_gen as bg
 
-        bg._pending_images = {"test-conv": {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}}
+        bg._pending_images = {
+            "test-conv": {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}
+        }
         result = bg.pop_pending_images("test-conv")
         assert result == {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}
         assert "test-conv" not in bg._pending_images
@@ -317,18 +319,20 @@ class TestBrochureGenTools:
         """ブローシャ生成エージェントが正しいツール数で作成されること"""
         from unittest.mock import MagicMock
 
+        import src.agent_client as ac
         import src.agents.brochure_gen as bg
 
         mock_agent = MagicMock()
         mock_client = MagicMock()
         mock_client.as_agent.return_value = mock_agent
 
+        monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agents.brochure_gen.AzureOpenAIResponsesClient",
+            "src.agent_client.AzureOpenAIResponsesClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
-            "src.agents.brochure_gen.DefaultAzureCredential",
+            "src.agent_client.DefaultAzureCredential",
             MagicMock,
         )
 
@@ -342,17 +346,19 @@ class TestBrochureGenTools:
         """model_settings が agent_kwargs に反映されること"""
         from unittest.mock import MagicMock
 
+        import src.agent_client as ac
         import src.agents.brochure_gen as bg
 
         mock_client = MagicMock()
         mock_client.as_agent.return_value = MagicMock()
 
+        monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agents.brochure_gen.AzureOpenAIResponsesClient",
+            "src.agent_client.AzureOpenAIResponsesClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
-            "src.agents.brochure_gen.DefaultAzureCredential",
+            "src.agent_client.DefaultAzureCredential",
             MagicMock,
         )
 
@@ -371,6 +377,7 @@ class TestMarketingPlanAgent:
         """マーケ施策エージェントが作成されること"""
         from unittest.mock import MagicMock
 
+        import src.agent_client as ac
         import src.agents.marketing_plan as mp
 
         mock_agent = MagicMock()
@@ -378,12 +385,13 @@ class TestMarketingPlanAgent:
         mock_client.as_agent.return_value = mock_agent
         mock_client.get_web_search_tool.return_value = MagicMock()
 
+        monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agents.marketing_plan.AzureOpenAIResponsesClient",
+            "src.agent_client.AzureOpenAIResponsesClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
-            "src.agents.marketing_plan.DefaultAzureCredential",
+            "src.agent_client.DefaultAzureCredential",
             MagicMock,
         )
 
@@ -398,18 +406,20 @@ class TestMarketingPlanAgent:
         """model_settings が正しく渡されること"""
         from unittest.mock import MagicMock
 
+        import src.agent_client as ac
         import src.agents.marketing_plan as mp
 
         mock_client = MagicMock()
         mock_client.as_agent.return_value = MagicMock()
         mock_client.get_web_search_tool.return_value = MagicMock()
 
+        monkeypatch.setattr(ac, "_clients", {})
         monkeypatch.setattr(
-            "src.agents.marketing_plan.AzureOpenAIResponsesClient",
+            "src.agent_client.AzureOpenAIResponsesClient",
             lambda **kwargs: mock_client,
         )
         monkeypatch.setattr(
-            "src.agents.marketing_plan.DefaultAzureCredential",
+            "src.agent_client.DefaultAzureCredential",
             MagicMock,
         )
 

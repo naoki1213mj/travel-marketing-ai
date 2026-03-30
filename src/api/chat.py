@@ -281,11 +281,8 @@ def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
     images: list[dict[str, str]] = []
     try:
         outputs = result.get_outputs() if hasattr(result, "get_outputs") else []
-    except (AttributeError, TypeError) as exc:
+    except (AttributeError, TypeError, RuntimeError, OSError) as exc:
         logger.debug("Code Interpreter 画像抽出で get_outputs() 失敗: %s", exc)
-        return images
-    except (AttributeError, TypeError) as exc:
-        logger.debug("Code Interpreter 画像抽出で予期しないエラー: %s", exc)
         return images
 
     all_items: list[object] = []
