@@ -520,6 +520,16 @@ def _is_retryable_agent_error(exc: Exception) -> bool:
     return any(keyword in message for keyword in ["429", "rate limit", "too many requests", "timeout", "temporarily"])
 
 
+def _is_code_interpreter_404(exc: Exception) -> bool:
+    """Code Interpreter の 404 エラーかを判定する。
+
+    Responses API が Code Interpreter コンテナを見つけられない場合に
+    返す 404 エラーを検出する。
+    """
+    message = str(exc).lower()
+    return "404" in message and "resource not found" in message
+
+
 async def _execute_agent(
     agent_name: str,
     agent_step: int,
@@ -562,6 +572,17 @@ async def _execute_agent(
             result = await agent.run(user_input)
             break
         except Exception as exc:
+            # Code Interpreter 404: 無効化してリトライ（リトライ回数を消費しない）
+            if agent_name == "data-search-agent" and _is_code_interpreter_404(exc):
+                from src.agents.data_search import _should_enable_code_interpreter, set_code_interpreter_available
+
+                if _should_enable_code_interpreter():
+                    set_code_interpreter_available(False)
+                    logger.warning(
+                        "Code Interpreter 404 を検出。無効化してリトライします: %s", exc
+                    )
+                    continue
+
             if agent_name == "brochure-gen-agent" and attempt == max_attempts:
                 logger.warning("brochure-gen-agent の通常生成に失敗したためフォールバックを返します: %s", exc)
                 return await _build_brochure_fallback_outcome(

@@ -3,6 +3,7 @@
 import csv
 import json
 import logging
+import os
 import struct
 from pathlib import Path
 
@@ -21,6 +22,33 @@ except ImportError:
     _HAS_PYODBC = False
 
 logger = logging.getLogger(__name__)
+
+# --- Code Interpreter 自動検出 ---
+# None = 未テスト、True = 利用可能、False = 利用不可（404 等で失敗済み）
+_code_interpreter_available: bool | None = None
+
+
+def set_code_interpreter_available(available: bool) -> None:
+    """Code Interpreter の利用可能状態を設定する（実行時自動検出用）。"""
+    global _code_interpreter_available
+    _code_interpreter_available = available
+    logger.info("Code Interpreter 利用可能状態を %s に設定", available)
+
+
+def _should_enable_code_interpreter() -> bool:
+    """Code Interpreter を有効にすべきかを判定する。
+
+    判定ロジック:
+    1. ENABLE_CODE_INTERPRETER=false で明示的に無効化 → False
+    2. 実行時に 404 等で失敗済み → False
+    3. それ以外 → True（初回は有効化して試す）
+    """
+    env_val = os.environ.get("ENABLE_CODE_INTERPRETER", "").lower()
+    if env_val in ("false", "0", "no"):
+        return False
+    if _code_interpreter_available is False:
+        return False
+    return True
 
 
 # --- ツール出力スキーマ（バリデーション・テスト用） ---
@@ -352,7 +380,9 @@ INSTRUCTIONS = """\
 4. **推奨**: データに基づく施策の方向性
 
 売上データと顧客レビューのツールを必ず使って分析してください。
+"""
 
+_CODE_INTERPRETER_INSTRUCTION_SUFFIX = """
 ## データ可視化
 売上データを分析した後、Code Interpreter を使って以下の可視化を生成してください:
 - 売上推移の折れ線グラフまたは棒グラフ
@@ -366,6 +396,10 @@ def create_data_search_agent(model_settings: dict | None = None):
 
     Code Interpreter はリージョン依存（East US 2 / Sweden Central 推奨）。
     利用できない場合はテキスト分析のみで動作する。
+
+    Code Interpreter の有効化:
+    - デフォルト: 有効（初回実行時に 404 が発生すると自動的に無効化）
+    - 明示的に無効化: ENABLE_CODE_INTERPRETER=false
     """
     settings = get_settings()
     endpoint = get_model_endpoint()
@@ -374,18 +408,23 @@ def create_data_search_agent(model_settings: dict | None = None):
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )
-    # Code Interpreter: Foundry Agent Service 組み込みツール（§3.5 AG1-06）
-    # リージョン制約で利用できない場合はスキップ
+
     agent_tools: list = [search_sales_history, search_customer_reviews]
-    try:
+    instructions = INSTRUCTIONS
+
+    enable_ci = _should_enable_code_interpreter()
+    if enable_ci:
         code_interpreter_tool = client.get_code_interpreter_tool()
         agent_tools.append(code_interpreter_tool)
-        logger.info("Code Interpreter ツールを追加しました")
-    except Exception as exc:
-        logger.warning("Code Interpreter ツール取得に失敗（リージョン制約の可能性）: %s", exc)
+        instructions = INSTRUCTIONS + _CODE_INTERPRETER_INSTRUCTION_SUFFIX
+        logger.info("Code Interpreter を有効化してエージェントを作成")
+    else:
+        reason = "環境変数で無効化" if os.environ.get("ENABLE_CODE_INTERPRETER", "").lower() in ("false", "0", "no") else "実行時エラーにより無効化"
+        logger.info("Code Interpreter なしでエージェントを作成（%s）", reason)
+
     agent_kwargs: dict = {
         "name": "data-search-agent",
-        "instructions": INSTRUCTIONS,
+        "instructions": instructions,
         "tools": agent_tools,
     }
     if model_settings:
