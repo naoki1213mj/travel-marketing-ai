@@ -98,7 +98,7 @@ class AgentExecutionOutcome(TypedDict):
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
 _TOOL_EVENT_HINTS: dict[str, list[str]] = {
-    "data-search-agent": ["search_sales_history", "search_customer_reviews", "code_interpreter"],
+    "data-search-agent": ["query_data_agent", "search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
     "regulation-check-agent": ["search_knowledge_base", "check_ng_expressions", "check_travel_law_compliance"],
     "plan-revision-agent": [],

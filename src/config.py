@@ -24,6 +24,7 @@ class AppSettings(TypedDict):
     speech_service_endpoint: str
     speech_service_region: str
     logic_app_callback_url: str
+    fabric_data_agent_url: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -40,6 +41,7 @@ _ENV_MAP: dict[str, str] = {
     "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
     "SPEECH_SERVICE_REGION": "speech_service_region",
     "LOGIC_APP_CALLBACK_URL": "logic_app_callback_url",
+    "FABRIC_DATA_AGENT_URL": "fabric_data_agent_url",
 }
 
 # デフォルト値（オプショナルな設定のみ）

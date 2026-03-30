@@ -22,6 +22,103 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+# --- Fabric Data Agent 連携 ---
+# Fabric Data Agent の Published URL が設定されていれば、自然言語でデータ分析を実行する。
+# Data Agent は NL2SQL で Lakehouse に問い合わせるため、SQL ハードコードが不要。
+
+
+async def _query_data_agent(question: str) -> str | None:
+    """Fabric Data Agent にクエリを送り、回答テキストを返す。
+
+    Published URL が未設定、または通信エラーの場合は None を返す。
+    """
+    settings = get_settings()
+    base_url = settings.get("fabric_data_agent_url", "")
+    if not base_url:
+        return None
+
+    try:
+        from azure.identity import DefaultAzureCredential as _Cred
+
+        credential = _Cred()
+        token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+    except (ValueError, OSError) as exc:
+        logger.warning("Fabric Data Agent: トークン取得失敗: %s", exc)
+        return None
+
+    try:
+        from openai import OpenAI
+
+        # Fabric Data Agent は OpenAI Assistants API 互換エンドポイントを公開する
+        client = OpenAI(
+            base_url=base_url,
+            api_key="",
+            default_headers={"Authorization": f"Bearer {token.token}"},
+        )
+
+        # スレッド作成 → メッセージ送信 → 実行 → 結果取得
+        assistant = client.beta.assistants.create(model="not used")
+        thread = client.beta.threads.create()
+        client.beta.threads.messages.create(
+            thread_id=thread.id,
+            role="user",
+            content=question,
+        )
+        run = client.beta.threads.runs.create(
+            thread_id=thread.id,
+            assistant_id=assistant.id,
+        )
+
+        # ポーリング（最大 60 秒）
+        import time as _time
+
+        terminal_states = {"completed", "failed", "cancelled", "requires_action"}
+        start = _time.time()
+        while run.status not in terminal_states:
+            if _time.time() - start > 60:
+                logger.warning("Fabric Data Agent: ポーリングタイムアウト (status=%s)", run.status)
+                break
+            run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
+            await __import__("asyncio").sleep(2)
+
+        if run.status != "completed":
+            logger.warning("Fabric Data Agent: run 失敗 (status=%s)", run.status)
+            # クリーンアップ
+            try:
+                client.beta.threads.delete(thread.id)
+            except (ValueError, OSError):
+                pass
+            return None
+
+        # 応答メッセージ取得
+        messages = client.beta.threads.messages.list(thread_id=thread.id, order="asc")
+        answer_parts: list[str] = []
+        for msg in messages:
+            if msg.role == "assistant":
+                for content in msg.content:
+                    if hasattr(content, "text"):
+                        answer_parts.append(content.text.value)
+
+        # クリーンアップ
+        try:
+            client.beta.threads.delete(thread.id)
+        except (ValueError, OSError):
+            pass
+
+        answer = "\n".join(answer_parts).strip()
+        if answer:
+            logger.info("Fabric Data Agent から回答取得: %d 文字", len(answer))
+            return answer
+        return None
+
+    except (ImportError, ValueError, OSError) as exc:
+        logger.warning("Fabric Data Agent 呼び出しに失敗: %s", exc)
+        return None
+    except Exception as exc:
+        logger.warning("Fabric Data Agent で予期しないエラー: %s", exc)
+        return None
+
 # --- Code Interpreter 自動検出 ---
 # None = 未テスト、True = 利用可能、False = 利用不可（404 等で失敗済み）
 _code_interpreter_available: bool | None = None
@@ -311,6 +408,28 @@ _FALLBACK_REVIEWS = [
 
 
 @tool
+async def query_data_agent(question: str) -> str:
+    """Fabric Data Agent に自然言語でデータ分析を依頼する。
+
+    Fabric Data Agent が Lakehouse のデータを自動で SQL に変換して実行し、
+    分析結果を返す。複雑なデータ分析やクロス集計に適している。
+
+    Args:
+        question: データに関する質問（例: 「沖縄プランの季節別売上推移は？」）
+    """
+    result = await _query_data_agent(question)
+    if result:
+        return json.dumps(
+            {"source": "Fabric Data Agent", "answer": result},
+            ensure_ascii=False,
+        )
+    return json.dumps(
+        {"source": "fallback", "message": "Fabric Data Agent は現在利用できません。search_sales_history / search_customer_reviews をお使いください。"},
+        ensure_ascii=False,
+    )
+
+
+@tool
 async def search_sales_history(
     query: str,
     season: str | None = None,
@@ -390,7 +509,8 @@ INSTRUCTIONS = """\
 4. **推奨事項**: データに基づく施策の方向性
 
 ## ツール使用ルール
-- `search_sales_history` と `search_customer_reviews` を**必ず**使ってください
+- `query_data_agent` が利用可能な場合は**まずそちらを使ってください**（Fabric Data Agent が自然言語で Lakehouse を分析）
+- `query_data_agent` が利用できない場合、または追加データが必要な場合は `search_sales_history` と `search_customer_reviews` を使ってください
 - データが見つからない場合でも、利用可能なデータから最善の分析を行ってください
 - 分析結果は具体的な数値を含めてください（売上額、件数、評価スコア等）
 
@@ -427,7 +547,7 @@ def create_data_search_agent(model_settings: dict | None = None):
         deployment = model_settings["model"]
     client = get_responses_client(deployment)
 
-    agent_tools: list = [search_sales_history, search_customer_reviews]
+    agent_tools: list = [query_data_agent, search_sales_history, search_customer_reviews]
     instructions = INSTRUCTIONS
 
     enable_ci = _should_enable_code_interpreter()
