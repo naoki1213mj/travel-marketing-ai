@@ -53,7 +53,7 @@ export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label }:
         <button
           type="submit"
           disabled={!canSubmit}
-          className="self-end rounded-full bg-[var(--accent)] px-6 py-3 text-sm font-medium text-white
+          className="self-end rounded-full bg-[var(--accent-strong)] px-6 py-3 text-sm font-medium text-white
                      hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-[var(--accent-soft)]
                      disabled:opacity-40 disabled:cursor-not-allowed
           "

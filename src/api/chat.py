@@ -496,7 +496,7 @@ async def _execute_agent(
     ]
 
     result = None
-    delay_seconds = 2.0
+    delay_seconds = 5.0
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
         try:
