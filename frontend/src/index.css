@@ -93,3 +93,15 @@ body {
   background: rgba(148, 163, 184, 0.3);
   border-radius: 3px;
 }
+
+/* 水平スクロールバー（会話履歴パネル等） */
+.scrollbar-thin::-webkit-scrollbar {
+  height: 4px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--text-muted);
+  border-radius: 2px;
+}
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}

@@ -1,5 +1,5 @@
 /**
- * 会話履歴サイドバー。右からスライドインするドロワー。
+ * 会話履歴パネル。左パネル上部にインラインで表示する折りたたみ式。
  */
 
 import { useState, useEffect, useCallback } from 'react'
@@ -38,132 +38,95 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
     if (isOpen) fetchHistory()
   }, [isOpen, fetchHistory])
 
-  const handleSelect = (id: string) => {
-    onSelect(id)
-    setIsOpen(false)
-  }
-
   const formatTime = (dateStr: string) => {
     try {
-      const date = new Date(dateStr)
+      const d = new Date(dateStr)
       const now = new Date()
-      const diff = now.getTime() - date.getTime()
-      const minutes = Math.floor(diff / 60000)
-      if (minutes < 60) return `${minutes}分前`
-      const hours = Math.floor(minutes / 60)
-      if (hours < 24) return `${hours}時間前`
-      return date.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })
-    } catch {
-      return dateStr
+      const mins = Math.floor((now.getTime() - d.getTime()) / 60000)
+      if (mins < 60) return `${mins}m`
+      const hrs = Math.floor(mins / 60)
+      if (hrs < 24) return `${hrs}h`
+      return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })
+    } catch { return '' }
+  }
+
+  const statusColor = (status: string) => {
+    switch (status) {
+      case 'completed': return 'bg-green-500'
+      case 'awaiting_approval': return 'bg-amber-500'
+      case 'error': return 'bg-red-500'
+      default: return 'bg-blue-500'
     }
   }
 
-  const statusIcon = (status: string) => {
-    switch (status) {
-      case 'completed': return '✅'
-      case 'awaiting_approval': return '⏳'
-      case 'error': return '❌'
-      default: return '🔄'
-    }
+  if (!isOpen) {
+    return (
+      <button
+        onClick={() => setIsOpen(true)}
+        className="flex items-center gap-1.5 rounded-full border border-[var(--panel-border)] bg-[var(--surface)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)]"
+        title={t('history.title')}
+      >
+        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+        {t('history.title')}
+      </button>
+    )
   }
 
   return (
-    <>
-      {/* トリガーボタン */}
-      <button
-        onClick={() => setIsOpen(true)}
-        className="rounded-full border border-[var(--panel-border)] bg-[var(--surface)] p-2 text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)]"
-        title={t('history.title')}
-        aria-label={t('history.title')}
-      >
-        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-        </svg>
-      </button>
-
-      {/* バックドロップ */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black/20 backdrop-blur-[2px] transition-opacity"
-          onClick={() => setIsOpen(false)}
-          aria-hidden="true"
-        />
-      )}
-
-      {/* サイドバーパネル */}
-      <div
-        className={`fixed right-0 top-0 z-50 h-full w-full sm:w-96 transform transition-transform duration-300 ease-out ${
-          isOpen ? 'translate-x-0' : 'translate-x-full'
-        }`}
-      >
-        <div className="flex h-full flex-col border-l border-[var(--panel-border)] bg-[var(--panel-bg)] shadow-2xl backdrop-blur-xl">
-          {/* ヘッダー */}
-          <div className="flex items-center justify-between border-b border-[var(--panel-border)] px-5 py-4">
-            <div className="flex items-center gap-2">
-              <svg className="h-5 w-5 text-[var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-              <h2 className="text-base font-semibold">{t('history.title')}</h2>
-            </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="rounded-lg p-1.5 text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)] transition-colors"
-              aria-label="Close"
-            >
-              <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          {/* コンテンツ */}
-          <div className="flex-1 overflow-y-auto px-4 py-3">
-            {loading ? (
-              <div className="flex items-center justify-center py-12">
-                <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
-              </div>
-            ) : conversations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-[var(--text-muted)]">
-                <svg className="mb-3 h-12 w-12 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                </svg>
-                <p className="text-sm">{t('history.empty')}</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {conversations.map((conv) => (
-                  <button
-                    key={conv.id}
-                    onClick={() => handleSelect(conv.id)}
-                    className="group w-full rounded-xl border border-[var(--panel-border)] bg-[var(--surface)] p-4 text-left transition-all hover:border-[var(--accent)] hover:shadow-md"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="flex-1 text-sm font-medium leading-snug line-clamp-2 group-hover:text-[var(--accent-strong)]">
-                        {conv.input || '(入力なし)'}
-                      </p>
-                      <span className="shrink-0 text-base" title={conv.status}>
-                        {statusIcon(conv.status)}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-2 text-xs text-[var(--text-muted)]">
-                      <span>{formatTime(conv.created_at)}</span>
-                      <span>•</span>
-                      <span className="font-mono">{conv.id.slice(0, 8)}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* フッター */}
-          <div className="border-t border-[var(--panel-border)] px-5 py-3">
-            <p className="text-center text-xs text-[var(--text-muted)]">
-              {conversations.length} {conversations.length === 1 ? 'conversation' : 'conversations'}
-            </p>
-          </div>
+    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--surface)] overflow-hidden">
+      {/* ヘッダー */}
+      <div className="flex items-center justify-between px-4 py-2.5 border-b border-[var(--panel-border)]">
+        <div className="flex items-center gap-2">
+          <svg className="h-4 w-4 text-[var(--accent)]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span className="text-xs font-semibold">{t('history.title')}</span>
+          <span className="rounded-full bg-[var(--accent-soft)] px-1.5 py-0.5 text-[10px] font-medium text-[var(--accent-strong)]">
+            {conversations.length}
+          </span>
         </div>
+        <button
+          onClick={() => setIsOpen(false)}
+          className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--accent-soft)] transition-colors"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
       </div>
-    </>
+
+      {/* コンテンツ */}
+      <div className="px-3 py-2.5">
+        {loading ? (
+          <div className="flex justify-center py-4">
+            <div className="h-5 w-5 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent" />
+          </div>
+        ) : conversations.length === 0 ? (
+          <p className="py-3 text-center text-xs text-[var(--text-muted)]">{t('history.empty')}</p>
+        ) : (
+          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
+            {conversations.map((conv) => (
+              <button
+                key={conv.id}
+                onClick={() => { onSelect(conv.id); setIsOpen(false) }}
+                className="group flex-shrink-0 w-48 rounded-xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3 text-left transition-all hover:border-[var(--accent)] hover:shadow-sm"
+              >
+                <div className="flex items-start gap-2">
+                  <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${statusColor(conv.status)}`} />
+                  <p className="flex-1 text-xs leading-snug line-clamp-2 group-hover:text-[var(--accent-strong)]">
+                    {conv.input || '(入力なし)'}
+                  </p>
+                </div>
+                <p className="mt-1.5 text-[10px] text-[var(--text-muted)] pl-4">
+                  {formatTime(conv.created_at)}
+                </p>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

@@ -73,7 +73,6 @@ function App() {
             <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)]">{t('app.subtitle')}</p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-          <ConversationHistory onSelect={(id) => sendMessage(`前回の会話 ${id} を参照`)} t={t} />
           <SafetyBadge result={state.safetyResult} t={t} />
           <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
           <ThemeToggle theme={theme} onChange={setTheme} t={t} />
@@ -86,6 +85,11 @@ function App() {
           <div className="border-b border-[var(--panel-border)] px-5 py-4">
             <h2 className="text-sm font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('panel.workflow')}</h2>
             <p className="mt-2 text-sm text-[var(--text-secondary)]">{t('panel.workflow.subtitle')}</p>
+          </div>
+
+          {/* 会話履歴（インラインパネル） */}
+          <div className="px-5 pt-3">
+            <ConversationHistory onSelect={(id) => sendMessage(`前回の会話 ${id} を参照`)} t={t} />
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">
