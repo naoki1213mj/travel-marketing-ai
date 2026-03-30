@@ -12,8 +12,8 @@ flowchart LR
     inputshield --> flow[SequentialBuilder workflow in FastAPI]
 
     flow --> a1[data-search-agent]
-    a1 --> fabric[Fabric Lakehouse]
-    a1 --> csv[CSV fallback]
+    a1 --> fabric[Fabric Lakehouse SQL]
+    a1 -.-> csv[CSV fallback]
 
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
@@ -26,9 +26,16 @@ flowchart LR
     flow --> a4[brochure-gen-agent]
     a4 --> image[gpt-image-1.5]
     a4 --> cu[Content Understanding]
-    a4 --> speech[Speech / Photo Avatar]
+    a4 --> speech[Speech / Photo Avatar video]
 
     flow --> outputsafety[Text Analysis]
+
+    subgraph fabricLayer[Fabric Data]
+        fabricSQL[Fabric SQL Endpoint]
+        fabricDelta[Delta Parquet tables]
+    end
+    fabric --> fabricSQL
+    fabricSQL --> fabricDelta
     outputsafety --> ui
 
     api -. optional .-> review[quality-review-agent]
@@ -51,7 +58,7 @@ flowchart TB
     ca --> appi[Application Insights]
     ca --> logic[Logic Apps]
 
-    apim[API Management AI Gateway] -. provisioned .-> aiServices
+    apim[API Management AI Gateway] -. travel-ai-gateway connection .-> aiServices
     ca -. not in active runtime path yet .-> apim
 
     aiSearch[Azure AI Search] --> foundryProject
@@ -87,8 +94,10 @@ flowchart TB
 |---|---|
 | Azure AI Search の作成と `regulations-index` の投入 | Foundry IQ の実データ検索に必要 |
 | Foundry project と Azure AI Search の接続 | `search_knowledge_base()` の既定接続に必要 |
+| `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse リアルタイムデータ検索に必要（未設定時は CSV フォールバック） |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Promo video 生成ツールが参照 |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（`casual-sitting` スタイル） |
+| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の HTTP callback に必要 |
 
 ## 5. 認証モデル
@@ -104,6 +113,12 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 ## 6. 現在の実装メモ
 
 - `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
-- APIM は Azure 側に作られ、`scripts/postprovision.py` で AI Gateway 接続の作成とトークン制限ポリシーの適用が自動実行されます。
+- Agent1 は Fabric Lakehouse SQL endpoint に pyodbc + Azure AD トークン認証で接続します。`FABRIC_SQL_ENDPOINT` 未設定時は CSV → ハードコードデータにフォールバック。
+- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。Photo Avatar 動画生成は `casual-sitting` スタイルで MP4/H.264 出力、ソフト字幕埋め込みに対応。
+- Agent5 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
+- Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
+- APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。また Voice Agent の作成も行います。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
+- Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
+- 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。

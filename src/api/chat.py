@@ -101,12 +101,13 @@ _TOOL_EVENT_HINTS: dict[str, list[str]] = {
     "data-search-agent": ["search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
     "regulation-check-agent": ["search_knowledge_base", "check_ng_expressions", "check_travel_law_compliance"],
+    "plan-revision-agent": [],
     "brochure-gen-agent": [
         "generate_hero_image",
         "generate_banner_image",
         "analyze_existing_brochure",
-        "generate_promo_video",
     ],
+    "video-gen-agent": ["generate_promo_video"],
 }
 
 
@@ -378,24 +379,6 @@ def _extract_plan_title(plan_markdown: str) -> str:
     return "旅行マーケティング企画書"
 
 
-def _extract_corrected_plan(regulation_output: str) -> str | None:
-    """Agent3 の出力から修正済み企画書セクションを抽出する。"""
-    markers = [
-        r"##\s*(?:修正済み|修正を反映した).*?企画書",
-        r"##\s*4\.\s*修正",
-        r"---\s*\n\s*#\s+",
-    ]
-    for pattern in markers:
-        match = re.search(pattern, regulation_output)
-        if match:
-            return regulation_output[match.start() :]
-    # マーカーが見つからない場合は最後の "# " 見出し以降を返す
-    last_heading = regulation_output.rfind("\n# ")
-    if last_heading > len(regulation_output) // 2:
-        return regulation_output[last_heading + 1 :]
-    return None
-
-
 async def _build_brochure_fallback_outcome(
     events: list[str],
     source_text: str,
@@ -637,7 +620,9 @@ async def _execute_agent(
         create_brochure_gen_agent,
         create_data_search_agent,
         create_marketing_plan_agent,
+        create_plan_revision_agent,
         create_regulation_check_agent,
+        create_video_gen_agent,
     )
 
     # OpenTelemetry スパン（計測用）
@@ -668,7 +653,9 @@ async def _execute_agent(
         "data-search-agent": (create_data_search_agent, 1),
         "marketing-plan-agent": (create_marketing_plan_agent, 2),
         "regulation-check-agent": (create_regulation_check_agent, 4),
+        "plan-revision-agent": (create_plan_revision_agent, 4),
         "brochure-gen-agent": (create_brochure_gen_agent, 5),
+        "video-gen-agent": (create_video_gen_agent, 5),
     }
     create_fn, default_step = agent_map.get(agent_name, (create_marketing_plan_agent, 2))
     step = agent_step or default_step
@@ -1264,7 +1251,7 @@ async def _mock_post_approval_events(conversation_id: str):
         {
             "tool": "generate_promo_video",
             "status": "completed",
-            "agent": "brochure-gen-agent",
+            "agent": "video-gen-agent",
         },
     )
     await asyncio.sleep(0.2)
@@ -1272,7 +1259,7 @@ async def _mock_post_approval_events(conversation_id: str):
     yield format_sse(
         SSEEventType.TEXT,
         {
-            "agent": "brochure-gen-agent",
+            "agent": "video-gen-agent",
             "content": "🎬 販促動画を生成中です（ジョブID: promo-mock-12345）。完了まで数分かかります。",
             "content_type": "text",
         },
@@ -1284,7 +1271,7 @@ async def _mock_post_approval_events(conversation_id: str):
         SSEEventType.TEXT,
         {
             "content": "https://example.com/mock-promo-video.mp4",
-            "agent": "brochure-gen-agent",
+            "agent": "video-gen-agent",
             "content_type": "video",
         },
     )
@@ -1472,6 +1459,19 @@ def _get_reference_brochure_path() -> str | None:
     return None
 
 
+def _extract_plan_summary(plan_text: str) -> str:
+    """企画書から100〜200文字のサマリを抽出する。"""
+    lines = plan_text.strip().split("\n")
+    summary_parts = []
+    for line in lines[:20]:
+        line = line.strip().lstrip("#").strip()
+        if line and not line.startswith("|") and not line.startswith("-"):
+            summary_parts.append(line)
+        if len("".join(summary_parts)) > 200:
+            break
+    return "".join(summary_parts)[:200] if summary_parts else plan_text[:200]
+
+
 async def _post_approval_events(user_response: str, conversation_id: str):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
     settings = get_settings()
@@ -1556,8 +1556,27 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     total_tool_calls += regulation_outcome["tool_calls"]
     total_tokens_sum += regulation_outcome.get("total_tokens", 0)
 
-    # Agent3 の出力から修正済み企画書を抽出。見つからなければ元の企画書を使用
-    brochure_input = _extract_corrected_plan(regulation_outcome["text"]) or context["plan_markdown"]
+    # Agent3b: 規制チェック結果を反映した修正版企画書を生成
+    revision_input = (
+        f"## 元の企画書\n\n{context['plan_markdown']}\n\n"
+        f"## 規制チェック結果\n\n{regulation_outcome['text']}"
+    )
+    revision_outcome = await _execute_agent(
+        agent_name="plan-revision-agent",
+        agent_step=4,
+        user_input=revision_input,
+        conversation_id=conversation_id,
+        model_settings=context.get("model_settings"),
+    )
+    for event in revision_outcome["events"]:
+        yield event
+    if not revision_outcome["success"]:
+        return
+    total_tool_calls += revision_outcome["tool_calls"]
+    total_tokens_sum += revision_outcome.get("total_tokens", 0)
+
+    # Agent4 への入力は修正版企画書
+    brochure_input = revision_outcome["text"]
 
     # 旅行先を入力に明示（画像生成の精度向上）— 先行生成で抽出済みの destination_text を再利用
     if destination_text:
@@ -1586,8 +1605,24 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     total_tool_calls += brochure_outcome["tool_calls"]
     total_tokens_sum += brochure_outcome.get("total_tokens", 0)
 
-    # 販促動画のポーリング（Photo Avatar バッチジョブ）
-    from src.agents.brochure_gen import poll_video_job, pop_pending_video_job
+    # Agent5: 販促動画生成（Photo Avatar）
+    # 企画書サマリを渡して動画を生成
+    video_summary = _extract_plan_summary(brochure_input)
+    if video_summary:
+        video_outcome = await _execute_agent(
+            agent_name="video-gen-agent",
+            agent_step=5,
+            user_input=video_summary,
+            conversation_id=conversation_id,
+            model_settings=context.get("model_settings"),
+        )
+        for event in video_outcome["events"]:
+            yield event
+        total_tool_calls += video_outcome["tool_calls"]
+        total_tokens_sum += video_outcome.get("total_tokens", 0)
+
+    # Video polling
+    from src.agents.video_gen import poll_video_job, pop_pending_video_job
 
     video_job = pop_pending_video_job()
     if video_job and video_job.get("job_id"):
@@ -1595,7 +1630,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
             SSEEventType.TEXT,
             {
                 "content": "🎬 販促動画を生成中です...",
-                "agent": "brochure-gen-agent",
+                "agent": "video-gen-agent",
                 "content_type": "text",
             },
         )
@@ -1605,7 +1640,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
                 SSEEventType.TEXT,
                 {
                     "content": video_url,
-                    "agent": "brochure-gen-agent",
+                    "agent": "video-gen-agent",
                     "content_type": "video",
                 },
             )

@@ -207,19 +207,19 @@ class TestBrochureGenTools:
 
     def test_pop_pending_video_job_returns_and_clears(self):
         """pop_pending_video_job がジョブ情報を返しクリアする"""
-        import src.agents.brochure_gen as bg
+        import src.agents.video_gen as vg
 
-        bg._pending_video_job = {"job_id": "promo-123", "status": "submitted"}
-        result = bg.pop_pending_video_job()
+        vg._pending_video_job = {"job_id": "promo-123", "status": "submitted"}
+        result = vg.pop_pending_video_job()
         assert result == {"job_id": "promo-123", "status": "submitted"}
-        assert bg._pending_video_job is None
+        assert vg._pending_video_job is None
 
     def test_pop_pending_video_job_none(self):
         """ジョブがない場合は None を返す"""
-        import src.agents.brochure_gen as bg
+        import src.agents.video_gen as vg
 
-        bg._pending_video_job = None
-        result = bg.pop_pending_video_job()
+        vg._pending_video_job = None
+        result = vg.pop_pending_video_job()
         assert result is None
 
     def test_get_image_openai_client_no_endpoint(self, monkeypatch):
@@ -307,11 +307,11 @@ class TestBrochureGenTools:
     @pytest.mark.asyncio
     async def test_generate_promo_video_no_endpoint(self, monkeypatch):
         """SPEECH_SERVICE_ENDPOINT 未設定時に unavailable を返す"""
-        import src.agents.brochure_gen as bg
+        import src.agents.video_gen as vg
 
         monkeypatch.delenv("SPEECH_SERVICE_ENDPOINT", raising=False)
         monkeypatch.delenv("SPEECH_SERVICE_REGION", raising=False)
-        result = await bg.generate_promo_video("テストサマリ", "concierge")
+        result = await vg.generate_promo_video("テストサマリ", "concierge")
         parsed = json.loads(result)
         assert parsed["status"] == "unavailable"
 
@@ -340,7 +340,7 @@ class TestBrochureGenTools:
         assert agent is mock_agent
         call_kwargs = mock_client.as_agent.call_args.kwargs
         assert call_kwargs["name"] == "brochure-gen-agent"
-        assert len(call_kwargs["tools"]) == 4
+        assert len(call_kwargs["tools"]) == 3
 
     def test_create_brochure_gen_agent_with_model_settings(self, monkeypatch):
         """model_settings が agent_kwargs に反映されること"""

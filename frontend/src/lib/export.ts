@@ -54,7 +54,8 @@ function downloadDataUrl(dataUrl: string, filename: string) {
 
 /** 企画書を Markdown ファイルとしてダウンロード */
 export function exportPlanMarkdown(contents: TextContent[]) {
-  const plan = contents.find(c => c.agent === 'marketing-plan-agent')
+  const revised = contents.find(c => c.agent === 'plan-revision-agent')
+  const plan = revised || contents.find(c => c.agent === 'marketing-plan-agent')
   if (!plan) return
   downloadBlob(plan.content, 'marketing-plan.md', 'text/markdown;charset=utf-8')
 }
@@ -83,6 +84,7 @@ export function exportAllAsJson(
       exported_at: new Date().toISOString(),
     },
     plan: contents.find(c => c.agent === 'marketing-plan-agent')?.content || null,
+    revised_plan: contents.find(c => c.agent === 'plan-revision-agent')?.content || null,
     regulation_check: contents.find(c => c.agent === 'regulation-check-agent')?.content || null,
     brochure_html: contents.find(c => c.agent === 'brochure-gen-agent' && c.content_type === 'html')?.content || null,
     analysis: contents.find(c => c.agent === 'data-search-agent')?.content || null,

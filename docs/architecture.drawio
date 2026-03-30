@@ -1,0 +1,191 @@
+<mxfile host="app.diagrams.net" agent="Copilot">
+  <diagram name="Travel Marketing AI - Azure Architecture" id="arch-1">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- ===== ZONE BOXES ===== -->
+
+        <mxCell id="z1" value="Users" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="130" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="z2" value="Edge / Security" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="170" y="20" width="170" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="z3" value="Compute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="360" y="20" width="160" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="z4" value="AI / Agents" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="540" y="20" width="390" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="z5" value="Data" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="950" y="20" width="330" height="400" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="z6" value="Infrastructure" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;verticalAlign=top;fontStyle=1;fontSize=13;arcSize=6;" vertex="1" parent="1">
+          <mxGeometry x="20" y="450" width="1260" height="240" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== USER ZONE ===== -->
+
+        <mxCell id="i-browser" value="Browser&lt;br&gt;React + Vite" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="35" y="120" width="100" height="50" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-voice" value="Voice Live&lt;br&gt;WebSocket" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="35" y="280" width="100" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== EDGE ZONE ===== -->
+
+        <mxCell id="i-apim" value="APIM&lt;br&gt;AI Gateway" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/integration/API_Management_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="231" y="100" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-safety" value="Content Safety&lt;br&gt;Prompt Shield" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Content_Safety.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="231" y="270" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== COMPUTE ZONE ===== -->
+
+        <mxCell id="i-ca" value="Container App&lt;br&gt;FastAPI + React" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/containers/App_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="416" y="120" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== AI ZONE ===== -->
+
+        <mxCell id="i-foundry" value="Microsoft Foundry" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Cognitive_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="711" y="55" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-agents" value="&lt;b&gt;Sequential Pipeline&lt;/b&gt;&lt;br&gt;&lt;br&gt;1. Data Search&lt;br&gt;2. Marketing Plan&lt;br&gt;[ Approval ]&lt;br&gt;3. Regulation Check&lt;br&gt;4. Brochure Gen&lt;br&gt;5. Quality Review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3e5f5;strokeColor=#9673a6;fontSize=10;align=left;verticalAlign=middle;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="555" y="120" width="175" height="270" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-speech" value="Speech Service&lt;br&gt;Photo Avatar" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/ai_machine_learning/Speech_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="810" y="130" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-models" value="gpt-5.4-mini&lt;br&gt;GPT Image 1.5" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;align=center;verticalAlign=middle;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="790" y="260" width="115" height="45" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== DATA ZONE ===== -->
+
+        <mxCell id="i-fabric" value="Microsoft Fabric&lt;br&gt;Lakehouse" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;size=15;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;align=center;" vertex="1" parent="1">
+          <mxGeometry x="1005" y="80" width="150" height="55" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-cosmos" value="Cosmos DB&lt;br&gt;Conversations" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/databases/Azure_Cosmos_DB.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1056" y="200" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-search" value="AI Search&lt;br&gt;Foundry IQ" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/app_services/Search_Services.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1056" y="320" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== INFRASTRUCTURE ZONE ===== -->
+
+        <mxCell id="i-vnet" value="VNet" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/networking/Virtual_Networks.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="55" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-pe" value="Private&lt;br&gt;Endpoint" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/networking/Private_Endpoint.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="210" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-vault" value="Key Vault" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/security/Key_Vaults.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="365" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-acr" value="ACR" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/containers/Container_Registries.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="520" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-insights" value="App Insights" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/devops/Application_Insights.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="675" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-logs" value="Log Analytics" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/analytics/Log_Analytics_Workspaces.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="830" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-logic" value="Logic Apps&lt;br&gt;Approval" style="image;aspect=fixed;html=1;points=[];align=center;image=img/lib/azure2/integration/Logic_Apps.svg;labelPosition=center;verticalLabelPosition=bottom;verticalAlign=top;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="985" y="510" width="48" height="48" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="i-gh" value="GitHub Actions&lt;br&gt;CI/CD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#24292e;strokeColor=#24292e;fontColor=#FFFFFF;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1130" y="518" width="105" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== ARROWS (Data Flow) ===== -->
+
+        <!-- Browser -> APIM -->
+        <mxCell id="a1" value="HTTPS" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#333333;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="i-browser" target="i-apim" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Voice -> Container App -->
+        <mxCell id="a2" value="WebSocket" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#6c8ebf;fontSize=9;dashed=1;" edge="1" source="i-voice" target="i-ca" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- APIM -> Container App -->
+        <mxCell id="a3" value="" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#333333;fontSize=9;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="i-apim" target="i-ca" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Container App <-> Content Safety -->
+        <mxCell id="a4" value="Safety Check" style="endArrow=blockThin;startArrow=blockThin;endFill=1;startFill=1;html=1;rounded=1;strokeColor=#d79b00;fontSize=9;" edge="1" source="i-ca" target="i-safety" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Container App -> Agents (SSE) -->
+        <mxCell id="a5" value="SSE" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#333333;fontSize=9;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.3;entryDx=0;entryDy=0;" edge="1" source="i-ca" target="i-agents" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Agents -> Fabric -->
+        <mxCell id="a6" value="Data Query" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#9673a6;fontSize=9;exitX=1;exitY=0.2;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="i-agents" target="i-fabric" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Agents -> AI Search -->
+        <mxCell id="a7" value="Knowledge" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#9673a6;fontSize=9;exitX=1;exitY=0.8;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="i-agents" target="i-search" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Container App -> Cosmos DB (routed below zones) -->
+        <mxCell id="a8" value="History" style="endArrow=blockThin;endFill=1;html=1;rounded=0;strokeColor=#82b366;fontSize=9;edgeStyle=orthogonalEdgeStyle;" edge="1" source="i-ca" target="i-cosmos" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="440" y="438"/>
+              <mxPoint x="1080" y="438"/>
+            </Array>
+          </mxGeometry>
+        </mxCell>
+
+        <!-- Key Vault -> Container App (secrets) -->
+        <mxCell id="a9" value="Secrets" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#999999;dashed=1;fontSize=9;" edge="1" source="i-vault" target="i-ca" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- Container App -> Logic Apps (approval) -->
+        <mxCell id="a10" value="Approval" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#999999;dashed=1;fontSize=9;" edge="1" source="i-ca" target="i-logic" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ACR -> Container App (deploy) -->
+        <mxCell id="a11" value="Deploy" style="endArrow=blockThin;endFill=1;html=1;rounded=1;strokeColor=#999999;dashed=1;fontSize=9;" edge="1" source="i-acr" target="i-ca" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

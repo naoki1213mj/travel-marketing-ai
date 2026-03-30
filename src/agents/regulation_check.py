@@ -271,8 +271,8 @@ INSTRUCTIONS = """\
 
 ## あなたの役割
 提出された企画書を受け取り、日本の旅行業関連法令・規制に適合しているかを
-徹底的にチェックします。違反があれば修正提案を行い、修正済みの企画書を出力します。
-あなたの出力は次の販促物生成工程の基盤になるため、正確性が極めて重要です。
+徹底的にチェックします。違反があれば具体的な修正提案を行います。
+あなたの出力は後続の修正エージェントに渡されるため、正確性が極めて重要です。
 
 ## 入力
 ユーザーが承認した企画書（Markdown）
@@ -285,15 +285,15 @@ INSTRUCTIONS = """\
 5. **ナレッジベース検索**: Foundry IQ で旅行業界の規制・ガイドラインを検索
 6. **外部安全情報**: 目的地の外務省危険情報・気象警報
 
-## 重要: 修正済み企画書は完全に出力すること
-修正を反映した企画書は、**省略せずに全セクション（タイトル〜KPI まで）を完全に出力**してください。
-「以下省略」「同上」等の省略は禁止です。
+## 重要: チェック結果のみ出力すること
+修正済みの企画書は出力しないでください（後続の修正エージェントが担当します）。
 
 ## 出力フォーマット（Markdown）
 1. チェック結果一覧テーブル（✅ 適合 / ⚠️ 要修正 / ❌ 違反）
 2. 違反・要修正箇所の具体的な指摘
 3. 修正提案（元の表現 → 修正案）
-4. **修正を反映した完全な企画書**（次の販促物生成工程がそのまま使えるように）
+
+修正済み企画書は出力しないでください（後続の修正エージェントが担当します）。
 
 ## ツール使用ルール
 - `check_ng_expressions` と `check_travel_law_compliance` を**必ず**使用すること
@@ -340,8 +340,7 @@ def create_regulation_check_agent(model_settings: dict | None = None):
         "instructions": INSTRUCTIONS,
         "tools": agent_tools,
     }
-    # Agent3 は修正済み企画書全文を出力するため、十分なトークン数を確保
-    default_opts: dict = {"max_output_tokens": 16384}
+    default_opts: dict = {}
     if model_settings:
         if "temperature" in model_settings:
             default_opts["temperature"] = model_settings["temperature"]
@@ -349,5 +348,6 @@ def create_regulation_check_agent(model_settings: dict | None = None):
             default_opts["max_output_tokens"] = model_settings["max_tokens"]
         if "top_p" in model_settings:
             default_opts["top_p"] = model_settings["top_p"]
-    agent_kwargs["default_options"] = default_opts
+    if default_opts:
+        agent_kwargs["default_options"] = default_opts
     return client.as_agent(**agent_kwargs)

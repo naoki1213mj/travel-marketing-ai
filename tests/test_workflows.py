@@ -80,17 +80,23 @@ class TestAgentCreation:
 
         assert callable(create_regulation_check_agent)
 
+    def test_plan_revision_agent_importable(self):
+        from src.agents.plan_revision import create_plan_revision_agent
+
+        assert callable(create_plan_revision_agent)
+
     def test_brochure_gen_agent_importable(self):
         from src.agents.brochure_gen import create_brochure_gen_agent
 
         assert callable(create_brochure_gen_agent)
 
     def test_agents_init_exports_all_four(self):
-        """agents/__init__.py が 4 エージェントをすべて export していること"""
+        """agents/__init__.py が全エージェントをすべて export していること"""
         from src.agents import (
             create_brochure_gen_agent,
             create_data_search_agent,
             create_marketing_plan_agent,
+            create_plan_revision_agent,
             create_regulation_check_agent,
         )
 
@@ -100,6 +106,7 @@ class TestAgentCreation:
                 create_data_search_agent,
                 create_marketing_plan_agent,
                 create_regulation_check_agent,
+                create_plan_revision_agent,
                 create_brochure_gen_agent,
             ]
         )

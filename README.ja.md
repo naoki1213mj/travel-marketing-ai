@@ -6,20 +6,30 @@
 
 ## 現在の実装範囲
 
-- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴、リプレイ、多言語 UI、音声入力 UI
+- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）
 - FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信
-- 主処理の 4 エージェント: データ検索、施策生成、規制チェック、販促物生成
+- 主処理の 4 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、販促物生成（顧客向け HTML + Photo Avatar 動画）
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
-- Microsoft Foundry、Content Safety、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar との連携
+- Fabric Lakehouse 連携: pyodbc + Azure AD トークン認証によるリアルタイム売上・レビューデータ検索
+- Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
+- Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
+- Code Interpreter の自動検出とグレースフルフォールバック
+- Microsoft Foundry、Content Safety、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar、Fabric Lakehouse との連携
 - `azd` + Bicep による Azure Container Apps、ACR、APIM、Key Vault、Cosmos DB、VNet、Log Analytics、Application Insights の構築
 
 ## 実装上の現在地
 
 - Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。
-- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、AI Gateway 接続の作成とトークン制限ポリシーの適用を行います。
+- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシーの適用を行います。
 - Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
 - パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）です。
+- Agent1 は Fabric Lakehouse に pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で接続します。Fabric SQL endpoint が利用できない場合は CSV フォールバックを使います。
+- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。Photo Avatar 動画は `casual-sitting` スタイルで MP4/H.264 出力です。
+- Agent5（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
+- Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
 - フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
+- Voice Live API は MSAL.js による Entra アプリ登録認証です。`VoiceInput` コンポーネントは Voice Live + Web Speech API のデュアルモードで動作します。
+- 会話履歴は Cosmos DB から `restoreConversation()` で復元され、再推論は行いません。
 - ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。
 
 Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。
@@ -33,7 +43,8 @@ flowchart LR
     api --> shield[Prompt Shield]
     shield --> flow[SequentialBuilder workflow]
     flow --> a1[data-search-agent]
-    a1 --> fabric[Fabric Lakehouse または CSV フォールバック]
+    a1 --> fabric[Fabric Lakehouse SQL]
+    a1 -.-> csv[CSV フォールバック]
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
     flow --> approval{approval_request}
@@ -107,10 +118,12 @@ azd up
 | `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini`。フロントエンドのモデルセレクターでは `gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` も選択可 |
 | `ENVIRONMENT` | 任意 | `development`、`staging`、`production` |
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存。未設定時はインメモリ |
-| `FABRIC_SQL_ENDPOINT` | 任意 | Fabric Lakehouse SQL endpoint |
+| `FABRIC_SQL_ENDPOINT` | 推奨 | Fabric Lakehouse SQL endpoint（リアルタイムデータ検索、未設定時は CSV フォールバック） |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | 任意 | PDF 解析用 |
-| `SPEECH_SERVICE_ENDPOINT` | 任意 | Speech / Photo Avatar 用 |
+| `SPEECH_SERVICE_ENDPOINT` | 任意 | Speech / Photo Avatar 動画生成用 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
+| `VOICE_SPA_CLIENT_ID` | 任意 | Voice Live の MSAL.js 認証用 Entra アプリ登録クライアント ID |
+| `AZURE_TENANT_ID` | 任意 | Voice Live 認証用 Entra テナント ID |
 | `LOGIC_APP_CALLBACK_URL` | 任意 | 承認継続後の Logic Apps HTTP トリガー |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | 任意 | Application Insights の接続文字列 |
 

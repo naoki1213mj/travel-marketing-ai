@@ -30,8 +30,10 @@
 | Azure AI Search の作成 | Foundry IQ / `search_knowledge_base()` の実データ検索 |
 | `regulations-index` の投入 | 規制ドキュメント検索 |
 | Foundry project への Azure AI Search 接続追加 | `connections.get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
+| `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse リアルタイムデータ検索（未設定時は CSV フォールバック） |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Promo video 生成で使用 |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（`casual-sitting` スタイル） |
+| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
 
 ## 3. 認証と権限
@@ -92,6 +94,7 @@ azd up
 
 1. **AI Gateway 接続の作成**: Foundry project に `travel-ai-gateway` という名前の APIM 接続を作成し、`ProjectManagedIdentity` 認証を設定
 2. **トークン制限ポリシーの適用**: APIM の foundry-* API に `llm-token-limit`（80,000 tokens/min）と `llm-emit-token-metric` ポリシーを適用
+3. **Voice Agent の作成**: Foundry に Voice Live 対応のプロンプトエージェントを作成（Entra アプリ登録の設定を含む）
 
 `AZURE_APIM_NAME` が未設定の場合、APIM 関連の設定はスキップされます。スクリプトは冪等で、複数回実行しても安全です。
 
@@ -154,10 +157,48 @@ az containerapp update \
     CONTENT_UNDERSTANDING_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_REGION=eastus2 \
-    LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url>
+    LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
+    FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
 ```
 
-  必要に応じて `FABRIC_SQL_ENDPOINT` も追加してください。Fabric Lakehouse / SQL endpoint 自体は引き続き別途構成が必要です。
+### 4.8 Fabric Lakehouse の設定
+
+Agent1 が Fabric Lakehouse にリアルタイム接続するには以下が必要です:
+
+1. Fabric Lakehouse に売上テーブル（`sales_history`）とレビューテーブル（`customer_reviews`）を作成
+2. SQL endpoint を取得（Fabric ポータル → Lakehouse → SQL analytics endpoint）
+3. Container App の Managed Identity に Fabric SQL への読み取り権限を付与
+4. `FABRIC_SQL_ENDPOINT` 環境変数を設定
+
+```bash
+az containerapp update \
+  --name <container-app-name> \
+  --resource-group <resource-group> \
+  --set-env-vars FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
+```
+
+接続は pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で行います。`FABRIC_SQL_ENDPOINT` 未設定時は CSV ファイル (`data/sales_history.csv`, `data/customer_reviews.csv`) にフォールバックします。
+
+### 4.9 Voice Live の設定（Entra アプリ登録）
+
+Voice Live API のフロントエンド認証には Entra アプリ登録が必要です:
+
+1. Azure Portal → Entra ID → App registrations → New registration
+2. Redirect URI に `http://localhost:5173`（開発）と `https://<container-app-fqdn>`（本番）を SPA として追加
+3. API permissions に `https://cognitiveservices.azure.com/user_impersonation` を追加
+
+環境変数:
+
+```bash
+az containerapp update \
+  --name <container-app-name> \
+  --resource-group <resource-group> \
+  --set-env-vars \
+    VOICE_SPA_CLIENT_ID=<entra-app-client-id> \
+    AZURE_TENANT_ID=<entra-tenant-id>
+```
+
+`scripts/postprovision.py` が Foundry に Voice Live 対応のプロンプトエージェントを自動作成します。
 
 ## 5. 検証
 
@@ -181,12 +222,33 @@ curl https://<container-app-fqdn>/api/ready
 
 ### 音声 / 動画疎通
 
-- `SPEECH_SERVICE_ENDPOINT`
-- `SPEECH_SERVICE_REGION`
+- `SPEECH_SERVICE_ENDPOINT` が設定済み
+- `SPEECH_SERVICE_REGION` が設定済み
+- Photo Avatar 動画生成が動作する（`casual-sitting` スタイル、MP4 出力）
+
+### Voice Live 疎通
+
+- `VOICE_SPA_CLIENT_ID` が設定済み
+- `AZURE_TENANT_ID` が設定済み
+- `/api/voice-config` が MSAL 設定を返す
+- フロントエンドの VoiceInput コンポーネントで音声入力が動作する
+- Voice Live 利用不可時に Web Speech API にフォールバックする
+
+### Fabric Lakehouse 疎通
+
+- `FABRIC_SQL_ENDPOINT` が設定済み
+- Agent1 の `search_sales_history()` が Fabric SQL クエリ結果を返す（CSV フォールバックではない）
+- Managed Identity に Fabric SQL 読み取り権限が付与済み
 
 ## 6. 実装差分として知っておくこと
 
-- APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で AI Gateway 接続とポリシーが自動構成される
+- APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）とポリシーが自動構成される
+- Agent1 は Fabric Lakehouse SQL endpoint にリアルタイム接続し、CSV は フォールバック専用
+- Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない。Photo Avatar 動画は `casual-sitting` スタイルで生成
+- Agent5 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
+- Code Interpreter は自動検出でグレースフルフォールバック
+- Voice Live API は MSAL.js + Entra アプリ登録で認証。Web Speech API への自動フォールバックあり
+- 会話履歴は Cosmos DB から `restoreConversation()` で再推論なしに復元
 - 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行する
 - パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）
 - 品質レビューは主 workflow participant ではなく、主処理後の追加 `text` イベント

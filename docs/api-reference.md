@@ -25,8 +25,10 @@
 | `POST` | `/api/chat` | メインチャット SSE |
 | `POST` | `/api/chat/{thread_id}/approve` | 承認継続または修正継続 |
 | `GET` | `/api/conversations` | 会話一覧取得 |
-| `GET` | `/api/conversations/{conversation_id}` | 会話詳細取得 |
+| `GET` | `/api/conversations/{conversation_id}` | 会話詳細取得（履歴復元用） |
 | `GET` | `/api/replay/{conversation_id}` | 保存済み SSE リプレイ |
+| `GET` | `/api/voice-token` | Voice Live 用 AAD トークン取得 |
+| `GET` | `/api/voice-config` | Voice Live MSAL 設定取得 |
 
 ## ヘルスチェック
 
@@ -81,7 +83,7 @@
 |---|---|---|---|
 | `message` | `string` | 必須 | 1〜5000 文字 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `settings` | `object \| null` | 任意 | `model` でテキスト推論モデルを選択可能（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）。`temperature`、`max_tokens` も将来拡張用に受け付ける |
+| `settings` | `object \| null` | 任意 | `model` でテキスト推論モデルを選択可能（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）。フロントエンドのモデルセレクターから送信される。`temperature`、`max_tokens` も将来拡張用に受け付ける |
 
 ### 現行挙動
 
@@ -178,7 +180,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 
 ### `GET /api/conversations/{conversation_id}`
 
-会話ドキュメント全体を返します。
+会話ドキュメント全体を返します。フロントエンドの `restoreConversation()` はこのエンドポイントから保存済みイベントを取得し、再推論なしで会話状態を復元します。
 
 レスポンス例:
 
@@ -423,3 +425,53 @@ data: <json>
 |---|---|
 | `POST /api/chat` | 10 リクエスト / 分 |
 | `POST /api/chat/{thread_id}/approve` | 10 リクエスト / 分 |
+
+## Voice Live API
+
+### `GET /api/voice-token`
+
+Voice Live 接続用の AAD トークンと設定を返します。`SPEECH_SERVICE_ENDPOINT` が設定されている場合のみ有効です。
+
+レスポンス例:
+
+```json
+{
+  "token": "<aad-token>",
+  "endpoint": "https://<speech-endpoint>",
+  "resource_name": "<resource-name>",
+  "api_version": "2024-11-15"
+}
+```
+
+未設定時:
+
+```json
+{"error": "Speech service not configured"}
+```
+
+### `GET /api/voice-config`
+
+Voice Live の MSAL.js クライアント設定を返します。フロントエンドが MSAL.js で Entra 認証を行うために使用します。
+
+レスポンス例:
+
+```json
+{
+  "client_id": "<entra-app-client-id>",
+  "tenant_id": "<entra-tenant-id>",
+  "agent_name": "travel-marketing-agent",
+  "endpoint": "https://<speech-endpoint>"
+}
+```
+
+未設定時:
+
+```json
+{"error": "Voice Live not configured"}
+```
+
+フロントエンドの `VoiceInput` コンポーネントは以下のフローで動作します:
+1. `/api/voice-config` を呼び出して MSAL 設定を取得
+2. MSAL.js で `https://cognitiveservices.azure.com/user_impersonation` スコープのトークンを取得
+3. Voice Live WebSocket に接続
+4. Voice Live が利用不可の場合は Web Speech API にフォールバック

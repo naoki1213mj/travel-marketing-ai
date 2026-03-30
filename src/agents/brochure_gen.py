@@ -6,11 +6,9 @@ import asyncio
 import json
 import logging
 import threading
-import time
 import urllib.request
 from pathlib import Path
 
-import httpx
 from agent_framework import tool
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
@@ -157,83 +155,6 @@ def pop_pending_images(conversation_id: str) -> dict[str, str]:
         return images
 
 
-# --- Side-channel 動画ジョブストア ---
-# Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
-_video_lock = threading.Lock()
-_pending_video_job: dict[str, str] | None = None
-
-
-def pop_pending_video_job() -> dict[str, str] | None:
-    """保留中の動画生成ジョブ情報を取得してクリアする（スレッドセーフ）。"""
-    global _pending_video_job
-    with _video_lock:
-        job = _pending_video_job
-        _pending_video_job = None
-        return job
-
-
-async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
-    """Photo Avatar バッチジョブの完了をポーリングし、動画 URL を返す。
-
-    Args:
-        job_id: バッチ合成ジョブ ID
-        max_wait: 最大待機秒数（デフォルト 3 分）
-
-    Returns:
-        動画の URL（完了時）または None（タイムアウト/エラー）
-    """
-    settings = get_settings()
-    speech_endpoint = settings.get("speech_service_endpoint", "")
-    if not speech_endpoint:
-        return None
-
-    try:
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-    except (ValueError, OSError) as exc:
-        logger.warning("Photo Avatar ポーリング: トークン取得失敗: %s", exc)
-        return None
-
-    poll_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
-    headers = {"Authorization": f"Bearer {token.token}"}
-
-    from src.http_client import get_http_client
-
-    client = get_http_client()
-
-    start = time.time()
-    while time.time() - start < max_wait:
-        try:
-            resp = await client.get(poll_url, headers=headers, timeout=10)
-            resp.raise_for_status()
-            data = resp.json()
-            status = data.get("status", "")
-
-            if status == "Succeeded":
-                outputs = data.get("outputs", {})
-                video_url = outputs.get("result", "")
-                if video_url:
-                    logger.info("Photo Avatar 動画生成完了: %s", video_url)
-                    return video_url
-                logger.warning("Photo Avatar: Succeeded だが result URL なし")
-                return None
-
-            if status in ("Failed", "Cancelled"):
-                logger.warning("Photo Avatar ジョブ失敗: status=%s", status)
-                return None
-
-            logger.debug("Photo Avatar ポーリング中: status=%s", status)
-        except httpx.HTTPStatusError as exc:
-            logger.warning("Photo Avatar ポーリング HTTP エラー: %s", exc)
-        except (httpx.RequestError, json.JSONDecodeError) as exc:
-            logger.warning("Photo Avatar ポーリングエラー: %s", exc)
-
-        await asyncio.sleep(10)
-
-    logger.warning("Photo Avatar ポーリングタイムアウト (job_id=%s)", job_id)
-    return None
-
-
 # --- ツール定義 ---
 
 
@@ -370,112 +291,6 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
         return f"❌ PDF 解析エラー: {exc}"
 
 
-@tool
-async def generate_promo_video(
-    summary_text: str,
-    avatar_style: str = "concierge",
-) -> str:
-    """企画書サマリから Photo Avatar + Voice Live で販促紹介動画を生成する。
-
-    Azure AI Speech Service の Photo Avatar API を使用してバッチ合成を行い、
-    アバターが企画書サマリを読み上げる動画を生成する。
-
-    Args:
-        summary_text: 動画で読み上げるテキスト（企画書サマリ）
-        avatar_style: アバタースタイル（concierge/guide/presenter）
-    """
-    settings = get_settings()
-    speech_endpoint = settings["speech_service_endpoint"]
-    speech_region = settings["speech_service_region"]
-
-    if not speech_endpoint or not speech_region:
-        return json.dumps(
-            {
-                "status": "unavailable",
-                "message": (
-                    "⚠️ 動画生成は現在利用できません。"
-                    "SPEECH_SERVICE_ENDPOINT と SPEECH_SERVICE_REGION 環境変数を設定してください。"
-                ),
-            },
-            ensure_ascii=False,
-        )
-
-    # アバタースタイルに応じた Photo Avatar キャラクター ID のマッピング
-    avatar_characters: dict[str, str] = {
-        "concierge": "lisa",
-        "guide": "harry",
-        "presenter": "lisa",
-    }
-    character = avatar_characters.get(avatar_style, "lisa")
-
-    try:
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-
-        # バッチ合成ジョブを作成する
-        job_id = f"promo-{int(time.time())}"
-        batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
-        payload = json.dumps(
-            {
-                "inputKind": "PlainText",
-                "inputs": [{"content": summary_text}],
-                "avatarConfig": {
-                    "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": "casual-sitting",
-                    "videoFormat": "mp4",
-                    "videoCodec": "h264",
-                    "subtitleType": "soft_embedded",
-                    "backgroundColor": "#FFFFFFFF",
-                },
-                "synthesisConfig": {"voice": "ja-JP-NanamiNeural"},
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
-
-        request = urllib.request.Request(
-            batch_url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {token.token}",
-                "Content-Type": "application/json",
-            },
-            method="PUT",
-        )
-
-        with urllib.request.urlopen(request, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
-
-        # Side-channel にジョブ情報を保存（スレッドセーフ）
-        global _pending_video_job
-        actual_job_id = result.get("id", job_id)
-        with _video_lock:
-            _pending_video_job = {"job_id": actual_job_id, "status": "submitted"}
-
-        return json.dumps(
-            {
-                "status": "submitted",
-                "job_id": actual_job_id,
-                "message": (
-                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_style}"
-                ),
-            },
-            ensure_ascii=False,
-        )
-
-    except urllib.error.URLError as exc:
-        logger.exception("Photo Avatar API 呼び出しに失敗しました")
-        return json.dumps(
-            {"status": "error", "message": f"❌ 動画生成 API エラー: {exc}"},
-            ensure_ascii=False,
-        )
-    except Exception as exc:
-        logger.exception("動画生成中に予期しないエラーが発生しました")
-        return json.dumps(
-            {"status": "error", "message": f"❌ 動画生成エラー: {exc}"},
-            ensure_ascii=False,
-        )
-
-
 INSTRUCTIONS = """\
 あなたは旅行マーケティング AI パイプラインの **販促物生成エージェント** です。
 
@@ -484,7 +299,7 @@ INSTRUCTIONS = """\
 2. **施策立案**: マーケティング企画書の作成（完了済み）
 3. **承認ステップ**: ユーザーが企画書を承認（完了済み）
 4. **規制チェック**: 規制チェック・修正済み企画書の出力（完了済み）
-5. **販促物生成（あなた）**: 最終的な販促物（HTML ブローシャ・画像・動画）を生成
+5. **販促物生成（あなた）**: 最終的な販促物（HTML ブローシャ・画像）を生成
 
 ## あなたの役割
 規制チェック済みの企画書を受け取り、プロフェッショナルな販促物一式を生成します。
@@ -497,7 +312,6 @@ INSTRUCTIONS = """\
 1. **HTML ブローシャ**: Tailwind CSS を使用したレスポンシブ HTML
 2. **ヒーロー画像**: `generate_hero_image` でメインビジュアルを生成（1536x1024px）
 3. **SNS バナー**: `generate_banner_image` で Instagram/Twitter 用バナーを生成
-4. **販促動画**: `generate_promo_video` で企画書サマリの紹介動画を生成（SPEECH_SERVICE_ENDPOINT 設定時のみ）
 
 ## HTML ブローシャのルール
 - ```html で囲んで出力すること
@@ -531,13 +345,7 @@ INSTRUCTIONS = """\
 ## ツール使用ルール
 - `generate_hero_image`: 目的地のメインビジュアルを生成（英語プロンプト推奨）
 - `generate_banner_image`: SNS 向けバナーを生成（platform パラメータで対応）
-- `generate_promo_video`: 企画書のサマリテキスト（100〜200文字）で紹介動画を生成。必ず最後に呼び出すこと
 - 入力に [参考パンフレット: ...] が含まれていれば `analyze_existing_brochure` を呼び出す
-
-## 販促紹介動画
-ブローシャと画像の生成が完了したら、**必ず** `generate_promo_video` ツールを呼び出してください。
-企画書のキャッチコピーとプラン概要を 100〜200 文字に要約したテキストを `summary_text` に渡します。
-ツールがエラーを返した場合のみスキップしてください（環境変数の有無はツール内部で判断するため、あなたが判断する必要はありません）。
 
 ## 出力の注意事項
 - 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
@@ -560,7 +368,6 @@ def create_brochure_gen_agent(model_settings: dict | None = None):
         generate_hero_image,
         generate_banner_image,
         analyze_existing_brochure,
-        generate_promo_video,
     ]
 
     agent_kwargs: dict = {
