@@ -4,8 +4,8 @@
 
 import type { ModelSettings } from '../components/SettingsPanel'
 
-/** SSE タイムアウト（5 分） */
-const SSE_TIMEOUT_MS = 300_000
+/** SSE タイムアウト（10 分 — Agent3+Agent4 の画像生成を考慮） */
+const SSE_TIMEOUT_MS = 600_000
 
 export type SSEEventType =
   | 'agent_progress'

@@ -38,6 +38,9 @@ function App() {
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
+  const regulationContent = state.textContents.find(c => c.agent === 'regulation-check-agent')
+  // 規制チェック完了前は企画書を「確認中」として表示
+  const showFinalPlan = regulationContent || isCompleted
   const statusLabel = t(`status.${state.status}`)
 
   return (
@@ -183,7 +186,15 @@ function App() {
                 key: 'plan',
                 label: `📝 ${t('tab.plan')}`,
                 content: planContent ? (
-                  <MarkdownView content={planContent.content} />
+                  showFinalPlan ? (
+                    <MarkdownView content={regulationContent?.content || planContent.content} />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
+                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
+                      <p className="text-sm">{t('status.approval')}…</p>
+                      <p className="text-xs mt-1">{t('preview.unavailable')}</p>
+                    </div>
+                  )
                 ) : null,
               },
               { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
