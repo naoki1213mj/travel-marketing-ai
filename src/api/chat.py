@@ -93,6 +93,7 @@ class AgentExecutionOutcome(TypedDict):
     success: bool
     latency_seconds: float
     tool_calls: int
+    total_tokens: int
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
@@ -283,7 +284,7 @@ def _extract_code_interpreter_images(result: object) -> list[dict[str, str]]:
     except (AttributeError, TypeError) as exc:
         logger.debug("Code Interpreter 画像抽出で get_outputs() 失敗: %s", exc)
         return images
-    except Exception as exc:
+    except (AttributeError, TypeError) as exc:
         logger.debug("Code Interpreter 画像抽出で予期しないエラー: %s", exc)
         return images
 
@@ -871,7 +872,7 @@ async def _execute_agent(
             span.set_attribute("agent.tool_calls", tool_calls)
             span.set_attribute("agent.success", True)
             span.end()
-        except (RuntimeError, ValueError):
+        except RuntimeError, ValueError:
             pass
 
     if include_done:
@@ -920,7 +921,7 @@ async def _maybe_run_quality_review(review_input: str) -> list[str]:
     except (ImportError, ValueError, OSError) as exc:
         logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
         return []
-    except Exception:
+    except RuntimeError, TypeError:
         logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
         return []
 
@@ -1495,6 +1496,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         return
 
     total_tool_calls = 0
+    total_tokens_sum = 0
     approval_start = time.monotonic()
 
     yield format_sse(
@@ -1510,6 +1512,39 @@ async def _post_approval_events(user_response: str, conversation_id: str):
 
     regulation_input = context["plan_markdown"]
 
+    # 🚀 並列化: 規制チェック中にヒーロー画像を先行生成（Agent4 の画像生成を高速化）
+    hero_image_task = None
+    destination_text = None
+    # 旅行先を事前抽出（画像の先行生成 + Agent4 入力に使用）
+    dest_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", regulation_input)
+    if dest_match:
+        destination_text = dest_match.group(1).strip()
+    else:
+        for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
+            if place in regulation_input:
+                destination_text = place
+                break
+
+    if destination_text and settings["project_endpoint"]:
+        from src.agents.brochure_gen import set_current_conversation_id
+
+        set_current_conversation_id(conversation_id)
+
+        async def _pregenerate_hero():
+            from src.agents.brochure_gen import generate_hero_image
+
+            try:
+                await generate_hero_image(
+                    prompt=f"Beautiful travel destination scenery of {destination_text}",
+                    destination=destination_text,
+                    style="photorealistic",
+                )
+                logger.info("ヒーロー画像の先行生成完了: %s", destination_text)
+            except (ValueError, OSError, RuntimeError) as exc:
+                logger.warning("ヒーロー画像の先行生成に失敗（Agent4 で再生成）: %s", exc)
+
+        hero_image_task = asyncio.create_task(_pregenerate_hero())
+
     regulation_outcome = await _execute_agent(
         agent_name="regulation-check-agent",
         agent_step=4,
@@ -1522,20 +1557,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     if not regulation_outcome["success"]:
         return
     total_tool_calls += regulation_outcome["tool_calls"]
+    total_tokens_sum += regulation_outcome.get("total_tokens", 0)
 
     # Agent3 の出力から修正済み企画書を抽出。見つからなければ元の企画書を使用
     brochure_input = _extract_corrected_plan(regulation_outcome["text"]) or context["plan_markdown"]
 
-    # 旅行先を入力に明示（画像生成の精度向上）
-    destination_match = re.search(r"(?:旅行先|目的地|プラン名)[：:]\s*(.+?)[\n。]", brochure_input)
-    if destination_match:
-        destination_text = destination_match.group(1).strip()
-    else:
-        destination_text = None
-        for place in ["北海道", "沖縄", "京都", "東京", "九州", "東北", "四国", "北陸"]:
-            if place in brochure_input:
-                destination_text = place
-                break
+    # 旅行先を入力に明示（画像生成の精度向上）— 先行生成で抽出済みの destination_text を再利用
     if destination_text:
         brochure_input = f"[旅行先: {destination_text}]\n\n{brochure_input}"
 
@@ -1543,6 +1570,10 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     reference_pdf = _get_reference_brochure_path()
     if reference_pdf:
         brochure_input = f"[参考パンフレット: {reference_pdf}]\n\n{brochure_input}"
+
+    # 先行生成タスクの完了を待機（Agent4 開始前に画像が side-channel に入っている必要がある）
+    if hero_image_task:
+        await hero_image_task
 
     brochure_outcome = await _execute_agent(
         agent_name="brochure-gen-agent",
@@ -1556,6 +1587,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     if not brochure_outcome["success"]:
         return
     total_tool_calls += brochure_outcome["tool_calls"]
+    total_tokens_sum += brochure_outcome.get("total_tokens", 0)
 
     # 販促動画のポーリング（Photo Avatar バッチジョブ）
     from src.agents.brochure_gen import poll_video_job, pop_pending_video_job
@@ -1610,7 +1642,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
             "metrics": {
                 "latency_seconds": round(time.monotonic() - approval_start, 1),
                 "tool_calls": total_tool_calls,
-                "total_tokens": 0,
+                "total_tokens": total_tokens_sum,
             },
         },
     )
@@ -1648,7 +1680,7 @@ async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_
         logger.info("Logic Apps コールバック送信完了: conversation_id=%s", conversation_id)
     except (ValueError, OSError) as exc:
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）: %s", exc)
-    except Exception:
+    except RuntimeError, urllib.error.URLError:
         logger.warning("Logic Apps コールバック送信に失敗（非致命的）", exc_info=True)
 
 
@@ -1793,7 +1825,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                             )
             except (ImportError, ValueError, OSError) as exc:
                 logger.warning("Agent5 品質レビューの実行に失敗（スキップ）: %s", exc)
-            except Exception:
+            except RuntimeError, TypeError:
                 logger.warning("Agent5 品質レビューの実行に失敗（スキップ）", exc_info=True)
 
     return StreamingResponse(
@@ -1859,7 +1891,7 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
             )
         except (ValueError, OSError) as exc:
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
-        except Exception:
+        except RuntimeError, TypeError:
             logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
 
     return StreamingResponse(

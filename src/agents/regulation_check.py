@@ -7,7 +7,6 @@ import os
 import urllib.request
 
 from agent_framework import tool
-from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
@@ -311,15 +310,12 @@ INSTRUCTIONS = """\
 
 def create_regulation_check_agent(model_settings: dict | None = None):
     """レギュレーションチェックエージェントを作成する"""
-    settings = get_settings()
-    deployment = settings["model_name"]
+    from src.agent_client import get_responses_client
+
+    deployment = None
     if model_settings and model_settings.get("model"):
         deployment = model_settings["model"]
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
-        credential=DefaultAzureCredential(),
-        deployment_name=deployment,
-    )
+    client = get_responses_client(deployment)
 
     # Foundry IQ 検索パラメータを設定
     if model_settings:

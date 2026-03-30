@@ -53,6 +53,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """アプリケーション起動・終了時のライフサイクル管理"""
     _configure_observability()
     yield
+    # httpx クライアントのクリーンアップ
+    try:
+        from src.http_client import close_http_client
+
+        await close_http_client()
+    except ImportError, RuntimeError:
+        pass
 
 
 app = FastAPI(
@@ -83,6 +90,30 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 
 
 # --- ミドルウェア ---
+
+# API キー認証（API_KEY 環境変数が設定されている場合のみ有効化）
+_API_KEY = os.environ.get("API_KEY", "")
+_AUTH_EXEMPT_PATHS = {"/api/health", "/api/ready", "/", "/index.html"}
+
+
+@app.middleware("http")
+async def api_key_auth_middleware(request: Request, call_next):
+    """API_KEY が設定されている場合、x-api-key ヘッダーで認証する。
+
+    APIM から Container App への通信で x-api-key を付与し、
+    直接アクセスを拒否する。API_KEY 未設定時はスキップ（開発環境）。
+    """
+    if _API_KEY and request.url.path not in _AUTH_EXEMPT_PATHS:
+        # 静的ファイルは認証不要
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        provided_key = request.headers.get("x-api-key", "")
+        if provided_key != _API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"error": "Unauthorized — invalid or missing API key"},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")

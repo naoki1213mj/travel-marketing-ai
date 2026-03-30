@@ -8,7 +8,6 @@ import struct
 from pathlib import Path
 
 from agent_framework import tool
-from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel
 
@@ -421,15 +420,12 @@ def create_data_search_agent(model_settings: dict | None = None):
     - デフォルト: 有効（初回実行時に 404 が発生すると自動的に無効化）
     - 明示的に無効化: ENABLE_CODE_INTERPRETER=false
     """
-    settings = get_settings()
-    deployment = settings["model_name"]
+    from src.agent_client import get_responses_client
+
+    deployment = None
     if model_settings and model_settings.get("model"):
         deployment = model_settings["model"]
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
-        credential=DefaultAzureCredential(),
-        deployment_name=deployment,
-    )
+    client = get_responses_client(deployment)
 
     agent_tools: list = [search_sales_history, search_customer_reviews]
     instructions = INSTRUCTIONS

@@ -2,11 +2,6 @@
 
 import logging
 
-from agent_framework.azure import AzureOpenAIResponsesClient
-from azure.identity import DefaultAzureCredential
-
-from src.config import get_settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -55,15 +50,12 @@ INSTRUCTIONS = """\
 
 def create_marketing_plan_agent(model_settings: dict | None = None):
     """マーケ施策作成エージェントを作成する"""
-    settings = get_settings()
-    deployment = settings["model_name"]
+    from src.agent_client import get_responses_client
+
+    deployment = None
     if model_settings and model_settings.get("model"):
         deployment = model_settings["model"]
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
-        credential=DefaultAzureCredential(),
-        deployment_name=deployment,
-    )
+    client = get_responses_client(deployment)
 
     # Foundry 組み込み Web Search（Grounding with Bing Search）を使用
     # 別途 Bing リソースは不要 — Foundry プロジェクト経由で自動接続される

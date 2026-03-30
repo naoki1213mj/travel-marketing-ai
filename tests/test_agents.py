@@ -147,7 +147,7 @@ class TestBrochureGenTools:
         assert parsed["status"] == "generated"
         assert parsed["type"] == "hero"
         # side-channel に保存されていること
-        images = bg.pop_pending_images()
+        images = bg.pop_pending_images(bg._current_conversation_id)
         assert "hero" in images
         assert images["hero"].startswith("data:image/png;base64,")
 
@@ -190,17 +190,17 @@ class TestBrochureGenTools:
         """pop_pending_images が保存済み画像を返しクリアする"""
         import src.agents.brochure_gen as bg
 
-        bg._pending_images = {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}
-        result = bg.pop_pending_images()
+        bg._pending_images = {"test-conv": {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}}
+        result = bg.pop_pending_images("test-conv")
         assert result == {"hero": "data:image/png;base64,abc", "banner_instagram": "data:image/png;base64,def"}
-        assert bg._pending_images == {}
+        assert "test-conv" not in bg._pending_images
 
     def test_pop_pending_images_empty(self):
         """画像がない場合は空辞書を返す"""
         import src.agents.brochure_gen as bg
 
         bg._pending_images = {}
-        result = bg.pop_pending_images()
+        result = bg.pop_pending_images("nonexistent")
         assert result == {}
 
     def test_pop_pending_video_job_returns_and_clears(self):

@@ -10,8 +10,8 @@ import time
 import urllib.request
 from pathlib import Path
 
+import httpx
 from agent_framework import tool
-from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
 from src.config import get_settings
@@ -190,19 +190,23 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
     try:
         credential = DefaultAzureCredential()
         token = credential.get_token("https://cognitiveservices.azure.com/.default")
-    except (ValueError, OSError, Exception) as exc:
+    except (ValueError, OSError) as exc:
         logger.warning("Photo Avatar ポーリング: トークン取得失敗: %s", exc)
         return None
 
     poll_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
     headers = {"Authorization": f"Bearer {token.token}"}
 
+    from src.http_client import get_http_client
+
+    client = get_http_client()
+
     start = time.time()
     while time.time() - start < max_wait:
         try:
-            req = urllib.request.Request(poll_url, headers=headers, method="GET")
-            resp = await asyncio.to_thread(urllib.request.urlopen, req, timeout=10)
-            data = json.loads(resp.read().decode())
+            resp = await client.get(poll_url, headers=headers, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
             status = data.get("status", "")
 
             if status == "Succeeded":
@@ -219,9 +223,9 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
                 return None
 
             logger.debug("Photo Avatar ポーリング中: status=%s", status)
-        except urllib.error.URLError as exc:
-            logger.warning("Photo Avatar ポーリング通信エラー: %s", exc)
-        except (json.JSONDecodeError, OSError) as exc:
+        except httpx.HTTPStatusError as exc:
+            logger.warning("Photo Avatar ポーリング HTTP エラー: %s", exc)
+        except (httpx.RequestError, json.JSONDecodeError) as exc:
             logger.warning("Photo Avatar ポーリングエラー: %s", exc)
 
         await asyncio.sleep(10)
@@ -417,7 +421,7 @@ async def generate_promo_video(
                 "inputs": [{"content": summary_text}],
                 "avatarConfig": {
                     "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": "graceful",
+                    "talkingAvatarStyle": "casual-sitting",
                     "videoFormat": "mp4",
                     "videoCodec": "h264",
                     "subtitleType": "soft_embedded",
@@ -545,15 +549,12 @@ INSTRUCTIONS = """\
 
 def create_brochure_gen_agent(model_settings: dict | None = None):
     """ブローシャ＆画像生成エージェントを作成する"""
-    settings = get_settings()
-    deployment = settings["model_name"]
+    from src.agent_client import get_responses_client
+
+    deployment = None
     if model_settings and model_settings.get("model"):
         deployment = model_settings["model"]
-    client = AzureOpenAIResponsesClient(
-        project_endpoint=settings["project_endpoint"],
-        credential=DefaultAzureCredential(),
-        deployment_name=deployment,
-    )
+    client = get_responses_client(deployment)
 
     agent_tools: list = [
         generate_hero_image,
