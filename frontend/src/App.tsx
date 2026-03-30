@@ -36,7 +36,7 @@ function App() {
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
-  const elapsed = useElapsedTime(isRunning)
+  const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
   const statusLabel = t(`status.${state.status}`)
 
@@ -92,8 +92,11 @@ function App() {
                   <div className="mt-2 flex items-center gap-2 text-sm text-[var(--text-muted)]">
                     <span>⏱</span>
                     <span>{elapsed}s</span>
-                    {state.agentProgress && (
-                      <span>— {t(AGENT_STEP_KEY[state.agentProgress.agent] || 'status.running')} {t('status.running')}</span>
+                    {state.agentProgress && state.agentProgress.agent !== 'approval' && (
+                      <span>— {t(AGENT_STEP_KEY[state.agentProgress.agent] || '')} {t('status.running')}</span>
+                    )}
+                    {state.agentProgress?.agent === 'approval' && (
+                      <span>— {t('status.approval')}</span>
                     )}
                   </div>
                 )}

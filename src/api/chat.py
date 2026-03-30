@@ -1353,6 +1353,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         {"agent": "approval", "status": "completed", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
     )
 
+    # 承認完了後、すぐに規制チェックの開始を通知（タイマーリセット用）
+    yield format_sse(
+        SSEEventType.AGENT_PROGRESS,
+        {"agent": "regulation-check-agent", "status": "running", "step": 4, "total_steps": _PIPELINE_TOTAL_STEPS},
+    )
+
     regulation_input = context["plan_markdown"]
 
     regulation_outcome = await _execute_agent(
