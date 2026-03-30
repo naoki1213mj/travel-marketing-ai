@@ -9,7 +9,7 @@ import logging
 
 from agent_framework import tool
 
-from src.config import get_model_endpoint, get_settings
+from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +121,8 @@ def create_review_agent():
         from agent_framework.azure import AzureOpenAIResponsesClient
         from azure.identity import DefaultAzureCredential
 
-        endpoint = get_model_endpoint()
         client = AzureOpenAIResponsesClient(
-            project_endpoint=endpoint,
+            project_endpoint=settings["project_endpoint"],
             credential=DefaultAzureCredential(),
             deployment_name=settings["model_name"],
         )

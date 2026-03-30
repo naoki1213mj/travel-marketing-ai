@@ -12,7 +12,7 @@ from agent_framework.azure import AzureOpenAIResponsesClient
 from azure.identity import DefaultAzureCredential
 from pydantic import BaseModel
 
-from src.config import get_model_endpoint, get_settings
+from src.config import get_settings
 
 try:
     import pyodbc
@@ -402,9 +402,8 @@ def create_data_search_agent(model_settings: dict | None = None):
     - 明示的に無効化: ENABLE_CODE_INTERPRETER=false
     """
     settings = get_settings()
-    endpoint = get_model_endpoint()
     client = AzureOpenAIResponsesClient(
-        project_endpoint=endpoint,
+        project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
         deployment_name=settings["model_name"],
     )

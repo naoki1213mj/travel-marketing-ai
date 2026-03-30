@@ -47,21 +47,10 @@ def _get_allowed_origins() -> list[str]:
     return [origin.strip() for origin in raw.split(",") if origin.strip()]
 
 
-def _log_apim_status() -> None:
-    """APIM AI Gateway の接続状態をログに記録する"""
-    settings = get_settings()
-    apim_url = settings.get("apim_gateway_url", "")  # type: ignore[arg-type]
-    if apim_url:
-        logger.info("APIM AI Gateway 有効: %s", apim_url)
-    else:
-        logger.info("APIM AI Gateway 未設定 — 直接 Foundry エンドポイントを使用")
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """アプリケーション起動・終了時のライフサイクル管理"""
     _configure_observability()
-    _log_apim_status()
     yield
 
 

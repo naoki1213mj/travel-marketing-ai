@@ -10,4 +10,4 @@ frontend/dist/
 data/*.csv
 .testagent/
 .coverage
-func-deploy.zip
+

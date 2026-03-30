@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "3056805078194359325"
+      "templateHash": "16433862356528391565"
     }
   },
   "parameters": {
@@ -507,7 +507,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "8844004625735544365"
+              "templateHash": "10200795175672424026"
             }
           },
           "parameters": {
@@ -556,7 +556,7 @@
               "apiVersion": "2025-06-01",
               "name": "[format('{0}/{1}', parameters('name'), parameters('modelDeploymentName'))]",
               "sku": {
-                "capacity": 30,
+                "capacity": 100,
                 "name": "GlobalStandard"
               },
               "properties": {
@@ -936,9 +936,6 @@
           "cosmosDbEndpoint": {
             "value": "[reference('cosmosDb').outputs.endpoint.value]"
           },
-          "apimGatewayUrl": {
-            "value": "[reference('apim').outputs.gatewayUrl.value]"
-          },
           "contentUnderstandingEndpoint": {
             "value": "[variables('aiServicesApiBase')]"
           },
@@ -959,7 +956,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "16090562433499655831"
+              "templateHash": "11789987973578532678"
             }
           },
           "parameters": {
@@ -1004,10 +1001,6 @@
               "type": "string",
               "defaultValue": ""
             },
-            "apimGatewayUrl": {
-              "type": "string",
-              "defaultValue": ""
-            },
             "contentUnderstandingEndpoint": {
               "type": "string",
               "defaultValue": ""
@@ -1027,7 +1020,7 @@
           },
           "variables": {
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('apimGatewayUrl'))), createArray(createObject('name', 'APIM_GATEWAY_URL', 'value', parameters('apimGatewayUrl'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()))]"
           },
           "resources": [
             {
@@ -1083,7 +1076,7 @@
                     }
                   ],
                   "scale": {
-                    "minReplicas": 0,
+                    "minReplicas": 1,
                     "maxReplicas": 3,
                     "rules": [
                       {
@@ -1152,7 +1145,6 @@
         "acr",
         "aiFoundry",
         "aiProject",
-        "apim",
         "appInsights",
         "containerAppsEnv",
         "cosmosDb",
@@ -1287,9 +1279,6 @@
           },
           "appInsightsInstrumentationKey": {
             "value": "[reference('appInsights').outputs.instrumentationKey.value]"
-          },
-          "foundryEndpoint": {
-            "value": "[reference('aiFoundry').outputs.endpoint.value]"
           }
         },
         "template": {
@@ -1299,7 +1288,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "9618497849549309624"
+              "templateHash": "2404124516519060274"
             }
           },
           "parameters": {
@@ -1327,10 +1316,6 @@
             "appInsightsInstrumentationKey": {
               "type": "string"
             },
-            "foundryEndpoint": {
-              "type": "string",
-              "defaultValue": ""
-            },
             "aiServicesId": {
               "type": "string",
               "defaultValue": ""
@@ -1344,7 +1329,7 @@
               "location": "[parameters('location')]",
               "tags": "[parameters('tags')]",
               "sku": {
-                "name": "BasicV2",
+                "name": "StandardV2",
                 "capacity": 1
               },
               "identity": {
@@ -1367,74 +1352,6 @@
                 }
               },
               "dependsOn": [
-                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('foundryEndpoint')))]",
-              "type": "Microsoft.ApiManagement/service/backends",
-              "apiVersion": "2024-06-01-preview",
-              "name": "[format('{0}/{1}', parameters('name'), 'foundry-backend')]",
-              "properties": {
-                "protocol": "http",
-                "url": "[parameters('foundryEndpoint')]",
-                "credentials": {
-                  "header": {}
-                },
-                "tls": {
-                  "validateCertificateChain": true,
-                  "validateCertificateName": true
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('foundryEndpoint')))]",
-              "type": "Microsoft.ApiManagement/service/apis",
-              "apiVersion": "2024-06-01-preview",
-              "name": "[format('{0}/{1}', parameters('name'), 'foundry-ai-gateway')]",
-              "properties": {
-                "displayName": "Foundry AI Gateway",
-                "description": "Microsoft Foundry AI Gateway — モデルデプロイメントの一元管理",
-                "path": "ai",
-                "protocols": [
-                  "https"
-                ],
-                "subscriptionRequired": true,
-                "serviceUrl": "[parameters('foundryEndpoint')]",
-                "type": "http"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('foundryEndpoint')))]",
-              "type": "Microsoft.ApiManagement/service/apis/policies",
-              "apiVersion": "2024-06-01-preview",
-              "name": "[format('{0}/{1}/{2}', parameters('name'), 'foundry-ai-gateway', 'policy')]",
-              "properties": {
-                "format": "xml",
-                "value": "<policies>\n  <inbound>\n    <base />\n    <!-- AI Gateway: トークンベースのレート制限（TPM） -->\n    <azure-openai-token-limit\n      tokens-per-minute=\"80000\"\n      counter-key=\"@(context.Subscription.Id)\"\n      estimate-prompt-tokens=\"true\"\n      remaining-tokens-header-name=\"x-ratelimit-remaining-tokens\" />\n    <!-- リクエスト追跡用ヘッダー -->\n    <set-header name=\"X-Request-Id\" exists-action=\"skip\">\n      <value>@(context.RequestId.ToString())</value>\n    </set-header>\n    <!-- Managed Identity でバックエンド認証 -->\n    <authentication-managed-identity resource=\"https://cognitiveservices.azure.com\" />\n  </inbound>\n  <backend>\n    <base />\n  </backend>\n  <outbound>\n    <base />\n    <!-- AI Gateway: トークン使用量メトリクスの発行 -->\n    <azure-openai-emit-token-metric>\n      <dimension name=\"Subscription ID\" />\n      <dimension name=\"API ID\" />\n    </azure-openai-emit-token-metric>\n    <set-header name=\"X-Gateway\" exists-action=\"override\">\n      <value>travel-marketing-ai-gateway</value>\n    </set-header>\n  </outbound>\n  <on-error>\n    <base />\n  </on-error>\n</policies>"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('name'), 'foundry-ai-gateway')]"
-              ]
-            },
-            {
-              "condition": "[not(empty(parameters('foundryEndpoint')))]",
-              "type": "Microsoft.ApiManagement/service/subscriptions",
-              "apiVersion": "2024-06-01-preview",
-              "name": "[format('{0}/{1}', parameters('name'), 'ai-gateway-subscription')]",
-              "properties": {
-                "displayName": "AI Gateway Access",
-                "scope": "[format('/apis/{0}', 'foundry-ai-gateway')]",
-                "state": "active"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ApiManagement/service/apis', parameters('name'), 'foundry-ai-gateway')]",
                 "[resourceId('Microsoft.ApiManagement/service', parameters('name'))]"
               ]
             },
@@ -1474,7 +1391,6 @@
         }
       },
       "dependsOn": [
-        "aiFoundry",
         "appInsights",
         "rg"
       ]
@@ -1577,206 +1493,6 @@
       "dependsOn": [
         "aiFoundry",
         "apim",
-        "rg"
-      ]
-    },
-    "functionApp": {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "function-app",
-      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "name": {
-            "value": "[format('{0}{1}', variables('abbrs').functionApp, variables('resourceToken'))]"
-          },
-          "location": {
-            "value": "[parameters('location')]"
-          },
-          "tags": {
-            "value": "[variables('tags')]"
-          },
-          "storageAccountName": {
-            "value": "[format('{0}{1}', variables('abbrs').funcStorage, variables('resourceToken'))]"
-          },
-          "appInsightsConnectionString": {
-            "value": "[reference('appInsights').outputs.connectionString.value]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.41.2.15936",
-              "templateHash": "541979357475706105"
-            }
-          },
-          "parameters": {
-            "name": {
-              "type": "string"
-            },
-            "location": {
-              "type": "string"
-            },
-            "tags": {
-              "type": "object",
-              "defaultValue": {}
-            },
-            "storageAccountName": {
-              "type": "string"
-            },
-            "appInsightsConnectionString": {
-              "type": "string"
-            }
-          },
-          "resources": [
-            {
-              "type": "Microsoft.Storage/storageAccounts",
-              "apiVersion": "2023-05-01",
-              "name": "[parameters('storageAccountName')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "kind": "StorageV2",
-              "sku": {
-                "name": "Standard_LRS"
-              },
-              "properties": {
-                "allowBlobPublicAccess": false,
-                "allowSharedKeyAccess": true,
-                "minimumTlsVersion": "TLS1_2",
-                "supportsHttpsTrafficOnly": true
-              }
-            },
-            {
-              "type": "Microsoft.Web/serverfarms",
-              "apiVersion": "2024-04-01",
-              "name": "[format('{0}-plan', parameters('name'))]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "sku": {
-                "tier": "FlexConsumption",
-                "name": "FC1"
-              },
-              "properties": {
-                "reserved": true
-              }
-            },
-            {
-              "type": "Microsoft.Web/sites",
-              "apiVersion": "2024-04-01",
-              "name": "[parameters('name')]",
-              "location": "[parameters('location')]",
-              "tags": "[parameters('tags')]",
-              "kind": "functionapp,linux",
-              "identity": {
-                "type": "SystemAssigned"
-              },
-              "properties": {
-                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan', parameters('name')))]",
-                "siteConfig": {
-                  "appSettings": [
-                    {
-                      "name": "AzureWebJobsStorage__accountName",
-                      "value": "[parameters('storageAccountName')]"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "FUNCTIONS_EXTENSION_VERSION",
-                      "value": "~4"
-                    },
-                    {
-                      "name": "WEBSITE_AUTH_STORAGE_TYPE",
-                      "value": "Msi"
-                    }
-                  ]
-                },
-                "functionAppConfig": {
-                  "deployment": {
-                    "storage": {
-                      "type": "blobContainer",
-                      "value": "[format('{0}deployments', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-05-01').primaryEndpoints.blob)]",
-                      "authentication": {
-                        "type": "SystemAssignedIdentity"
-                      }
-                    }
-                  },
-                  "runtime": {
-                    "name": "python",
-                    "version": "3.13"
-                  },
-                  "scaleAndConcurrency": {
-                    "maximumInstanceCount": 40,
-                    "instanceMemoryMB": 2048
-                  }
-                }
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Web/serverfarms', format('{0}-plan', parameters('name')))]",
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.Web/sites', parameters('name')), 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]",
-              "properties": {
-                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b')]"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
-              ]
-            },
-            {
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), resourceId('Microsoft.Web/sites', parameters('name')), '17d1049b-9a84-46fb-8f53-869881c3d3ab')]",
-              "properties": {
-                "principalId": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]",
-                "principalType": "ServicePrincipal",
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '17d1049b-9a84-46fb-8f53-869881c3d3ab')]"
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName'))]",
-                "[resourceId('Microsoft.Web/sites', parameters('name'))]"
-              ]
-            }
-          ],
-          "outputs": {
-            "id": {
-              "type": "string",
-              "value": "[resourceId('Microsoft.Web/sites', parameters('name'))]"
-            },
-            "name": {
-              "type": "string",
-              "value": "[parameters('name')]"
-            },
-            "defaultHostName": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01').defaultHostName]"
-            },
-            "principalId": {
-              "type": "string",
-              "value": "[reference(resourceId('Microsoft.Web/sites', parameters('name')), '2024-04-01', 'full').identity.principalId]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "appInsights",
         "rg"
       ]
     },
@@ -2227,13 +1943,13 @@
       "type": "string",
       "value": "[variables('defaultImageModelDeploymentName')]"
     },
+    "AZURE_APIM_NAME": {
+      "type": "string",
+      "value": "[reference('apim').outputs.name.value]"
+    },
     "AZURE_APIM_GATEWAY_URL": {
       "type": "string",
       "value": "[reference('apim').outputs.gatewayUrl.value]"
-    },
-    "AZURE_FUNCTION_APP_NAME": {
-      "type": "string",
-      "value": "[reference('functionApp').outputs.name.value]"
     },
     "AZURE_LOGIC_APP_NAME": {
       "type": "string",

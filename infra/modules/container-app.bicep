@@ -12,7 +12,7 @@ param modelName string = 'gpt-5-4-mini'
 param projectEndpoint string = ''
 param contentSafetyEndpoint string = ''
 param cosmosDbEndpoint string = ''
-param apimGatewayUrl string = ''
+
 param contentUnderstandingEndpoint string = ''
 param speechServiceEndpoint string = ''
 param speechServiceRegion string = ''
@@ -53,12 +53,7 @@ var containerEnv = concat([
     name: 'COSMOS_DB_ENDPOINT'
     value: cosmosDbEndpoint
   }
-] : [], !empty(apimGatewayUrl) ? [
-  {
-    name: 'APIM_GATEWAY_URL'
-    value: apimGatewayUrl
-  }
-] : [], !empty(contentUnderstandingEndpoint) ? [
+] : [], !empty(contentUnderstandingEndpoint)? [
   {
     name: 'CONTENT_UNDERSTANDING_ENDPOINT'
     value: contentUnderstandingEndpoint

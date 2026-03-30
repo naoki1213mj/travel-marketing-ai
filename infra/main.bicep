@@ -148,7 +148,7 @@ module containerApp 'modules/container-app.bicep' = {
     projectEndpoint: aiProjectEndpoint
     contentSafetyEndpoint: aiFoundry.outputs.endpoint
     cosmosDbEndpoint: cosmosDb.outputs.endpoint
-    apimGatewayUrl: apim.outputs.gatewayUrl
+
     contentUnderstandingEndpoint: aiServicesApiBase
     speechServiceEndpoint: aiFoundry.outputs.endpoint
     speechServiceRegion: location
@@ -176,7 +176,6 @@ module apim 'modules/api-management.bicep' = {
     tags: tags
     appInsightsId: appInsights.outputs.id
     appInsightsInstrumentationKey: appInsights.outputs.instrumentationKey
-    foundryEndpoint: aiFoundry.outputs.endpoint
   }
 }
 
@@ -187,19 +186,6 @@ module aiFoundryApimAccess 'modules/ai-project-app-access.bicep' = {
   params: {
     aiFoundryName: aiFoundry.outputs.name
     principalId: apim.outputs.principalId
-  }
-}
-
-// Azure Functions MCP サーバー (Flex Consumption)
-module functionApp 'modules/function-app.bicep' = {
-  name: 'function-app'
-  scope: rg
-  params: {
-    name: '${abbrs.functionApp}${resourceToken}'
-    location: location
-    tags: tags
-    storageAccountName: '${abbrs.funcStorage}${resourceToken}'
-    appInsightsConnectionString: appInsights.outputs.connectionString
   }
 }
 
@@ -246,8 +232,8 @@ output AZURE_AI_PROJECT_NAME string = aiProject.outputs.name
 output AZURE_AI_FOUNDRY_NAME string = aiFoundry.outputs.name
 output MODEL_NAME string = defaultModelDeploymentName
 output IMAGE_MODEL_NAME string = defaultImageModelDeploymentName
+output AZURE_APIM_NAME string = apim.outputs.name
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
-output AZURE_FUNCTION_APP_NAME string = functionApp.outputs.name
 output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name
 output AZURE_RESOURCE_GROUP string = rg.name
 output CONTENT_SAFETY_ENDPOINT string = aiFoundry.outputs.endpoint

@@ -24,7 +24,6 @@ class AppSettings(TypedDict):
     speech_service_endpoint: str
     speech_service_region: str
     logic_app_callback_url: str
-    apim_gateway_url: str
 
 
 # 環境変数名 → AppSettings キーのマッピング
@@ -41,7 +40,6 @@ _ENV_MAP: dict[str, str] = {
     "SPEECH_SERVICE_ENDPOINT": "speech_service_endpoint",
     "SPEECH_SERVICE_REGION": "speech_service_region",
     "LOGIC_APP_CALLBACK_URL": "logic_app_callback_url",
-    "APIM_GATEWAY_URL": "apim_gateway_url",
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -68,22 +66,6 @@ def is_production_environment() -> bool:
     environment = os.environ.get("ENVIRONMENT", _DEFAULTS["environment"]).lower()
     return environment in _PRODUCTION_ENVIRONMENTS
 
-
-def get_model_endpoint() -> str:
-    """モデル呼び出し用のエンドポイントを返す。
-
-    APIM AI Gateway が設定されている場合はログに記録するが、
-    AzureOpenAIResponsesClient は project_endpoint パスを必要とするため、
-    APIM 経由のルーティングは APIM 側の設定が完了してから有効化する。
-    現時点では常に Foundry プロジェクトエンドポイントを返す。
-    """
-    settings = get_settings()
-    apim_url = settings.get("apim_gateway_url", "")  # type: ignore[arg-type]
-    if apim_url:
-        # APIM は Bicep で定義済みだが、バックエンドルーティング構成が必要
-        # 構成完了後に APIM 経由に切り替える
-        pass
-    return settings["project_endpoint"]
 
 
 def get_missing_required_settings() -> list[str]:

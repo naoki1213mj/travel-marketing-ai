@@ -12,6 +12,13 @@ services:
       path: Dockerfile
       remoteBuild: true
 
+hooks:
+  postprovision:
+    shell: sh
+    run: uv run python scripts/postprovision.py
+    interactive: true
+    continueOnError: true
+
 infra:
   provider: bicep
   path: infra
