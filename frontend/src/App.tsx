@@ -1,28 +1,33 @@
-import { AnalysisView } from './components/AnalysisView'
+import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { BrochurePreview } from './components/BrochurePreview'
 import { ConversationHistory } from './components/ConversationHistory'
-import { ErrorRetry } from './components/ErrorRetry'
 import { ImageGallery } from './components/ImageGallery'
 import { InputForm } from './components/InputForm'
 import { LanguageSwitcher } from './components/LanguageSwitcher'
 import { MarkdownView } from './components/MarkdownView'
-import { MetricsBar } from './components/MetricsBar'
 import { PipelineStepper } from './components/PipelineStepper'
-import { PlanApproval } from './components/PlanApproval'
 import { RefineChat } from './components/RefineChat'
-import { RegulationResults } from './components/RegulationResults'
 import { SafetyBadge } from './components/SafetyBadge'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeToggle } from './components/ThemeToggle'
-import { ToolEventBadges } from './components/ToolEventBadges'
 import { VersionSelector } from './components/VersionSelector'
 import { VideoPreview } from './components/VideoPreview'
 import { VoiceInput } from './components/VoiceInput'
+import { WorkflowAccordion } from './components/WorkflowAccordion'
+import { useElapsedTime } from './hooks/useElapsedTime'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
+
+const AGENT_STEP_KEY: Record<string, string> = {
+  'data-search-agent': 'step.data_search',
+  'marketing-plan-agent': 'step.marketing_plan',
+  'approval': 'step.approval',
+  'regulation-check-agent': 'step.regulation',
+  'brochure-gen-agent': 'step.brochure',
+}
 
 function App() {
   const { state, sendMessage, approve, reset, restoreVersion, updateSettings } = useSSE()
@@ -31,6 +36,7 @@ function App() {
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
+  const elapsed = useElapsedTime(isRunning)
   const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
   const statusLabel = t(`status.${state.status}`)
 
@@ -80,7 +86,18 @@ function App() {
             )}
 
             {state.status !== 'idle' && (
-              <PipelineStepper progress={state.agentProgress} t={t} />
+              <>
+                <PipelineStepper progress={state.agentProgress} t={t} />
+                {isRunning && (
+                  <div className="mt-2 flex items-center gap-2 text-sm text-[var(--text-muted)]">
+                    <span>⏱</span>
+                    <span>{elapsed}s</span>
+                    {state.agentProgress && (
+                      <span>— {t(AGENT_STEP_KEY[state.agentProgress.agent] || 'status.running')} {t('status.running')}</span>
+                    )}
+                  </div>
+                )}
+              </>
             )}
 
             {/* 処理中のローディング表示 */}
@@ -90,29 +107,23 @@ function App() {
                 <span className="text-sm text-[var(--text-secondary)]">{t('status.running')}</span>
               </div>
             )}
-            <ToolEventBadges events={state.toolEvents} t={t} />
-            <AnalysisView contents={state.textContents} t={t} />
 
-            {planContent && (
-              <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-5">
-                <div className="mb-3">
-                  <span className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-medium text-[var(--accent-strong)]">
-                    {t('section.planAgent')}
-                  </span>
-                </div>
-                <MarkdownView content={planContent.content} />
-              </div>
-            )}
-
-            {state.status === 'approval' && state.approvalRequest && (
-              <PlanApproval request={state.approvalRequest} onApprove={approve} t={t} />
-            )}
-            <RegulationResults contents={state.textContents} t={t} />
-            {state.error && (
-              <ErrorRetry error={state.error} onRetry={reset} retryLabel={t('error.retry')} t={t} />
-            )}
-            <MetricsBar metrics={state.metrics} t={t} locale={locale} />
+            <WorkflowAccordion
+              agentProgress={state.agentProgress}
+              textContents={state.textContents}
+              toolEvents={state.toolEvents}
+              metrics={state.metrics}
+              error={state.error}
+              onRetry={reset}
+              t={t}
+              locale={locale}
+            />
           </div>
+
+          {/* 承認バナー（スクロール領域の外、固定位置） */}
+          {state.status === 'approval' && state.approvalRequest && (
+            <ApprovalBanner request={state.approvalRequest} onApprove={approve} t={t} />
+          )}
 
           <div className="border-t border-[var(--panel-border)] px-5 py-4">
             <div className="mb-3 flex items-center justify-between">
