@@ -75,10 +75,11 @@ def main():
         },
     ]
 
+    # gpt-5 系モデルは max_tokens 非対応。is_reasoning_model=True で max_completion_tokens を使う
     evaluators = {
-        "relevance": RelevanceEvaluator(model_config=model_config),
-        "coherence": CoherenceEvaluator(model_config=model_config),
-        "fluency": FluencyEvaluator(model_config=model_config),
+        "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
+        "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
+        "fluency": FluencyEvaluator(model_config=model_config, is_reasoning_model=True),
     }
 
     print("\n📊 品質評価を実行中...")
