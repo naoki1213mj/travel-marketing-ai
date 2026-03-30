@@ -23,18 +23,6 @@ import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 
-/** Agent3 出力から修正済み企画書セクションのみを抽出する */
-function extractCorrectedPlan(content: string | undefined): string | undefined {
-  if (!content) return undefined
-  const markers = ['## 修正済み企画書', '## 修正を反映した', '## 修正後']
-  for (const marker of markers) {
-    const idx = content.indexOf(marker)
-    if (idx >= 0) return content.substring(idx)
-  }
-  const lastH1 = content.lastIndexOf('\n# ')
-  if (lastH1 > content.length / 2) return content.substring(lastH1 + 1)
-  return content
-}
 
 const AGENT_STEP_KEY: Record<string, string> = {
   'data-search-agent': 'step.data_search',
@@ -59,9 +47,8 @@ function App() {
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const planContent = state.textContents.find(c => c.agent === 'marketing-plan-agent')
   const revisionContent = state.textContents.find(c => c.agent === 'plan-revision-agent')
-  const regulationContent = state.textContents.find(c => c.agent === 'regulation-check-agent')
-  // 規制チェック完了前は企画書を「確認中」として表示
-  const showFinalPlan = revisionContent || regulationContent || isCompleted
+  // revision agent が修正済み企画書を出力するまでは「確認中」として表示
+  const showFinalPlan = revisionContent || isCompleted
   const statusLabel = t(`status.${state.status}`)
 
   return (
@@ -214,7 +201,7 @@ function App() {
                 label: `📝 ${t('tab.plan')}`,
                 content: planContent ? (
                   showFinalPlan ? (
-                    <MarkdownView content={revisionContent?.content || extractCorrectedPlan(regulationContent?.content) || planContent.content} />
+                    <MarkdownView content={revisionContent?.content || planContent.content} />
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                       <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />

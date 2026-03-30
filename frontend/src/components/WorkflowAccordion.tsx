@@ -63,6 +63,9 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
 
   const getStatus = (stepKey: string, stepNum: number) => {
     if (!agentProgress) return 'pending'
+    // コンテンツが存在し、現在実行中でなければ完了とみなす
+    const hasContent = textContents.some(c => c.agent === stepKey)
+    if (hasContent && agentProgress.agent !== stepKey) return 'completed'
     if (stepNum < agentProgress.step) return 'completed'
     if (agentProgress.agent === stepKey && agentProgress.status === 'running') return 'active'
     if (agentProgress.agent === stepKey && agentProgress.status === 'completed') return 'completed'
@@ -138,6 +141,12 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                     <AnalysisView contents={textContents} t={t} />
                   ) : step.key === 'regulation-check-agent' ? (
                     <RegulationResults contents={textContents} t={t} />
+                  ) : step.key === 'brochure-gen-agent' ? (
+                    // ブローシャ HTML は右パネルで表示。ここではサマリのみ
+                    <div className="py-3 text-sm text-[var(--text-secondary)]">
+                      <p>✅ ブローシャ・画像の生成が完了しました。</p>
+                      <p className="mt-1 text-xs text-[var(--text-muted)]">右側の「ブローシャ」「画像」タブでプレビューできます。</p>
+                    </div>
                   ) : (
                     <MarkdownView content={content.content} />
                   )
