@@ -18,7 +18,7 @@ resource apim 'Microsoft.ApiManagement/service@2024-06-01-preview' = {
   location: location
   tags: tags
   sku: {
-    name: 'BasicV2'
+    name: 'StandardV2'
     capacity: 1
   }
   identity: {

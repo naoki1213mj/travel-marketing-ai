@@ -38,7 +38,7 @@ export function RefineChat({ onSubmit, disabled, placeholder, sendLabel, label }
           disabled={disabled}
           maxLength={MAX_LENGTH + 100}
           aria-label={label}
-          className="flex-1 rounded-full border border-[var(--panel-border)] bg-[var(--input-bg)] px-4 py-2.5 text-sm text-[var(--text-primary)]
+          className="flex-1 rounded-full border-2 border-[var(--input-border)] bg-[var(--input-bg)] px-4 py-2.5 text-sm text-[var(--text-primary)]
                      placeholder:text-[var(--text-muted)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-soft)]
                      disabled:opacity-50
           "

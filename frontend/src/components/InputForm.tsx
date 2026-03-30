@@ -38,7 +38,7 @@ export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label }:
           rows={3}
           maxLength={MAX_LENGTH + 100}
           aria-label={label}
-          className="flex-1 resize-none rounded-[24px] border border-[var(--panel-border)] bg-[var(--input-bg)] px-4 py-3
+          className="flex-1 resize-none rounded-[24px] border-2 border-[var(--input-border)] bg-[var(--input-bg)] px-4 py-3
                      text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)]
                      focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--accent-soft)]
                      disabled:opacity-50
