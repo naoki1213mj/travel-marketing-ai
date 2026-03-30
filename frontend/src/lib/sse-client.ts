@@ -84,6 +84,7 @@ export async function connectSSE(
   const body: Record<string, unknown> = { message, conversation_id: conversationId }
   if (settings) {
     body.settings = {
+      model: settings.model,
       temperature: settings.temperature,
       max_tokens: settings.maxTokens,
       top_p: settings.topP,

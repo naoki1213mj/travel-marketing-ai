@@ -1353,10 +1353,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         {"agent": "approval", "status": "completed", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
     )
 
-    # Agent3 への入力はコンテキスト長制限を避けるため 4000 文字に制限
     regulation_input = context["plan_markdown"]
-    if len(regulation_input) > 4000:
-        regulation_input = regulation_input[:4000] + "\n\n（以降省略）"
 
     regulation_outcome = await _execute_agent(
         agent_name="regulation-check-agent",
@@ -1371,10 +1368,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         return
     total_tool_calls += regulation_outcome["tool_calls"]
 
-    # Agent4 への入力はコンテキスト長制限を避けるため企画書部分だけ渡す
     brochure_input = context["plan_markdown"]
-    if len(brochure_input) > 2000:
-        brochure_input = brochure_input[:2000] + "\n\n（以降省略）"
 
     # 既存パンフレット参照（Content Understanding）
     reference_pdf = _get_reference_brochure_path()

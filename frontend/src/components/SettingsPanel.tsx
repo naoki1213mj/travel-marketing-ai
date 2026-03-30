@@ -5,6 +5,7 @@
 import { useState } from 'react'
 
 export interface ModelSettings {
+  model: string
   temperature: number
   maxTokens: number
   topP: number
@@ -14,12 +15,20 @@ export interface ModelSettings {
 
 // eslint-disable-next-line react-refresh/only-export-components
 export const DEFAULT_SETTINGS: ModelSettings = {
+  model: 'gpt-5-4-mini',
   temperature: 0.7,
   maxTokens: 4096,
   topP: 1.0,
   iqSearchResults: 5,
   iqScoreThreshold: 0.0,
 }
+
+const AVAILABLE_MODELS = [
+  { value: 'gpt-5-4-mini', label: 'GPT-5.4 mini (default)' },
+  { value: 'gpt-5.4', label: 'GPT-5.4' },
+  { value: 'gpt-4-1-mini', label: 'GPT-4.1 mini' },
+  { value: 'gpt-4.1', label: 'GPT-4.1' },
+]
 
 interface SettingsPanelProps {
   settings: ModelSettings
@@ -69,7 +78,7 @@ function SliderField({ label, tooltip, value, min, max, step, onChange }: Slider
 export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
   const [isOpen, setIsOpen] = useState(false)
 
-  const update = (key: keyof ModelSettings, value: number) => {
+  const update = (key: keyof ModelSettings, value: number | string) => {
     onChange({ ...settings, [key]: value })
   }
 
@@ -92,6 +101,23 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
       {isOpen && (
         <div className="mt-2 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4 shadow-sm">
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.model.desc')}>
+                  {t('settings.model')}
+                  <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.model.desc')}>ⓘ</span>
+                </label>
+              </div>
+              <select
+                value={settings.model}
+                onChange={(e) => update('model', e.target.value)}
+                className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+              >
+                {AVAILABLE_MODELS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
+            </div>
             <SliderField
               label={t('settings.temperature')}
               tooltip={t('settings.temperature.desc')}

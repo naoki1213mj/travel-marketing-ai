@@ -402,10 +402,13 @@ def create_data_search_agent(model_settings: dict | None = None):
     - 明示的に無効化: ENABLE_CODE_INTERPRETER=false
     """
     settings = get_settings()
+    deployment = settings["model_name"]
+    if model_settings and model_settings.get("model"):
+        deployment = model_settings["model"]
     client = AzureOpenAIResponsesClient(
         project_endpoint=settings["project_endpoint"],
         credential=DefaultAzureCredential(),
-        deployment_name=settings["model_name"],
+        deployment_name=deployment,
     )
 
     agent_tools: list = [search_sales_history, search_customer_reviews]
