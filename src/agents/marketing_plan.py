@@ -79,14 +79,13 @@ def create_marketing_plan_agent(model_settings: dict | None = None):
         "instructions": INSTRUCTIONS,
         "tools": agent_tools,
     }
+    default_opts: dict = {"max_output_tokens": 16384}
     if model_settings:
-        opts: dict = {}
         if "temperature" in model_settings:
-            opts["temperature"] = model_settings["temperature"]
+            default_opts["temperature"] = model_settings["temperature"]
         if "max_tokens" in model_settings:
-            opts["max_output_tokens"] = model_settings["max_tokens"]
+            default_opts["max_output_tokens"] = model_settings["max_tokens"]
         if "top_p" in model_settings:
-            opts["top_p"] = model_settings["top_p"]
-        if opts:
-            agent_kwargs["default_options"] = opts
+            default_opts["top_p"] = model_settings["top_p"]
+    agent_kwargs["default_options"] = default_opts
     return client.as_agent(**agent_kwargs)

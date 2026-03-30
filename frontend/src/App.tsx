@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
 import { BrochurePreview } from './components/BrochurePreview'
@@ -15,7 +16,6 @@ import { ThemeToggle } from './components/ThemeToggle'
 import { VersionSelector } from './components/VersionSelector'
 import { VideoPreview } from './components/VideoPreview'
 import { VoiceInput } from './components/VoiceInput'
-import { useState } from 'react'
 import { WorkflowAccordion } from './components/WorkflowAccordion'
 import { useElapsedTime } from './hooks/useElapsedTime'
 import { useI18n } from './hooks/useI18n'
@@ -26,7 +26,7 @@ import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/e
 /** Agent3 出力から修正済み企画書セクションのみを抽出する */
 function extractCorrectedPlan(content: string | undefined): string | undefined {
   if (!content) return undefined
-  const markers = ['## 修正済み企画書', '## 修正を反映した', '## 4.', '## 修正後']
+  const markers = ['## 修正済み企画書', '## 修正を反映した', '## 修正後']
   for (const marker of markers) {
     const idx = content.indexOf(marker)
     if (idx >= 0) return content.substring(idx)

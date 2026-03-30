@@ -417,7 +417,7 @@ class TestMarketingPlanAgent:
         call_kwargs = mock_client.as_agent.call_args.kwargs
         opts = call_kwargs["default_options"]
         assert opts["temperature"] == 0.3
-        assert "max_output_tokens" not in opts
+        assert opts["max_output_tokens"] == 16384
 
     def test_instructions_contains_required_sections(self):
         """INSTRUCTIONS に必要な構成要素が含まれること"""

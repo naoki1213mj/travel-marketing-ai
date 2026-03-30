@@ -138,10 +138,12 @@ async def search_knowledge_base(query: str) -> str:
         # Agentic Retrieval API で Knowledge Base にクエリを送信
         url = f"{search_endpoint}/knowledgebases/{_KB_NAME}/retrieve?api-version={_KB_API_VERSION}"
         request_body = {
-            "messages": [{
-                "role": "user",
-                "content": [{"type": "text", "text": query}],
-            }],
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": query}],
+                }
+            ],
             "retrievalReasoningEffort": {"kind": _iq_reasoning_effort},
             "includeActivity": True,
         }
@@ -220,7 +222,9 @@ async def _fallback_index_search(query: str, search_endpoint: str, api_key: str)
             if content:
                 results.append({"title": title, "content": content[:500]})
         if results:
-            return json.dumps({"source": "Azure AI Search (直接検索)", "query": query, "results": results}, ensure_ascii=False)
+            return json.dumps(
+                {"source": "Azure AI Search (直接検索)", "query": query, "results": results}, ensure_ascii=False
+            )
     except Exception as e:
         logger.warning("Index 直接検索もも失敗: %s", e)
     return _get_fallback_regulations(query)
@@ -341,7 +345,7 @@ def create_regulation_check_agent(model_settings: dict | None = None):
         "tools": agent_tools,
     }
     # Agent3 は修正済み企画書全文を出力するため、十分なトークン数を確保
-    default_opts: dict = {"max_output_tokens": 8192}
+    default_opts: dict = {"max_output_tokens": 16384}
     if model_settings:
         if "temperature" in model_settings:
             default_opts["temperature"] = model_settings["temperature"]

@@ -67,6 +67,8 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const [useVoiceLive, setUseVoiceLive] = useState<boolean | null>(null)
   const clientRef = useRef<VoiceLiveClient | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
+  const stateRef = useRef<VoiceState>('idle')
+  stateRef.current = state
 
   // Voice Live 利用可能性チェック — MSAL.js トークン取得を試みる
   useEffect(() => {
@@ -90,7 +92,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
     }
     const recognition = new SpeechRecognitionClass()
     recognition.lang = 'ja-JP'
-    recognition.continuous = false
+    recognition.continuous = true
     recognition.interimResults = true
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
@@ -106,13 +108,25 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
       if (finalText) {
         onTranscript(finalText)
         setTranscript('')
-        setState('idle')
+        // continuous モードなので停止しない — ユーザーが停止ボタンを押すまで継続
       } else {
         setTranscript(interim)
       }
     }
-    recognition.onerror = () => setState('idle')
-    recognition.onend = () => setState('idle')
+    recognition.onerror = (e: { error: string }) => {
+      // no-speech は正常（沈黙時に発生）— 無視して継続
+      if (e.error === 'no-speech') return
+      console.warn('Web Speech error:', e.error)
+      setState('idle')
+    }
+    recognition.onend = () => {
+      // continuous モードでも Edge は時々 onend を発火する — 自動再開
+      if (stateRef.current === 'listening' && recognitionRef.current) {
+        try { recognitionRef.current.start() } catch { setState('idle') }
+      } else {
+        setState('idle')
+      }
+    }
 
     recognition.start()
     recognitionRef.current = recognition

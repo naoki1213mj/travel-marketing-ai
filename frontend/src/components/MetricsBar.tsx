@@ -13,7 +13,9 @@ export function MetricsBar({ metrics, t, locale }: MetricsBarProps) {
     <div className="flex flex-wrap items-center gap-3 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-xs text-[var(--text-secondary)]">
       <span>⏱ {t('metrics.latency')}: {metrics.latency_seconds}s</span>
       <span>🛠 {t('metrics.tools')}: {metrics.tool_calls}</span>
-      <span>📝 {t('metrics.tokens')}: {metrics.total_tokens.toLocaleString(locale)}</span>
+      {metrics.total_tokens > 0 && (
+        <span>📝 {t('metrics.tokens')}: {metrics.total_tokens.toLocaleString(locale)}</span>
+      )}
     </div>
   )
 }

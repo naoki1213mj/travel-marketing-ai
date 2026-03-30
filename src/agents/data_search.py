@@ -73,6 +73,7 @@ class CustomerReview(BaseModel):
     rating: int
     comment: str
 
+
 # --- Fabric Lakehouse SQL 接続 ---
 
 # Azure SQL / Fabric 用のトークンスコープ
@@ -97,9 +98,7 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
         credential = DefaultAzureCredential()
         token = credential.get_token(_SQL_TOKEN_SCOPE)
         token_bytes = token.token.encode("utf-16-le")
-        token_struct = struct.pack(
-            f"<I{len(token_bytes)}s", len(token_bytes), token_bytes
-        )
+        token_struct = struct.pack(f"<I{len(token_bytes)}s", len(token_bytes), token_bytes)
 
         # SQL_COPT_SS_ACCESS_TOKEN = 1256
         conn = pyodbc.connect(
@@ -442,7 +441,11 @@ def create_data_search_agent(model_settings: dict | None = None):
         instructions = INSTRUCTIONS + _CODE_INTERPRETER_INSTRUCTION_SUFFIX
         logger.info("Code Interpreter を有効化してエージェントを作成")
     else:
-        reason = "環境変数で無効化" if os.environ.get("ENABLE_CODE_INTERPRETER", "").lower() in ("false", "0", "no") else "実行時エラーにより無効化"
+        reason = (
+            "環境変数で無効化"
+            if os.environ.get("ENABLE_CODE_INTERPRETER", "").lower() in ("false", "0", "no")
+            else "実行時エラーにより無効化"
+        )
         logger.info("Code Interpreter なしでエージェントを作成（%s）", reason)
 
     agent_kwargs: dict = {
@@ -450,14 +453,13 @@ def create_data_search_agent(model_settings: dict | None = None):
         "instructions": instructions,
         "tools": agent_tools,
     }
+    default_opts: dict = {"max_output_tokens": 16384}
     if model_settings:
-        opts: dict = {}
         if "temperature" in model_settings:
-            opts["temperature"] = model_settings["temperature"]
+            default_opts["temperature"] = model_settings["temperature"]
         if "max_tokens" in model_settings:
-            opts["max_output_tokens"] = model_settings["max_tokens"]
+            default_opts["max_output_tokens"] = model_settings["max_tokens"]
         if "top_p" in model_settings:
-            opts["top_p"] = model_settings["top_p"]
-        if opts:
-            agent_kwargs["default_options"] = opts
+            default_opts["top_p"] = model_settings["top_p"]
+    agent_kwargs["default_options"] = default_opts
     return client.as_agent(**agent_kwargs)

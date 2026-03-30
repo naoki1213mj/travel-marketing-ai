@@ -17,7 +17,7 @@ export interface ModelSettings {
 export const DEFAULT_SETTINGS: ModelSettings = {
   model: 'gpt-5-4-mini',
   temperature: 0.7,
-  maxTokens: 4096,
+  maxTokens: 16384,
   topP: 1.0,
   iqSearchResults: 5,
   iqScoreThreshold: 0.0,

@@ -20,8 +20,9 @@ export function BrochurePreview({ contents, t }: BrochurePreviewProps) {
         <iframe
           srcDoc={htmlContent.content}
           title={t('section.brochure')}
-          className="h-[28rem] w-full bg-white"
+          className="w-full border-0 bg-white"
           sandbox=""
+          style={{ minHeight: '60vh', height: '80vh' }}
         />
       </div>
     </div>

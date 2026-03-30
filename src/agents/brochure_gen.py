@@ -515,9 +515,9 @@ INSTRUCTIONS = """\
 - 入力に [参考パンフレット: ...] が含まれていれば `analyze_existing_brochure` を呼び出す
 
 ## 販促紹介動画
-ブローシャと画像の生成後、`generate_promo_video` ツールを使って販促紹介動画を生成してください。
-企画書のサマリテキスト（100〜200文字）をアバターに読み上げさせます。
-SPEECH_SERVICE_ENDPOINT が設定されていない場合はスキップしてください。
+ブローシャと画像の生成が完了したら、**必ず** `generate_promo_video` ツールを呼び出してください。
+企画書のキャッチコピーとプラン概要を 100〜200 文字に要約したテキストを `summary_text` に渡します。
+ツールがエラーを返した場合のみスキップしてください（環境変数の有無はツール内部で判断するため、あなたが判断する必要はありません）。
 
 ## 出力の注意事項
 - 「必要であれば～」「さらに～できます」「次に～可能です」のような追加提案の文は**絶対に出力しないでください**
@@ -551,14 +551,13 @@ def create_brochure_gen_agent(model_settings: dict | None = None):
         "instructions": INSTRUCTIONS,
         "tools": agent_tools,
     }
+    default_opts: dict = {"max_output_tokens": 16384}
     if model_settings:
-        opts: dict = {}
         if "temperature" in model_settings:
-            opts["temperature"] = model_settings["temperature"]
+            default_opts["temperature"] = model_settings["temperature"]
         if "max_tokens" in model_settings:
-            opts["max_output_tokens"] = model_settings["max_tokens"]
+            default_opts["max_output_tokens"] = model_settings["max_tokens"]
         if "top_p" in model_settings:
-            opts["top_p"] = model_settings["top_p"]
-        if opts:
-            agent_kwargs["default_options"] = opts
+            default_opts["top_p"] = model_settings["top_p"]
+    agent_kwargs["default_options"] = default_opts
     return client.as_agent(**agent_kwargs)
