@@ -232,7 +232,7 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
         ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
         capture_output=True,
         text=True,
-        check=False,
+        check=False, shell=True,
     )
     existing_id = result.stdout.strip()
     if existing_id:
@@ -252,6 +252,7 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
         capture_output=True,
         text=True,
         check=False,
+        shell=True,
     )
     if result.returncode != 0:
         logger.warning("Entra App 作成失敗: %s", result.stderr)
@@ -273,6 +274,7 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
         capture_output=True,
         text=True,
         check=False,
+        shell=True,
     )
 
     # Microsoft Graph User.Read 権限を追加
@@ -286,6 +288,7 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
         capture_output=True,
         text=True,
         check=False,
+        shell=True,
     )
 
     logger.info("Entra App 作成完了: %s (%s)", app_name, app_id)
@@ -436,15 +439,15 @@ def main() -> None:
         ["az", "account", "show", "--query", "tenantId", "-o", "tsv"],
         capture_output=True,
         text=True,
-        check=False,
+        check=False, shell=True,
     )
     tenant_id = tenant_result.stdout.strip()
     app_id = create_entra_app()
     if app_id:
-        subprocess.run(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id], check=False)
+        subprocess.run(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id], check=False, shell=True)
         logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
     if tenant_id:
-        subprocess.run(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id], check=False)
+        subprocess.run(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id], check=False, shell=True)
         logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
 
     logger.info("postprovision 完了")
