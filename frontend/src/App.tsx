@@ -213,7 +213,6 @@ function App() {
                         <>
                           <PlanVersionTabs
                             versions={planVersions}
-                            t={t}
                             activeIndex={planVersionIdx}
                             onChangeIndex={setPlanVersionIdx}
                           />

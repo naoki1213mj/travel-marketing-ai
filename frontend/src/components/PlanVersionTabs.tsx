@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
 
 interface PlanVersion {
   label: string
@@ -7,12 +7,11 @@ interface PlanVersion {
 
 interface PlanVersionTabsProps {
   versions: PlanVersion[]
-  t: (key: string) => string
   activeIndex?: number
   onChangeIndex?: (index: number) => void
 }
 
-export function PlanVersionTabs({ versions, t, activeIndex, onChangeIndex }: PlanVersionTabsProps) {
+export function PlanVersionTabs({ versions, activeIndex, onChangeIndex }: PlanVersionTabsProps) {
   const [internal, setInternal] = useState(versions.length - 1)
   const active = activeIndex ?? internal
 
