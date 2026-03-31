@@ -211,7 +211,12 @@ function App() {
                       <p className="text-xs mt-1">{t('preview.unavailable')}</p>
                     </div>
                   )
-                ) : null,
+                ) : (
+                  <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
+                    <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
+                    <p className="text-sm">{t('step.marketing_plan')}…</p>
+                  </div>
+                ),
               },
               { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={state.textContents} t={t} /> },
               { key: 'images', label: t('tab.images'), content: <ImageGallery images={state.images} t={t} /> },
