@@ -142,10 +142,21 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                   ) : step.key === 'regulation-check-agent' ? (
                     <RegulationResults contents={textContents} t={t} />
                   ) : step.key === 'brochure-gen-agent' ? (
-                    // ブローシャ HTML は右パネルで表示。ここではサマリのみ
-                    <div className="py-3 text-sm text-[var(--text-secondary)]">
-                      <p>✅ ブローシャ・画像の生成が完了しました。</p>
-                      <p className="mt-1 text-xs text-[var(--text-muted)]">右側の「ブローシャ」「画像」タブでプレビューできます。</p>
+                    // ブローシャ HTML は右パネルで表示。ここでは完了サマリ
+                    <div className="py-3 space-y-2">
+                      <p className="text-sm text-[var(--text-secondary)]">✅ ブローシャ・画像の生成が完了しました。</p>
+                      <p className="text-xs text-[var(--text-muted)]">右側の「ブローシャ」「販促用画像」タブでプレビューできます。</p>
+                      {(() => {
+                        const videoContent = textContents.find(c => c.content_type === 'video')
+                        const videoProgress = textContents.find(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')
+                        if (videoContent) {
+                          return <p className="text-sm text-[var(--text-secondary)]">🎬 アバター動画の生成が完了しました。「アバター動画」タブで再生できます。</p>
+                        }
+                        if (videoProgress) {
+                          return <p className="text-sm text-[var(--text-muted)]">🎬 アバター動画を生成中...</p>
+                        }
+                        return null
+                      })()}
                     </div>
                   ) : (
                     <MarkdownView content={content.content} />

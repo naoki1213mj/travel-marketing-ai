@@ -18,7 +18,8 @@
     "@azure/msal-browser": "^4.30.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
-    "react-markdown": "^10.1.0"
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "optionalDependencies": {
     "@rolldown/binding-win32-arm64-msvc": "1.0.0-rc.12",

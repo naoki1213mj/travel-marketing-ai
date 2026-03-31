@@ -4,6 +4,7 @@
 
 import { memo } from 'react'
 import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 interface MarkdownViewProps {
   content: string
@@ -33,7 +34,7 @@ export const MarkdownView = memo(function MarkdownView({ content, className = ''
         className,
       ].join(' ')}
     >
-      <ReactMarkdown>{content}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   )
 })
