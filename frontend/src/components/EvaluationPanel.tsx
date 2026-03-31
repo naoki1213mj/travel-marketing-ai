@@ -13,6 +13,7 @@ interface EvaluationPanelProps {
   response: string
   html: string
   t: (key: string) => string
+  onRefine?: (feedback: string) => void
 }
 
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
@@ -35,7 +36,54 @@ function CheckItem({ label, passed }: { label: string; passed: boolean }) {
   )
 }
 
-export function EvaluationPanel({ query, response, html, t }: EvaluationPanelProps) {
+/** 評価結果から低スコア項目を抽出し、修正プロンプトを自動生成する */
+function buildFeedback(result: EvaluationResult, t: (key: string) => string): string {
+  const issues: string[] = []
+
+  // Built-in: スコア 3 未満の指標
+  if (result.builtin && !('error' in result.builtin)) {
+    for (const [name, val] of Object.entries(result.builtin)) {
+      if (val.score >= 0 && val.score < 3) {
+        issues.push(`${t(`eval.${name}`) || name}が低い（${val.score}/5）${val.reason ? ': ' + val.reason : ''}`)
+      }
+    }
+  }
+
+  // Marketing quality: スコア 3 未満の項目
+  if (result.marketing_quality) {
+    for (const key of ['target_clarity', 'differentiation', 'kpi_validity', 'creativity']) {
+      const val = result.marketing_quality[key]
+      if (typeof val === 'number' && val < 3) {
+        issues.push(`${t(`eval.${key}`) || key}が低い（${val}/5）`)
+      }
+    }
+    if (result.marketing_quality.reason) {
+      issues.push(`審査コメント: ${String(result.marketing_quality.reason)}`)
+    }
+  }
+
+  // Compliance: 不適合項目
+  if (result.custom) {
+    for (const [name, val] of Object.entries(result.custom)) {
+      if (val.details) {
+        const missing = Object.entries(val.details)
+          .filter(([, passed]) => !passed)
+          .map(([item]) => item)
+        if (missing.length > 0) {
+          issues.push(`${t(`eval.${name}`) || name}: ${missing.join('・')}が不足`)
+        }
+      }
+    }
+  }
+
+  if (issues.length === 0) {
+    return '品質評価の結果、全項目が基準を満たしています。さらにクオリティを高めてください。'
+  }
+
+  return `以下の品質評価結果に基づいて企画書を改善してください:\n${issues.map(i => `- ${i}`).join('\n')}`
+}
+
+export function EvaluationPanel({ query, response, html, t, onRefine }: EvaluationPanelProps) {
   const [result, setResult] = useState<EvaluationResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -161,6 +209,19 @@ export function EvaluationPanel({ query, response, html, t }: EvaluationPanelPro
             >
               📊 {t('eval.portal')} →
             </a>
+          )}
+
+          {/* 評価結果に基づく改善ボタン */}
+          {onRefine && (
+            <button
+              onClick={() => {
+                const feedback = buildFeedback(result, t)
+                if (feedback) onRefine(feedback)
+              }}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--accent)] bg-[var(--accent-soft)] px-4 py-2 text-xs font-medium text-[var(--accent-strong)] transition-colors hover:bg-[var(--accent)]/20"
+            >
+              ✨ {t('eval.refine')}
+            </button>
           )}
         </div>
       )}

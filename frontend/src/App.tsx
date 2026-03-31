@@ -216,6 +216,7 @@ function App() {
                           response={planContent?.content || ''}
                           html={state.textContents.find(c => c.content_type === 'html')?.content || ''}
                           t={t}
+                          onRefine={sendMessage}
                         />
                       )}
                     </>

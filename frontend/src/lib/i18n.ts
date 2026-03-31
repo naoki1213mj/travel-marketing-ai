@@ -120,6 +120,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.plan_structure': '企画書構成',
     'eval.brochure_accessibility': 'アクセシビリティ',
     'eval.portal': 'Foundry ポータルで詳細を見る',
+    'eval.refine': '評価結果をもとに改善する',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -236,6 +237,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.plan_structure': 'Plan Structure',
     'eval.brochure_accessibility': 'Accessibility',
     'eval.portal': 'View in Foundry Portal',
+    'eval.refine': 'Refine based on evaluation',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -352,5 +354,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     'eval.plan_structure': '企划书结构',
     'eval.brochure_accessibility': '无障碍性',
     'eval.portal': '在 Foundry 门户中查看',
+    'eval.refine': '根据评估结果改进',
   },
 }
