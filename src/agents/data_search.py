@@ -55,6 +55,7 @@ async def _query_data_agent(question: str) -> str | None:
             base_url=base_url,
             api_key="",
             default_headers={"Authorization": f"Bearer {token.token}"},
+            default_query={"api-version": "2024-05-01-preview"},
         )
 
         # スレッド作成 → メッセージ送信 → 実行 → 結果取得
