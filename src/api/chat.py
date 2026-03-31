@@ -1426,7 +1426,26 @@ async def _refine_events(refine_text: str, conversation_id: str):
         return
 
     text_lower = refine_text.lower()
-    if any(k in text_lower for k in ["画像", "バナー", "イメージ", "色", "明るく"]):
+    # 評価フィードバック（品質評価結果に基づく改善指示）は常に企画書修正として処理
+    is_eval_feedback = "品質評価" in refine_text or "evaluation" in text_lower
+    if is_eval_feedback:
+        target_agent = "marketing-plan-agent"
+        step = 2
+        # 元の企画書コンテキストを復元して修正プロンプトを構築
+        conversation = await get_conversation(conversation_id)
+        original_plan = ""
+        if conversation:
+            for msg in conversation.get("messages", []):
+                data = msg.get("data", {})
+                if msg.get("event") == "text" and data.get("agent") == "marketing-plan-agent":
+                    original_plan = data.get("content", "")
+        if original_plan:
+            refine_text = (
+                f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
+                f"## 現在の企画書\n{original_plan[:3000]}\n\n"
+                f"## 改善指示\n{refine_text}"
+            )
+    elif any(k in text_lower for k in ["画像", "バナー", "イメージ", "色", "明るく"]):
         target_agent = "brochure-gen-agent"
         step = 5
     elif any(k in text_lower for k in ["規制", "法令", "チェック", "表現"]):
