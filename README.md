@@ -8,7 +8,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 
 - React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), and dark mode with WCAG AA contrast
 - FastAPI backend with rate limiting, liveness/readiness probes, and static asset serving from the built frontend
-- Four primary agents in a Python `SequentialBuilder` workflow: data search (Fabric Lakehouse SQL with CSV fallback), marketing plan, regulation check, and brochure generation (customer-facing HTML + Photo Avatar video)
+- Seven agents in the pipeline (data search, marketing plan, regulation check, plan revision, brochure generation, video generation, and quality review) with 5 user-facing steps: data → plan → approval → regulation + revision → brochure + video
 - Optional quality-review agent that emits an extra text result after the main flow when Azure is configured
 - Fabric Lakehouse integration via pyodbc + Azure AD token authentication for real-time sales and review data queries
 - Photo Avatar video generation (`casual-sitting` style, MP4/H.264 with soft-embedded subtitles)
@@ -21,11 +21,12 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 
 - The Azure-backed runtime calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`.
 - APIM AI Gateway is provisioned and configured via `scripts/postprovision.py`, which creates a Foundry AI Gateway connection (`travel-ai-gateway`) and applies token-limit policies to the auto-generated foundry APIs.
-- `POST /api/chat` in Azure mode pauses for approval after Agent2 (marketing-plan-agent) and resumes Agent3 → Agent4 upon user approval.
-- The pipeline uses 5 steps (4 agents + 1 approval step).
+- `POST /api/chat` in Azure mode pauses for approval after Agent2 (marketing-plan-agent) and resumes Agent3a → Agent3b → Agent4 → Agent5 upon user approval.
+- The pipeline uses 5 user-facing steps powered by 7 internal agents (Agent3a+3b share step 4, Agent4+5 share step 5).
 - Agent1 connects to Fabric Lakehouse via pyodbc with Azure AD token authentication (`SQL_COPT_SS_ACCESS_TOKEN`). CSV files serve as fallback when the Fabric SQL endpoint is unavailable.
-- Agent4 generates customer-facing brochures that exclude KPI, sales targets, and internal analysis. Photo Avatar video generation uses the `casual-sitting` style with MP4/H.264 output.
-- Agent5 (quality-review-agent) uses `GitHubCopilotAgent` with `PermissionHandler.approve_all` for automated permission handling.
+- Agent4 generates customer-facing brochures that exclude KPI, sales targets, and internal analysis.
+- Agent5 (video-gen-agent) generates Photo Avatar promotional videos using the `casual-sitting` style with `ja-JP-NanamiNeural` voice and MP4/H.264 output.
+- Agent6 (quality-review-agent) uses `GitHubCopilotAgent` with `PermissionHandler.approve_all` for automated permission handling.
 - Code Interpreter is auto-detected at runtime with a graceful fallback (`ENABLE_CODE_INTERPRETER=false` to disable).
 - A model selector in the frontend lets users choose between `gpt-5-4-mini` (default), `gpt-5.4`, `gpt-4-1-mini`, and `gpt-4.1`.
 - Voice Live API is authenticated via MSAL.js with Entra App Registration. The `VoiceInput` component supports dual-mode: Voice Live for real-time voice, with automatic fallback to Web Speech API.
@@ -48,18 +49,22 @@ flowchart LR
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
     flow --> approval{approval_request}
-    approval --> a3[regulation-check-agent]
-    a3 --> kb[Azure AI Search / Foundry IQ]
-    a3 --> safeweb[Web Search for safety info]
+    approval --> a3a[regulation-check-agent]
+    a3a --> kb[Azure AI Search / Foundry IQ]
+    a3a --> safeweb[Web Search for safety info]
+    a3a --> a3b[plan-revision-agent]
     flow --> a4[brochure-gen-agent]
     a4 --> image[gpt-image-1.5]
     a4 --> cu[Content Understanding]
-    a4 --> speech[Speech / Photo Avatar]
+    flow --> a5[video-gen-agent]
+    a5 --> speech[Speech / Photo Avatar]
     flow --> output[Text Analysis]
     output --> ui
     api -. optional .-> review[quality-review-agent]
     api -. callback .-> logic[Logic Apps]
 ```
+
+See [docs/architecture.drawio](docs/architecture.drawio) for the full architecture diagram.
 
 ## Quick Start
 

@@ -29,6 +29,7 @@
 | `GET` | `/api/replay/{conversation_id}` | 保存済み SSE リプレイ |
 | `GET` | `/api/voice-token` | Voice Live 用 AAD トークン取得 |
 | `GET` | `/api/voice-config` | Voice Live MSAL 設定取得 |
+| `POST` | `/api/evaluate` | 品質評価の実行 |
 
 ## ヘルスチェック
 
@@ -89,13 +90,13 @@
 
 | 条件 | SSE の主な流れ |
 |---|---|
-| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `safety` → `done`、その後に任意で `quality-review-agent` の `text` |
+| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `safety` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
-| `conversation_id` あり | 指示内容に応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
+| `conversation_id` あり | 指示内容に応じて `marketing-plan-agent` / `regulation-check-agent` / `plan-revision-agent` / `brochure-gen-agent` / `video-gen-agent` を再実行 |
 
 ### 注意
 
-- Azure モードの主フローは Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
+- Azure モードの主フローは Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - `conversation_id` を指定した修正モードでは、会話履歴全体を再構成するのではなく、対象エージェントを個別に呼び直します。
 
 ### cURL 例
@@ -147,8 +148,8 @@ curl -N -X POST http://localhost:8000/api/chat \
 
 | 条件 | 挙動 |
 |---|---|
-| 承認 + Azure 接続あり | `regulation-check-agent` → `brochure-gen-agent` を順に実行し、最後に Logic Apps callback を試行 |
-| 承認 + Azure 接続なし | モックの Agent3 → Agent4 イベントを返す |
+| 承認 + Azure 接続あり | `regulation-check-agent` → `plan-revision-agent` → `brochure-gen-agent` → `video-gen-agent` を順に実行し、最後に Logic Apps callback を試行 |
+| 承認 + Azure 接続なし | モックの Agent3a → Agent3b → Agent4 → Agent5 イベントを返す |
 | 非承認 | 修正テキストとして扱い、再調整経路に入る |
 
 ## 会話 API
@@ -246,10 +247,10 @@ data: <json>
 
 | フィールド | 型 | 説明 |
 |---|---|---|
-| `agent` | `string` | `pipeline`、`data-search-agent`、`marketing-plan-agent`、`regulation-check-agent`、`brochure-gen-agent` のいずれか |
+| `agent` | `string` | `pipeline`、`data-search-agent`、`marketing-plan-agent`、`regulation-check-agent`、`plan-revision-agent`、`brochure-gen-agent`、`video-gen-agent` のいずれか |
 | `status` | `string` | `running` または `completed` |
 | `step` | `int` | 現在の段階 |
-| `total_steps` | `int` | 現状は 5（4 エージェント + 1 承認ステップ） |
+| `total_steps` | `int` | 現状は 5（7 エージェントが 5 ユーザー向けステップに対応: Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有） |
 
 注: Azure の主フローでは `pipeline` 名で出るのが基本です。個別エージェント名はモックや修正モードで多く出ます。
 
@@ -267,12 +268,15 @@ data: <json>
 
 - `search_sales_history`
 - `search_customer_reviews`
+- `code_interpreter`
 - `web_search`
 - `search_knowledge_base`
 - `check_ng_expressions`
 - `check_travel_law_compliance`
+- `analyze_existing_brochure`
 - `generate_hero_image`
 - `generate_banner_image`
+- `generate_promo_video`
 
 注: Azure の `workflow_event_generator()` では現在 `tool_event` は個別には流れず、モック経路や単一エージェント再実行で主に見えます。
 
@@ -289,9 +293,9 @@ data: <json>
 |---|---|---|
 | `content` | `string` | Markdown または HTML |
 | `agent` | `string` | 出力元エージェント |
-| `content_type` | `string?` | HTML の場合は `html` |
+| `content_type` | `string?` | HTML の場合は `html`、動画の場合は `video` |
 
-品質レビューは `quality-review-agent` 名の追加 `text` イベントとして返ります。
+品質レビューは `quality-review-agent` 名の追加 `text` イベントとして返ります。動画は `video-gen-agent` 名の `text` イベントで `content_type: "video"` として返ります。
 
 ### `image`
 
@@ -379,11 +383,15 @@ data: <json>
    — user approves via POST /api/chat/{thread_id}/approve —
 4. agent_progress (regulation-check-agent)
 5. text           (regulation-check-agent)
-6. agent_progress (brochure-gen-agent)
-7. text           (brochure-gen-agent)
-8. safety
-9. done
-10. text           (quality-review-agent, optional)
+6. agent_progress (plan-revision-agent)
+7. text           (plan-revision-agent)
+8. agent_progress (brochure-gen-agent)
+9. text           (brochure-gen-agent)
+10. agent_progress (video-gen-agent)
+11. text           (video-gen-agent, content_type: video)
+12. safety
+13. done
+14. text           (quality-review-agent, optional)
 ```
 
 ### モック / デモモードの新規会話
@@ -403,12 +411,14 @@ data: <json>
 ```text
 1. agent_progress (regulation-check-agent)
 2. text
-3. safety
-4. done
+3. agent_progress (plan-revision-agent)
+4. text
 5. agent_progress (brochure-gen-agent)
 6. text
-7. safety
-8. done
+7. agent_progress (video-gen-agent)
+8. text
+9. safety
+10. done
 ```
 
 ## Content Safety

@@ -8,7 +8,7 @@
 
 - React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）
 - FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信
-- 主処理の 4 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、販促物生成（顧客向け HTML + Photo Avatar 動画）
+- パイプラインの 7 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、企画書修正、販促物生成（顧客向け HTML）、動画生成（Photo Avatar）、品質レビュー。ユーザーには 5 ステップ表示
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
 - Fabric Lakehouse 連携: pyodbc + Azure AD トークン認証によるリアルタイム売上・レビューデータ検索
 - Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
@@ -21,18 +21,19 @@
 
 - Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。
 - APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシーの適用を行います。
-- Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
-- パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）です。
+- Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
+- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - Agent1 は Fabric Lakehouse に pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で接続します。Fabric SQL endpoint が利用できない場合は CSV フォールバックを使います。
-- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。Photo Avatar 動画は `casual-sitting` スタイルで MP4/H.264 出力です。
-- Agent5（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
+- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
+- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で出力します。
+- Agent6（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
 - Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
 - フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
 - Voice Live API は MSAL.js による Entra アプリ登録認証です。`VoiceInput` コンポーネントは Voice Live + Web Speech API のデュアルモードで動作します。
 - 会話履歴は Cosmos DB から `restoreConversation()` で復元され、再推論は行いません。
 - ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。
 
-Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。
+Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。詳細な構成図は [docs/architecture.drawio](docs/architecture.drawio) にもあります。
 
 ## アーキテクチャ概要
 
@@ -48,13 +49,15 @@ flowchart LR
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
     flow --> approval{approval_request}
-    approval --> a3[regulation-check-agent]
-    a3 --> kb[Azure AI Search / Foundry IQ]
-    a3 --> safeweb[Web Search 安全情報]
+    approval --> a3a[regulation-check-agent]
+    a3a --> kb[Azure AI Search / Foundry IQ]
+    a3a --> safeweb[Web Search 安全情報]
+    a3a --> a3b[plan-revision-agent]
     flow --> a4[brochure-gen-agent]
     a4 --> image[gpt-image-1.5]
     a4 --> cu[Content Understanding]
-    a4 --> speech[Speech / Photo Avatar]
+    flow --> a5[video-gen-agent]
+    a5 --> speech[Speech / Photo Avatar]
     flow --> output[Text Analysis]
     output --> ui
     api -. optional .-> review[quality-review-agent]

@@ -244,14 +244,15 @@ curl https://<container-app-fqdn>/api/ready
 
 - APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）とポリシーが自動構成される
 - Agent1 は Fabric Lakehouse SQL endpoint にリアルタイム接続し、CSV は フォールバック専用
-- Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない。Photo Avatar 動画は `casual-sitting` スタイルで生成
-- Agent5 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
+- Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない
+- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を生成
+- Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
 - Code Interpreter は自動検出でグレースフルフォールバック
 - Voice Live API は MSAL.js + Entra アプリ登録で認証。Web Speech API への自動フォールバックあり
 - 会話履歴は Cosmos DB から `restoreConversation()` で再推論なしに復元
-- 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行する
-- パイプラインは 5 ステップ（4 エージェント + 1 承認ステップ）
-- 品質レビューは主 workflow participant ではなく、主処理後の追加 `text` イベント
+- 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行する
+- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）
+- 品質レビュー（Agent6）は主 workflow participant ではなく、主処理後の追加 `text` イベント
 - Logic Apps callback URL は IaC から Container App secret として注入する
 - Azure AI Search の実行時アクセスは MI だが、bootstrap script には API-key 経路も残る
 

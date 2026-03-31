@@ -138,6 +138,8 @@ azd deploy
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析 |
 | `SPEECH_SERVICE_ENDPOINT` | 動画生成 |
 | `SPEECH_SERVICE_REGION` | 動画生成 |
+| `VOICE_SPA_CLIENT_ID` | Voice Live MSAL.js 認証 |
+| `AZURE_TENANT_ID` | Voice Live 認証 |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の通知 / 保存 |
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | テレメトリ |
 

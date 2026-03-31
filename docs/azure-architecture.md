@@ -1,6 +1,6 @@
 # Azure アーキテクチャ
 
-このドキュメントは、要件書の理想構成ではなく、現在の実装と Azure 側の実配備前提をベースに整理したものです。
+このドキュメントは、要件書の理想構成ではなく、現在の実装と Azure 側の実配備前提をベースに整理したものです。詳細な構成図は [architecture.drawio](architecture.drawio) も参照してください。
 
 ## 1. ランタイム実行フロー
 
@@ -19,14 +19,18 @@ flowchart LR
     a2 --> web[Foundry Web Search]
 
     flow --> approval{approval_request}
-    approval --> a3[regulation-check-agent]
-    a3 --> search[Azure AI Search / Foundry IQ]
-    a3 --> safetyweb[Web Search for safety info]
+    approval --> a3a[regulation-check-agent]
+    a3a --> search[Azure AI Search / Foundry IQ]
+    a3a --> safetyweb[Web Search for safety info]
+
+    a3a --> a3b[plan-revision-agent]
 
     flow --> a4[brochure-gen-agent]
     a4 --> image[gpt-image-1.5]
     a4 --> cu[Content Understanding]
-    a4 --> speech[Speech / Photo Avatar video]
+
+    flow --> a5[video-gen-agent]
+    a5 --> speech[Speech / Photo Avatar video]
 
     flow --> outputsafety[Text Analysis]
 
@@ -112,13 +116,15 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 
 ## 6. 現在の実装メモ
 
-- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3 → Agent4 を続行します。
+- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - Agent1 は Fabric Lakehouse SQL endpoint に pyodbc + Azure AD トークン認証で接続します。`FABRIC_SQL_ENDPOINT` 未設定時は CSV → ハードコードデータにフォールバック。
-- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。Photo Avatar 動画生成は `casual-sitting` スタイルで MP4/H.264 出力、ソフト字幕埋め込みに対応。
-- Agent5 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
+- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
+- Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で生成します。
+- Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
 - Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
 - APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。また Voice Agent の作成も行います。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
+- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
 - Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
 - 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。
