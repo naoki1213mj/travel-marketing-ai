@@ -155,13 +155,13 @@ async def generate_promo_video(
                 "inputs": [{"content": summary_text}],
                 "avatarConfig": {
                     "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": "graceful-sitting",
+                    "talkingAvatarStyle": "casual-sitting",
                     "videoFormat": "mp4",
                     "videoCodec": "h264",
                     "subtitleType": "soft_embedded",
                     "backgroundColor": "#FFFFFFFF",
                 },
-                "synthesisConfig": {"voice": "ja-JP-NanamiDragonHDLatestNeural"},
+                "synthesisConfig": {"voice": "ja-JP-NanamiNeural"},
             },
             ensure_ascii=False,
         ).encode("utf-8")

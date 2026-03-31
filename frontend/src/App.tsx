@@ -210,6 +210,14 @@ function App() {
                       >
                         💾 {t('export.plan')}
                       </button>
+                      {isCompleted && (
+                        <EvaluationPanel
+                          query={state.userMessages[0] || ''}
+                          response={planContent?.content || ''}
+                          html={state.textContents.find(c => c.content_type === 'html')?.content || ''}
+                          t={t}
+                        />
+                      )}
                     </>
                   ) : (
                     <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
@@ -239,12 +247,6 @@ function App() {
 
             {isCompleted && (
               <>
-              <EvaluationPanel
-                query={state.userMessages[0] || ''}
-                response={planContent?.content || ''}
-                html={state.textContents.find(c => c.content_type === 'html')?.content || ''}
-                t={t}
-              />
               <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--panel-border)] pt-4">
                 <VersionSelector
                   versions={state.versions.map((_, i) => i + 1)}

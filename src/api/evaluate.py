@@ -135,9 +135,9 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         from azure.ai.evaluation import CoherenceEvaluator, FluencyEvaluator, RelevanceEvaluator
 
         evaluators = {
-            "relevance": RelevanceEvaluator(model_config=model_config),
-            "coherence": CoherenceEvaluator(model_config=model_config),
-            "fluency": FluencyEvaluator(model_config=model_config),
+            "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
+            "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
+            "fluency": FluencyEvaluator(model_config=model_config, is_reasoning_model=True),
         }
 
         results: dict[str, dict] = {}
@@ -223,7 +223,7 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
                 {"role": "user", "content": judge_prompt.format(query=query, response=response[:3000])},
             ],
             temperature=0.1,
-            max_tokens=500,
+            max_completion_tokens=500,
         )
 
         answer = completion.choices[0].message.content or ""
@@ -282,8 +282,8 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
         result = evaluate(
             data=temp_path,
             evaluators={
-                "relevance": RelevanceEvaluator(model_config=model_config),
-                "coherence": CoherenceEvaluator(model_config=model_config),
+                "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
+                "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
             },
             azure_ai_project=azure_ai_project,
         )
