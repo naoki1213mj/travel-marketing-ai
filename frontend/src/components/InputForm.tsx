@@ -10,17 +10,17 @@ interface InputFormProps {
   sendLabel: string
   label: string
   initialValue?: string
+  t: (key: string) => string
 }
 
-const QUICK_CHIPS = [
-  { label: '春の沖縄ファミリー', prompt: '春の沖縄ファミリー向けプランを企画して' },
-  { label: '冬の北海道カップル', prompt: '冬の北海道カップル向けプランを企画して' },
-  { label: '秋の京都シニア', prompt: '秋の京都シニア向けプランを企画して' },
-  { label: '夏のハワイ学生', prompt: '夏のハワイ学生旅行向けプランを企画して' },
-]
-
-export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, initialValue }: InputFormProps) {
+export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, initialValue, t }: InputFormProps) {
   const [message, setMessage] = useState(initialValue ?? '')
+  const quickChips = [
+    { label: 'input.quick.okinawa.label', prompt: 'input.quick.okinawa.prompt' },
+    { label: 'input.quick.hokkaido.label', prompt: 'input.quick.hokkaido.prompt' },
+    { label: 'input.quick.kyoto.label', prompt: 'input.quick.kyoto.prompt' },
+    { label: 'input.quick.hawaii.label', prompt: 'input.quick.hawaii.prompt' },
+  ]
 
   const isOverLimit = message.length > MAX_LENGTH
   const isNearLimit = message.length > WARN_THRESHOLD
@@ -37,15 +37,15 @@ export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, i
     <form onSubmit={handleSubmit} className="flex flex-col gap-1">
       {!disabled && !message && (
         <div className="mb-2 flex flex-wrap gap-1.5">
-          {QUICK_CHIPS.map(chip => (
+          {quickChips.map(chip => (
             <button
               key={chip.label}
               type="button"
-              onClick={() => setMessage(chip.prompt)}
+              onClick={() => setMessage(t(chip.prompt))}
               className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs
                          text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)]"
             >
-              {chip.label}
+              {t(chip.label)}
             </button>
           ))}
         </div>
@@ -85,17 +85,19 @@ export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, i
           {sendLabel}
         </button>
       </div>
-      <span
-        className={`self-end text-xs pr-1 ${
-          isOverLimit
-            ? 'text-red-500 font-semibold'
-            : isNearLimit
-              ? 'text-red-400'
-              : 'text-[var(--text-muted)]'
-        }`}
-      >
-        {message.length} / {MAX_LENGTH}
-      </span>
+      {message.length > 0 && (
+        <span
+          className={`self-end pr-1 text-xs ${
+            isOverLimit
+              ? 'font-semibold text-red-500'
+              : isNearLimit
+                ? 'text-red-400'
+                : 'text-[var(--text-muted)]'
+          }`}
+        >
+          {message.length} / {MAX_LENGTH}
+        </span>
+      )}
     </form>
   )
 }

@@ -2,7 +2,7 @@
  * 会話履歴パネル。左パネル上部にインラインで表示する折りたたみ式。
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 interface Conversation {
   id: string
@@ -14,9 +14,10 @@ interface Conversation {
 interface ConversationHistoryProps {
   onSelect: (conversationId: string) => void
   t: (key: string) => string
+  locale: string
 }
 
-export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
+export function ConversationHistory({ onSelect, t, locale }: ConversationHistoryProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(false)
@@ -46,7 +47,7 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
       if (mins < 60) return `${mins}m`
       const hrs = Math.floor(mins / 60)
       if (hrs < 24) return `${hrs}h`
-      return d.toLocaleDateString('ja-JP', { month: 'short', day: 'numeric' })
+      return d.toLocaleDateString(locale, { month: 'short', day: 'numeric' })
     } catch { return '' }
   }
 
@@ -89,6 +90,8 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
         </div>
         <button
           onClick={() => setIsOpen(false)}
+          aria-label={t('history.close')}
+          title={t('history.close')}
           className="rounded-md p-1 text-[var(--text-muted)] hover:bg-[var(--accent-soft)] transition-colors"
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -116,7 +119,7 @@ export function ConversationHistory({ onSelect, t }: ConversationHistoryProps) {
                 <div className="flex items-start gap-2">
                   <span className={`mt-1 h-2 w-2 flex-shrink-0 rounded-full ${statusColor(conv.status)}`} />
                   <p className="flex-1 text-xs leading-snug line-clamp-2 group-hover:text-[var(--accent-strong)]">
-                    {conv.input || '(入力なし)'}
+                    {conv.input || t('history.no_input')}
                   </p>
                 </div>
                 <p className="mt-1.5 text-[10px] text-[var(--text-muted)] pl-4">

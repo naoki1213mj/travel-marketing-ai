@@ -223,7 +223,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
   const stateLabel = state === 'listening' ? t('voice.listening')
     : state === 'processing' ? t('voice.processing')
     : state === 'speaking' ? t('voice.speaking')
-    : state === 'connecting' ? '...'
+    : state === 'connecting' ? t('voice.connecting')
     : state === 'error' ? t('voice.unsupported')
     : ''
 
@@ -243,7 +243,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
                 : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
         } ${disabled ? 'cursor-not-allowed opacity-50' : ''}`}
         aria-label={t('voice.label')}
-        title={useVoiceLive ? 'Voice Live' : t('voice.label')}
+        title={useVoiceLive ? t('voice.provider') : t('voice.label')}
       >
         {isActive ? (
           <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24">
@@ -274,7 +274,7 @@ export function VoiceInput({ onTranscript, disabled = false, t }: VoiceInputProp
         </span>
       )}
       {useVoiceLive && state === 'idle' && (
-        <span className="text-[10px] text-green-600 dark:text-green-400">Voice Live</span>
+        <span className="text-[10px] text-[var(--success-text)]">{t('voice.provider')}</span>
       )}
     </div>
   )

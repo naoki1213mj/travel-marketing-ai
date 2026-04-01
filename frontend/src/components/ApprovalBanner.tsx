@@ -10,6 +10,9 @@ interface ApprovalBannerProps {
 export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
   const [mode, setMode] = useState<'action' | 'revise'>('action')
   const [revision, setRevision] = useState('')
+  const displayPrompt = request.prompt.trim() && !/承認|修正|approve|revise/i.test(request.prompt)
+    ? request.prompt
+    : t('approval.message')
 
   return (
     <div className="sticky bottom-0 z-30 mx-0 mt-2 rounded-2xl border border-amber-300 bg-white/95 dark:bg-slate-900/95 px-6 py-5 shadow-[0_-4px_30px_rgba(251,191,36,0.15)] backdrop-blur-lg">
@@ -23,7 +26,7 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
 
       {mode === 'action' ? (
         <div className="flex items-center gap-3">
-          <p className="flex-1 text-sm text-[var(--text-secondary)]">{request.prompt}</p>
+          <p className="flex-1 text-sm text-[var(--text-secondary)]">{displayPrompt}</p>
           <button
             onClick={() => setMode('revise')}
             className="inline-flex items-center gap-1.5 rounded-full border border-[var(--panel-border)] bg-white/80 dark:bg-white/10 px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-white dark:hover:bg-white/20 transition-colors"

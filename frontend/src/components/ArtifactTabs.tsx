@@ -43,15 +43,11 @@ export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
 
   return (
     <div className="flex min-h-[0] flex-1 flex-col">
-      <div className="flex flex-wrap gap-2 border-b border-[var(--panel-border)] pb-3" role="tablist" aria-label={t('panel.preview')}>
+      <div className="flex flex-wrap gap-2 border-b border-[var(--panel-border)] pb-3" role="toolbar" aria-label={t('panel.preview')}>
         {activeTabs.map(tab => (
           <button
             key={tab.key}
-            id={`artifact-tab-${tab.key}`}
             type="button"
-            role="tab"
-            data-selected={effectiveActiveTab === tab.key ? 'true' : 'false'}
-            aria-controls={`artifact-panel-${tab.key}`}
             onClick={() => setUserSelectedTab(tab.key)}
             className={`inline-flex items-center rounded-full px-4 py-2 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]
               ${effectiveActiveTab === tab.key
@@ -68,9 +64,6 @@ export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
       {activeTabs.map(tab => (
         <div
           key={tab.key}
-          id={`artifact-panel-${tab.key}`}
-          role="tabpanel"
-          aria-labelledby={`artifact-tab-${tab.key}`}
           className={`min-h-[0] flex-1 py-4 ${tab.key === effectiveActiveTab ? 'animate-fade-slide-in' : 'hidden'}`}
         >
           {tab.content || (

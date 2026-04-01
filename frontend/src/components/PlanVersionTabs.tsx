@@ -15,10 +15,11 @@ export function PlanVersionTabs({ versions, activeIndex, onChangeIndex }: PlanVe
   if (versions.length <= 1) return null
 
   return (
-    <div className="mb-3 flex items-center gap-1 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] p-1">
+    <div className="mb-3 flex items-center gap-1 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] p-1" role="toolbar" aria-label="Plan versions">
       {versions.map((v, i) => (
         <button
           key={i}
+          type="button"
           onClick={() => onChangeIndex?.(i)}
           className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
             i === active

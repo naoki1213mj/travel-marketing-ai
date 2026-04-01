@@ -354,9 +354,11 @@ export function useSSE() {
     },
     image: (data) => {
       if (requestId !== activeRequestIdRef.current) return
+      const image = data as ImageContent
+      if (!image.url?.trim()) return
       setState(prev => ({
         ...prev,
-        images: [...prev.images, data as ImageContent],
+        images: [...prev.images, image],
       }))
     },
     approval_request: (data) => {
@@ -365,9 +367,18 @@ export function useSSE() {
       conversationIdRef.current = request.conversation_id
       setState(prev => ({
         ...prev,
-        approvalRequest: request,
+        approvalRequest: {
+          ...request,
+          plan_markdown: request.plan_markdown || getLatestPlanMarkdown(prev.textContents),
+        },
         status: 'approval',
         conversationId: request.conversation_id,
+        agentProgress: {
+          agent: 'approval',
+          status: 'running',
+          step: 3,
+          total_steps: PIPELINE_TOTAL_STEPS,
+        },
       }))
     },
     safety: (data) => {

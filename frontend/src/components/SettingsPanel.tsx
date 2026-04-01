@@ -37,6 +37,7 @@ interface SettingsPanelProps {
 }
 
 interface SliderFieldProps {
+  inputId: string
   label: string
   tooltip: string
   value: number
@@ -46,11 +47,11 @@ interface SliderFieldProps {
   onChange: (value: number) => void
 }
 
-function SliderField({ label, tooltip, value, min, max, step, onChange }: SliderFieldProps) {
+function SliderField({ inputId, label, tooltip, value, min, max, step, onChange }: SliderFieldProps) {
   return (
     <div className="space-y-1.5">
       <div className="flex items-center justify-between">
-        <label className="text-xs font-medium text-[var(--text-secondary)]" title={tooltip}>
+        <label htmlFor={inputId} className="text-xs font-medium text-[var(--text-secondary)]" title={tooltip}>
           {label}
           <span className="ml-1 cursor-help text-[var(--text-muted)]" title={tooltip}>ⓘ</span>
         </label>
@@ -59,6 +60,7 @@ function SliderField({ label, tooltip, value, min, max, step, onChange }: Slider
         </span>
       </div>
       <input
+        id={inputId}
         type="range"
         min={min}
         max={max}
@@ -103,14 +105,16 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.model.desc')}>
+                <label htmlFor="settings-model" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.model.desc')}>
                   {t('settings.model')}
                   <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.model.desc')}>ⓘ</span>
                 </label>
               </div>
               <select
+                id="settings-model"
                 value={settings.model}
                 onChange={(e) => update('model', e.target.value)}
+                aria-label={t('settings.model')}
                 className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
               >
                 {AVAILABLE_MODELS.map((m) => (
@@ -119,6 +123,7 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
               </select>
             </div>
             <SliderField
+              inputId="settings-temperature"
               label={t('settings.temperature')}
               tooltip={t('settings.temperature.desc')}
               value={settings.temperature}
@@ -128,15 +133,17 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
               onChange={(v) => update('temperature', v)}
             />
             <SliderField
+              inputId="settings-max-tokens"
               label={t('settings.maxTokens')}
               tooltip={t('settings.maxTokens')}
               value={settings.maxTokens}
               min={256}
-              max={8192}
+              max={16384}
               step={256}
               onChange={(v) => update('maxTokens', v)}
             />
             <SliderField
+              inputId="settings-top-p"
               label={t('settings.topP')}
               tooltip="Top P"
               value={settings.topP}
@@ -146,6 +153,7 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
               onChange={(v) => update('topP', v)}
             />
             <SliderField
+              inputId="settings-iq-results"
               label={t('settings.iqResults')}
               tooltip={t('settings.iqResults')}
               value={settings.iqSearchResults}
@@ -155,6 +163,7 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
               onChange={(v) => update('iqSearchResults', v)}
             />
             <SliderField
+              inputId="settings-iq-threshold"
               label={t('settings.iqThreshold')}
               tooltip={t('settings.iqThreshold')}
               value={settings.iqScoreThreshold}

@@ -8,6 +8,7 @@
   --bg-accent-strong: rgba(14, 116, 144, 0.12);
   --panel-bg: rgba(255, 255, 255, 0.82);
   --panel-strong: rgba(248, 250, 252, 0.94);
+  --surface: rgba(255, 255, 255, 0.7);
   --panel-border: rgba(15, 23, 42, 0.08);
   --text-primary: #0f172a;
   --text-secondary: #334155;
@@ -37,6 +38,7 @@
   --bg-accent-strong: rgba(34, 211, 238, 0.09);
   --panel-bg: rgba(9, 15, 28, 0.84);
   --panel-strong: rgba(15, 23, 42, 0.92);
+  --surface: rgba(15, 23, 42, 0.72);
   --panel-border: rgba(148, 163, 184, 0.16);
   --text-primary: #e2e8f0;
   --text-secondary: #cbd5e1;

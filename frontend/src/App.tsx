@@ -11,6 +11,7 @@ import { LanguageSwitcher } from './components/LanguageSwitcher'
 import { MarkdownView } from './components/MarkdownView'
 import { PdfUpload } from './components/PdfUpload'
 import { PipelineStepper } from './components/PipelineStepper'
+import { PlanVersionTabs } from './components/PlanVersionTabs'
 import { RefineChat } from './components/RefineChat'
 import { SafetyBadge } from './components/SafetyBadge'
 import { SettingsPanel } from './components/SettingsPanel'
@@ -24,6 +25,7 @@ import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
+import { buildPlanVersions } from './lib/plan-versions'
 
 
 const AGENT_STEP_KEY: Record<string, string> = {
@@ -58,14 +60,27 @@ function App() {
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const planContent = state.textContents.findLast(c => c.agent === 'marketing-plan-agent')
   const revisionContent = state.textContents.findLast(c => c.agent === 'plan-revision-agent')
-  // revision agent が修正済み企画書を出力するまでは「確認中」として表示
-  const showFinalPlan = revisionContent || isCompleted
+  const planVersions = buildPlanVersions(state.textContents)
+  const [selectedPlanVersionIndexes, setSelectedPlanVersionIndexes] = useState<Record<string, number>>({})
   const statusLabel = t(`status.${state.status}`)
   const pendingPlanLabel = state.status === 'approval'
     ? t('status.approval')
     : state.agentProgress?.agent === 'plan-revision-agent'
       ? t('step.plan_revision')
       : t('step.regulation')
+  const planVersionScope = `${state.conversationId ?? 'draft'}:${state.currentVersion}`
+  const defaultPlanVersionIndex = Math.max(planVersions.length - 1, 0)
+  const activePlanVersionIndex = Math.min(
+    selectedPlanVersionIndexes[planVersionScope] ?? defaultPlanVersionIndex,
+    defaultPlanVersionIndex,
+  )
+  const activePlanVersion = planVersions[activePlanVersionIndex]
+  const displayedPlan = revisionContent?.content
+    || activePlanVersion?.content
+    || state.approvalRequest?.plan_markdown
+    || planContent?.content
+    || ''
+  const showDraftPlanTabs = !revisionContent && planVersions.length > 1
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
@@ -95,7 +110,7 @@ function App() {
 
           {/* 会話履歴（インラインパネル） */}
           <div className="px-5 pt-3">
-            <ConversationHistory onSelect={restoreConversation} t={t} />
+            <ConversationHistory onSelect={restoreConversation} t={t} locale={locale} />
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">
@@ -160,35 +175,42 @@ function App() {
               </div>
             </div>
             <SettingsPanel settings={state.settings} onChange={updateSettings} t={t} />
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <div className="flex-1">
-                {state.status === 'completed' ? (
-                  <RefineChat
-                    onSubmit={sendMessage}
-                    disabled={isRunning}
-                    placeholder={t('refine.placeholder')}
-                    sendLabel={t('input.send')}
-                    label={t('refine.label')}
-                  />
-                ) : (
-                  <InputForm
-                    key={voiceDraft.id}
-                    onSubmit={(msg) => { sendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
-                    disabled={isRunning}
-                    placeholder={t('input.placeholder')}
-                    sendLabel={t('input.send')}
-                    label={t('input.label')}
-                    initialValue={voiceDraft.text}
-                  />
-                )}
+            {state.status === 'approval' ? (
+              <div className="rounded-[20px] border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--warning-text)]">
+                {t('approval.awaiting_action')}
               </div>
-              <VoiceInput
-                onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
-                disabled={isRunning}
-                t={t}
-              />
-              <PdfUpload disabled={isRunning} t={t} />
-            </div>
+            ) : (
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+                <div className="flex-1">
+                  {state.status === 'completed' ? (
+                    <RefineChat
+                      onSubmit={sendMessage}
+                      disabled={isRunning}
+                      placeholder={t('refine.placeholder')}
+                      sendLabel={t('input.send')}
+                      label={t('refine.label')}
+                    />
+                  ) : (
+                    <InputForm
+                      key={voiceDraft.id}
+                      onSubmit={(msg) => { sendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
+                      disabled={isRunning}
+                      placeholder={t('input.placeholder')}
+                      sendLabel={t('input.send')}
+                      label={t('input.label')}
+                      initialValue={voiceDraft.text}
+                      t={t}
+                    />
+                  )}
+                </div>
+                <VoiceInput
+                  onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
+                  disabled={isRunning}
+                  t={t}
+                />
+                <PdfUpload disabled={isRunning} t={t} />
+              </div>
+            )}
           </div>
         </section>
 
@@ -225,37 +247,39 @@ function App() {
               {
                 key: 'plan',
                 label: t('tab.plan'),
-                content: planContent ? (
-                  showFinalPlan ? (
-                    <>
-                      <MarkdownView content={revisionContent?.content || planContent.content} />
-                      <button
-                        onClick={() => exportPlanMarkdown(state.textContents)}
-                        className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
-                      >
-                        <Download className="h-3.5 w-3.5" /> {t('export.plan')}
-                      </button>
-                      <EvaluationPanel
-                        query={state.userMessages[0] || ''}
-                        response={revisionContent?.content || planContent.content}
-                        html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
-                        t={t}
-                        onRefine={isRunning ? undefined : sendMessage}
+                content: displayedPlan ? (
+                  <>
+                    {showDraftPlanTabs && (
+                      <PlanVersionTabs
+                        versions={planVersions}
+                        activeIndex={activePlanVersionIndex}
+                        onChangeIndex={(index) => {
+                          setSelectedPlanVersionIndexes(prev => ({
+                            ...prev,
+                            [planVersionScope]: index,
+                          }))
+                        }}
                       />
-                    </>
-                  ) : (
-                    <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
-                      <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
-                      <p className="text-sm">
-                        {pendingPlanLabel}…
-                      </p>
-                      <p className="text-xs mt-1">{t('preview.unavailable')}</p>
-                    </div>
-                  )
+                    )}
+                    <MarkdownView content={displayedPlan} />
+                    <button
+                      onClick={() => exportPlanMarkdown(state.textContents)}
+                      className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+                    >
+                      <Download className="h-3.5 w-3.5" /> {t('export.plan')}
+                    </button>
+                    <EvaluationPanel
+                      query={state.userMessages[0] || ''}
+                      response={displayedPlan}
+                      html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
+                      t={t}
+                      onRefine={state.status === 'completed' && !isRunning ? sendMessage : undefined}
+                    />
+                  </>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
-                    <p className="text-sm">{t('step.marketing_plan')}…</p>
+                    <p className="text-sm">{pendingPlanLabel}…</p>
                   </div>
                 ),
               },

@@ -21,7 +21,6 @@ export function LanguageSwitcher({ locale, onChange, t }: LanguageSwitcherProps)
         onChange={e => onChange(e.target.value as Locale)}
         aria-label={t('language.label')}
         className="rounded-full bg-[var(--panel-strong)] px-2 py-1 text-sm text-[var(--text-primary)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-        style={{ colorScheme: 'normal' }}
       >
         {LOCALES.map(l => (
           <option key={l.value} value={l.value} className="bg-[var(--panel-strong)] text-[var(--text-primary)]">{l.label}</option>

@@ -7,7 +7,15 @@ interface ImageGalleryProps {
 }
 
 export function ImageGallery({ images, t }: ImageGalleryProps) {
-  if (images.length === 0) return null
+  const validImages = images.filter(image => image.url.trim().length > 0)
+
+  if (validImages.length === 0) {
+    return (
+      <div className="rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] px-6 py-10 text-sm text-[var(--text-muted)]">
+        {t('preview.unavailable')}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-2">
@@ -15,7 +23,7 @@ export function ImageGallery({ images, t }: ImageGalleryProps) {
         {t('section.images')}
       </h3>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {images.map((img, i) => (
+        {validImages.map((img, i) => (
           <div key={i} className="overflow-hidden rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-3">
             <img
               src={img.url}

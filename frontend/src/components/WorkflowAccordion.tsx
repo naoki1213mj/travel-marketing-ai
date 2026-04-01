@@ -229,16 +229,16 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
                 <RegulationResults contents={roundContents} t={t} />
               ) : step.key === 'brochure-gen-agent' ? (
                 <div className="py-3 space-y-2">
-                  <p className="text-sm text-[var(--text-secondary)]">ブローシャ・画像の生成が完了しました。</p>
-                  <p className="text-xs text-[var(--text-muted)]">右側の「ブローシャ」「販促用画像」タブでプレビューできます。</p>
+                  <p className="text-sm text-[var(--text-secondary)]">{t('workflow.brochure.ready')}</p>
+                  <p className="text-xs text-[var(--text-muted)]">{t('workflow.brochure.preview_hint')}</p>
                   {(() => {
                     const videoContent = roundContents.find(c => c.content_type === 'video')
                     const videoProgress = roundContents.find(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')
                     if (videoContent) {
-                      return <p className="text-sm text-[var(--text-secondary)]">アバター動画の生成が完了しました。「アバター動画」タブで再生できます。</p>
+                      return <p className="text-sm text-[var(--text-secondary)]">{t('workflow.video.ready')}</p>
                     }
                     if (videoProgress) {
-                      return <p className="text-sm text-[var(--text-muted)]">アバター動画を生成中...</p>
+                      return <p className="text-sm text-[var(--text-muted)]">{t('workflow.video.running')}</p>
                     }
                     return null
                   })()}
@@ -276,7 +276,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
           <summary className="flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-xs text-[var(--text-muted)] hover:bg-[var(--surface)] hover:text-[var(--text-primary)]">
             <ChevronDown className="h-3 w-3 transition-transform group-open:rotate-180" />
             <span className="font-medium">
-              {round.number === 1 ? t('round.initial') : `Round ${round.number} · ${t('round.improvement')}`}
+              {round.number === 1 ? t('round.initial') : `${t('workflow.round').replace('{n}', String(round.number))} · ${t('round.improvement')}`}
             </span>
             <span className="rounded-full bg-green-100 dark:bg-green-900/60 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-200">
               <Check className="inline h-3 w-3" />
@@ -315,7 +315,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
               <div className="flex items-center gap-3 py-2">
                 <div className="h-px flex-1 bg-[var(--panel-border)]" />
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                  Round {round.number} · {t('round.improvement')}
+                  {t('workflow.round').replace('{n}', String(round.number))} · {t('round.improvement')}
                 </span>
                 <div className="h-px flex-1 bg-[var(--panel-border)]" />
               </div>
