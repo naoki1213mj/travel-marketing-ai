@@ -1687,10 +1687,15 @@ async def _post_approval_events(user_response: str, conversation_id: str):
 
     video_job = pop_pending_video_job()
     if video_job and video_job.get("job_id"):
+        # ポーリング中は video-gen-agent を running に戻す（UI で brochure に完了チェックが付かないように）
+        yield format_sse(
+            SSEEventType.AGENT_PROGRESS,
+            {"agent": "video-gen-agent", "status": "running", "step": 5, "total_steps": _PIPELINE_TOTAL_STEPS},
+        )
         yield format_sse(
             SSEEventType.TEXT,
             {
-                "content": "🎬 販促動画を生成中です...",
+                "content": "販促動画を生成中です...",
                 "agent": "video-gen-agent",
                 "content_type": "text",
             },
@@ -1707,6 +1712,12 @@ async def _post_approval_events(user_response: str, conversation_id: str):
             )
         elif video_url:
             logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
+
+        # ポーリング完了 → video-gen-agent を completed に
+        yield format_sse(
+            SSEEventType.AGENT_PROGRESS,
+            {"agent": "video-gen-agent", "status": "completed", "step": 5, "total_steps": _PIPELINE_TOTAL_STEPS},
+        )
 
     review_input = "\n\n".join(
         part
