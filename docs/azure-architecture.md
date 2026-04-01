@@ -8,12 +8,16 @@
 flowchart LR
     user[マーケ担当者] --> ui[React 19 frontend]
     ui --> api[FastAPI SSE API]
+    ui -. evaluate / refine .-> eval[/POST /api/evaluate/]
+    eval --> foundryEval[Foundry Evaluations]
     api --> inputshield[Prompt Shield]
     inputshield --> flow[SequentialBuilder workflow in FastAPI]
 
     flow --> a1[data-search-agent]
-    a1 --> fabric[Fabric Lakehouse SQL]
-    a1 -.-> csv[CSV fallback]
+    a1 --> dataAgent[Fabric Data Agent Published URL]
+    dataAgent --> fabricDelta[Lakehouse tables]
+    a1 -. fallback .-> fabric[Fabric Lakehouse SQL]
+    fabric -. fallback .-> csv[CSV fallback]
 
     flow --> a2[marketing-plan-agent]
     a2 --> web[Foundry Web Search]
@@ -36,9 +40,11 @@ flowchart LR
 
     subgraph fabricLayer[Fabric Data]
         fabricSQL[Fabric SQL Endpoint]
+        fabricAgent[Published Data Agent]
         fabricDelta[Delta Parquet tables]
     end
     fabric --> fabricSQL
+    dataAgent --> fabricAgent
     fabricSQL --> fabricDelta
     outputsafety --> ui
 
@@ -98,7 +104,9 @@ flowchart TB
 |---|---|
 | Azure AI Search の作成と `regulations-index` の投入 | Foundry IQ の実データ検索に必要 |
 | Foundry project と Azure AI Search の接続 | `search_knowledge_base()` の既定接続に必要 |
-| `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse リアルタイムデータ検索に必要（未設定時は CSV フォールバック） |
+| `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent Published URL を優先利用するため |
+| `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse SQL フォールバック接続に必要（未設定時は CSV フォールバック） |
+| `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` に評価専用 deployment を使う場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
@@ -108,7 +116,7 @@ flowchart TB
 
 | 実行主体 | 認証方式 | 主な用途 |
 |---|---|---|
-| FastAPI / Container App | `DefaultAzureCredential` | Foundry、Cosmos DB、Azure AI Search、Content Safety |
+| FastAPI / Container App | `DefaultAzureCredential` | Foundry、Fabric Data Agent / Fabric SQL、Cosmos DB、Azure AI Search、Content Safety |
 | APIM | Managed Identity | Foundry バックエンドへの認証 |
 | AI Search bootstrap script | Foundry 接続または API key | 初期インデックス投入 |
 
@@ -117,12 +125,14 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 ## 6. 現在の実装メモ
 
 - `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
-- Agent1 は Fabric Lakehouse SQL endpoint に pyodbc + Azure AD トークン認証で接続します。`FABRIC_SQL_ENDPOINT` 未設定時は CSV → ハードコードデータにフォールバック。
+- Agent1 は `FABRIC_DATA_AGENT_URL` がある場合、Fabric Data Agent Published URL を最優先で使用します。利用不可時のみ Fabric Lakehouse SQL endpoint の pyodbc 接続、その後 CSV → ハードコードデータへフォールバックします。
 - Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
 - Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で生成します。
 - Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `AzureOpenAIResponsesClient` にフォールバックします。
 - Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
 - APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。また Voice Agent の作成も行います。
+- `/api/evaluate` は Built-in 評価器（Relevance / Coherence / Fluency）に加え、旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーンを返し、成功時は Foundry にログします。
+- フロントエンドは各 `done` イベントごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。

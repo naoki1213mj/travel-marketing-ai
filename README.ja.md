@@ -6,11 +6,12 @@
 
 ## 現在の実装範囲
 
-- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）
-- FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信
+- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）、企画書タブ内の評価パネル、成果物全体の v1/v2 切替
+- FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信、`/api/evaluate` 品質評価 API
 - パイプラインの 7 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、企画書修正、販促物生成（顧客向け HTML）、動画生成（Photo Avatar）、品質レビュー。ユーザーには 5 ステップ表示
+- Fabric データアクセス: `FABRIC_DATA_AGENT_URL` がある場合は Fabric Data Agent Published URL を優先し、利用不可時は Fabric Lakehouse SQL、その次に CSV へフォールバック
+- Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、評価起点の再改善
 - Azure 構成時のみ追加で動くオプションの品質レビューエージェント
-- Fabric Lakehouse 連携: pyodbc + Azure AD トークン認証によるリアルタイム売上・レビューデータ検索
 - Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
 - Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
 - Code Interpreter の自動検出とグレースフルフォールバック
@@ -23,12 +24,15 @@
 - APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシーの適用を行います。
 - Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
-- Agent1 は Fabric Lakehouse に pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で接続します。Fabric SQL endpoint が利用できない場合は CSV フォールバックを使います。
+- Agent1 はまず Fabric Data Agent Published URL（`FABRIC_DATA_AGENT_URL`）を AAD 認証付きの Assistants 互換エンドポイントとして利用し、利用できない場合は Fabric Lakehouse SQL の pyodbc 接続（`SQL_COPT_SS_ACCESS_TOKEN`）、最後に CSV へフォールバックします。
 - Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
 - Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を MP4/H.264 で出力します。
 - Agent6（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
 - Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
 - フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
+- `POST /api/evaluate` は `azure-ai-evaluation` の Built-in 評価器（Relevance / Coherence / Fluency）と、code-based / prompt-based のカスタム評価器を組み合わせ、成功時は Foundry ポータル URL も返します。
+- 評価結果からの改善は `POST /api/chat` にフィードバック文を戻して企画書を再生成し、新しい `approval_request` を返します。承認すると規制チェック以降の成果物も再生成されます。
+- フロントエンドは完了ごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
 - Voice Live API は MSAL.js による Entra アプリ登録認証です。`VoiceInput` コンポーネントは Voice Live + Web Speech API のデュアルモードで動作します。
 - 会話履歴は Cosmos DB から `restoreConversation()` で復元され、再推論は行いません。
 - ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。
@@ -119,12 +123,17 @@ azd up
 | `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Microsoft Foundry project endpoint |
 | `CONTENT_SAFETY_ENDPOINT` | 本番 | Content Safety / Text Analysis のエンドポイント |
 | `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini`。フロントエンドのモデルセレクターでは `gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` も選択可 |
+| `EVAL_MODEL_DEPLOYMENT` | 推奨 | `/api/evaluate` 用の専用 deployment 名。未設定時は `MODEL_NAME` を使用 |
 | `ENVIRONMENT` | 任意 | `development`、`staging`、`production` |
+| `SERVE_STATIC` | 任意 | ビルド済みフロントエンドを FastAPI から配信する場合に `true` |
+| `API_KEY` | 任意 | 設定すると `health` / `ready` 以外の `/api/*` が `x-api-key` 必須になる |
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存。未設定時はインメモリ |
-| `FABRIC_SQL_ENDPOINT` | 推奨 | Fabric Lakehouse SQL endpoint（リアルタイムデータ検索、未設定時は CSV フォールバック） |
+| `FABRIC_DATA_AGENT_URL` | 推奨 | `/aiassistant/openai` で終わる Fabric Data Agent Published URL。Agent1 はこれを最優先で利用 |
+| `FABRIC_SQL_ENDPOINT` | 任意 | Fabric Data Agent が使えない場合や追加の構造化検索が必要な場合の SQL endpoint |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | 任意 | PDF 解析用 |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Speech / Photo Avatar 動画生成用 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
+| `VOICE_AGENT_NAME` | 任意 | `/api/voice-config` で返す Voice Live エージェント名 |
 | `VOICE_SPA_CLIENT_ID` | 任意 | Voice Live の MSAL.js 認証用 Entra アプリ登録クライアント ID |
 | `AZURE_TENANT_ID` | 任意 | Voice Live 認証用 Entra テナント ID |
 | `LOGIC_APP_CALLBACK_URL` | 任意 | 承認継続後の Logic Apps HTTP トリガー |

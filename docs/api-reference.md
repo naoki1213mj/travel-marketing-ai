@@ -1,6 +1,6 @@
 # API リファレンス
 
-このドキュメントは、現在の実装を基準にした REST API と SSE の仕様です。要件書にある将来像ではなく、`src/api/chat.py`、`src/api/conversations.py`、`src/api/health.py` の現行挙動をまとめています。
+このドキュメントは、現在の実装を基準にした REST API と SSE の仕様です。要件書にある将来像ではなく、`src/api/chat.py`、`src/api/conversations.py`、`src/api/evaluate.py`、`src/api/voice.py`、`src/api/health.py` の現行挙動をまとめています。
 
 ## ベース URL
 
@@ -13,8 +13,8 @@
 |---|---|---|
 | Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | `SequentialBuilder` を使って主フローを最後まで実行 |
 | モック / デモモード | `AZURE_AI_PROJECT_ENDPOINT` 未設定 | ハードコード済みの SSE イベントを返す |
-| 修正モード | `POST /api/chat` に `conversation_id` を指定 | キーワードに応じて単一エージェントを再実行 |
-| 承認継続モード | `POST /api/chat/{thread_id}/approve` | 承認なら Agent3→Agent4、修正なら再調整経路 |
+| 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
+| 承認継続モード | `POST /api/chat/{thread_id}/approve` | 承認なら Agent3a→Agent3b→Agent4→Agent5、非承認なら企画書を再生成して再度 `approval_request` を返す |
 
 ## エンドポイント一覧
 
@@ -74,8 +74,12 @@
   "message": "沖縄のファミリー向け春キャンペーンを企画してください",
   "conversation_id": null,
   "settings": {
+    "model": "gpt-5-4-mini",
     "temperature": 0.2,
-    "max_tokens": 1200
+    "max_tokens": 1200,
+    "top_p": 1.0,
+    "iq_search_results": 5,
+    "iq_score_threshold": 0.0
   }
 }
 ```
@@ -84,7 +88,7 @@
 |---|---|---|---|
 | `message` | `string` | 必須 | 1〜5000 文字 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `settings` | `object \| null` | 任意 | `model` でテキスト推論モデルを選択可能（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）。フロントエンドのモデルセレクターから送信される。`temperature`、`max_tokens` も将来拡張用に受け付ける |
+| `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold` を送信できる。現行バックエンドで明示利用しているのは主に `model`、`temperature`、`max_tokens`、`top_p` |
 
 ### 現行挙動
 
@@ -92,12 +96,15 @@
 |---|---|
 | 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `safety` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
-| `conversation_id` あり | 指示内容に応じて `marketing-plan-agent` / `regulation-check-agent` / `plan-revision-agent` / `brochure-gen-agent` / `video-gen-agent` を再実行 |
+| `conversation_id` + 承認待ち中 | `marketing-plan-agent` で企画書を再生成し、新しい `approval_request` を返す |
+| `conversation_id` + 完了済み + 評価フィードバック | `marketing-plan-agent` で企画書を改善し、新しい `approval_request` を返す |
+| `conversation_id` + 完了済み + 通常の修正指示 | キーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 
 ### 注意
 
 - Azure モードの主フローは Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
-- `conversation_id` を指定した修正モードでは、会話履歴全体を再構成するのではなく、対象エージェントを個別に呼び直します。
+- `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
+- フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
 
 ### cURL 例
 
@@ -222,6 +229,82 @@ curl -N -X POST http://localhost:8000/api/chat \
 }
 ```
 
+## `POST /api/evaluate`
+
+企画書とブローシャを評価し、Built-in 指標、カスタム指標、LLM ジャッジ結果をまとめて返します。
+
+- レート制限: 5 リクエスト / 分
+- フロントエンドでは企画書タブの評価パネルから呼ばれます
+- `AZURE_AI_PROJECT_ENDPOINT` が未設定でも呼び出せますが、Built-in 評価と prompt-based 評価はエラー / 低機能モードになります
+
+### リクエストボディ
+
+```json
+{
+  "query": "沖縄のファミリー向け春キャンペーンを企画してください",
+  "response": "# 春の沖縄ファミリープラン\n\n...",
+  "html": "<!DOCTYPE html><html lang=\"ja\">...</html>"
+}
+```
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `query` | `string` | 必須 | 元のユーザー依頼 |
+| `response` | `string` | 必須 | 企画書 Markdown |
+| `html` | `string` | 任意 | ブローシャ HTML。空文字可。未指定時のコンバージョン期待度判定は `response` を代用 |
+
+### レスポンス例
+
+```json
+{
+  "custom": {
+    "travel_law_compliance": {
+      "score": 0.8,
+      "details": {
+        "旅行業登録番号": true,
+        "取引条件": true,
+        "取消料": false,
+        "旅程": true,
+        "価格表示": true
+      },
+      "reason": "5 項目中 4 項目が記載されています"
+    },
+    "conversion_potential": {
+      "score": 0.6,
+      "details": {
+        "CTA（予約導線）": true,
+        "価格表示の明確さ": true,
+        "限定感の訴求": false,
+        "特典・付加価値": true,
+        "安心感の提供": false
+      },
+      "reason": "5 項目中 3 項目が含まれています"
+    }
+  },
+  "builtin": {
+    "relevance": { "score": 4.0, "reason": "依頼に沿っています" },
+    "coherence": { "score": 4.5, "reason": "構成が自然です" },
+    "fluency": { "score": 4.2, "reason": "日本語表現が滑らかです" }
+  },
+  "marketing_quality": {
+    "appeal": 4,
+    "differentiation": 3,
+    "kpi_validity": 4,
+    "brand_tone": 5,
+    "overall": 4,
+    "reason": "訴求は強いが差別化の具体性に改善余地があります"
+  },
+  "foundry_portal_url": "https://ai.azure.com/..."
+}
+```
+
+| フィールド | 型 | 説明 |
+|---|---|---|
+| `custom` | `object` | code-based カスタム評価。現在は `travel_law_compliance` と `conversion_potential` |
+| `builtin` | `object` | `azure-ai-evaluation` による `relevance` / `coherence` / `fluency` |
+| `marketing_quality` | `object` | prompt-based LLM ジャッジ。`appeal` / `differentiation` / `kpi_validity` / `brand_tone` / `overall` |
+| `foundry_portal_url` | `string?` | Foundry への評価ログに成功した場合のみ返るポータル URL |
+
 ## SSE 形式
 
 全ストリームは次の形式です。
@@ -266,6 +349,7 @@ data: <json>
 
 主な `tool` 値:
 
+- `query_data_agent`
 - `search_sales_history`
 - `search_customer_reviews`
 - `code_interpreter`
@@ -278,7 +362,7 @@ data: <json>
 - `generate_banner_image`
 - `generate_promo_video`
 
-注: Azure の `workflow_event_generator()` では現在 `tool_event` は個別には流れず、モック経路や単一エージェント再実行で主に見えます。
+注: Azure の主フローでも `_TOOL_EVENT_HINTS` に基づく `tool_event` が送出されます。実際に呼ばれた外部サービス数と 1:1 ではなく、UI 表示用の補助イベントです。
 
 ### `text`
 
@@ -370,28 +454,38 @@ data: <json>
 }
 ```
 
-`tool_calls` と `total_tokens` は現状の Azure 主フローでは 0 のまま返ることがあります。
+`tool_calls` と `total_tokens` は承認後フローで集計され、モック経路や一部フォールバック経路では 0 のことがあります。
 
 ## 代表的な SSE フロー
 
 ### Azure モードの新規会話
 
 ```text
-1. agent_progress (pipeline, running)
-2. text           (pipeline — Agent1 + Agent2 results)
-3. approval_request
+1. agent_progress (data-search-agent, running)
+2. tool_event     (0..n)
+3. text           (data-search-agent)
+4. image          (0..n, Code Interpreter グラフなど)
+5. agent_progress (data-search-agent, completed)
+6. safety
+7. agent_progress (marketing-plan-agent, running)
+8. tool_event     (0..n)
+9. text           (marketing-plan-agent)
+10. agent_progress (marketing-plan-agent, completed)
+11. safety
+12. agent_progress (approval, running)
+13. approval_request
    — user approves via POST /api/chat/{thread_id}/approve —
-4. agent_progress (regulation-check-agent)
-5. text           (regulation-check-agent)
-6. agent_progress (plan-revision-agent)
-7. text           (plan-revision-agent)
-8. agent_progress (brochure-gen-agent)
-9. text           (brochure-gen-agent)
-10. agent_progress (video-gen-agent)
-11. text           (video-gen-agent, content_type: video)
-12. safety
-13. done
-14. text           (quality-review-agent, optional)
+14. agent_progress (approval, completed)
+15. agent_progress (regulation-check-agent, running)
+16. tool_event / text / safety
+17. agent_progress (plan-revision-agent, running)
+18. text / safety
+19. agent_progress (brochure-gen-agent, running)
+20. tool_event / text(html) / image / safety
+21. agent_progress (video-gen-agent, running)
+22. text           (進捗メッセージ or video URL)
+23. text           (quality-review-agent, optional)
+24. done
 ```
 
 ### モック / デモモードの新規会話
@@ -421,6 +515,20 @@ data: <json>
 10. done
 ```
 
+### 評価起点の改善
+
+```text
+1. POST /api/evaluate で評価結果を取得
+2. フロントエンドが改善フィードバック文を生成
+3. POST /api/chat (conversation_id 付き) で改善フィードバックを送信
+4. agent_progress (marketing-plan-agent, running)
+5. text           (改善後の企画書)
+6. safety
+7. agent_progress (approval, running)
+8. approval_request
+9. 承認後は通常の承認継続フローで下流成果物を再生成
+```
+
 ## Content Safety
 
 - 入力: `check_prompt_shield()` で Prompt Shield を実行
@@ -435,28 +543,31 @@ data: <json>
 |---|---|
 | `POST /api/chat` | 10 リクエスト / 分 |
 | `POST /api/chat/{thread_id}/approve` | 10 リクエスト / 分 |
+| `POST /api/evaluate` | 5 リクエスト / 分 |
 
 ## Voice Live API
 
 ### `GET /api/voice-token`
 
-Voice Live 接続用の AAD トークンと設定を返します。`SPEECH_SERVICE_ENDPOINT` が設定されている場合のみ有効です。
+Voice Live 接続用の AAD トークンと設定を返します。`AZURE_AI_PROJECT_ENDPOINT` から `resource_name` と `project_name` を導出し、`DefaultAzureCredential` で `https://ai.azure.com/.default` スコープのトークンを取得します。
 
 レスポンス例:
 
 ```json
 {
   "token": "<aad-token>",
-  "endpoint": "https://<speech-endpoint>",
-  "resource_name": "<resource-name>",
-  "api_version": "2024-11-15"
+  "expires_on": 1767225600,
+  "resource_name": "your-foundry",
+  "project_name": "your-project",
+  "endpoint": "wss://your-foundry.services.ai.azure.com/voice-live/realtime",
+  "api_version": "2026-01-01-preview"
 }
 ```
 
-未設定時:
+失敗時:
 
 ```json
-{"error": "Speech service not configured"}
+{"error": "Voice token unavailable"}
 ```
 
 ### `GET /api/voice-config`
@@ -467,18 +578,19 @@ Voice Live の MSAL.js クライアント設定を返します。フロントエ
 
 ```json
 {
+  "agent_name": "travel-voice-orchestrator",
   "client_id": "<entra-app-client-id>",
   "tenant_id": "<entra-tenant-id>",
-  "agent_name": "travel-marketing-agent",
-  "endpoint": "https://<speech-endpoint>"
+  "resource_name": "your-foundry",
+  "project_name": "your-project",
+  "voice": "ja-JP-NanamiNeural",
+  "vad_type": "azure_semantic_vad",
+  "endpoint": "wss://your-foundry.services.ai.azure.com/voice-live/realtime",
+  "api_version": "2026-01-01-preview"
 }
 ```
 
-未設定時:
-
-```json
-{"error": "Voice Live not configured"}
-```
+`VOICE_SPA_CLIENT_ID` や `AZURE_TENANT_ID` が未設定でもこのエンドポイント自体は `200 OK` を返し、未設定項目は空文字列になります。
 
 フロントエンドの `VoiceInput` コンポーネントは以下のフローで動作します:
 1. `/api/voice-config` を呼び出して MSAL 設定を取得

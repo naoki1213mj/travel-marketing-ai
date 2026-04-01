@@ -38,9 +38,12 @@ cp .env.example .env
 ```env
 AZURE_AI_PROJECT_ENDPOINT=https://your-foundry.services.ai.azure.com/api/projects/your-project
 CONTENT_SAFETY_ENDPOINT=https://your-foundry.cognitiveservices.azure.com/
+EVAL_MODEL_DEPLOYMENT=gpt-4-1-mini
 ```
 
 `AZURE_AI_PROJECT_ENDPOINT` を入れなければモック / デモモードで動作します。
+
+Fabric の実データを自然言語で引かせたい場合は、追加で `FABRIC_DATA_AGENT_URL` に Published URL（`.../aiassistant/openai`）を設定します。未設定時は `FABRIC_SQL_ENDPOINT`、それもなければ CSV フォールバックです。
 
 ### 起動
 
@@ -116,7 +119,7 @@ azd deploy
 
 - IaC は既定のテキストモデル (`gpt-5-4-mini`) と画像モデル (`gpt-image-1.5`) を自動配備します
 - Container App には Content Understanding / Speech / Logic Apps callback の基本設定も自動注入されます
-- post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、および必要に応じた `FABRIC_SQL_ENDPOINT` の設定です
+- post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、必要に応じた `FABRIC_DATA_AGENT_URL` または `FABRIC_SQL_ENDPOINT` の設定、評価専用モデルを分ける場合の `EVAL_MODEL_DEPLOYMENT` 設定です
 - 詳細は [azure-setup.md](azure-setup.md) を参照してください
 
 ## 6. 本番相当の環境変数
@@ -133,11 +136,16 @@ azd deploy
 | 変数名 | 用途 |
 |---|---|
 | `MODEL_NAME` | テキストモデル deployment 名 |
+| `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用の評価モデル deployment 名 |
+| `SERVE_STATIC` | FastAPI からビルド済みフロントエンドを返す場合に `true` |
+| `API_KEY` | APIM 経由アクセス時の `x-api-key` 保護 |
 | `COSMOS_DB_ENDPOINT` | 会話履歴保存 |
-| `FABRIC_SQL_ENDPOINT` | Fabric Lakehouse 接続 |
+| `FABRIC_DATA_AGENT_URL` | Fabric Data Agent Published URL（優先経路） |
+| `FABRIC_SQL_ENDPOINT` | Fabric Lakehouse SQL 接続（フォールバック経路） |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析 |
 | `SPEECH_SERVICE_ENDPOINT` | 動画生成 |
 | `SPEECH_SERVICE_REGION` | 動画生成 |
+| `VOICE_AGENT_NAME` | Voice Live エージェント名 |
 | `VOICE_SPA_CLIENT_ID` | Voice Live MSAL.js 認証 |
 | `AZURE_TENANT_ID` | Voice Live 認証 |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の通知 / 保存 |
@@ -148,6 +156,9 @@ azd deploy
 ```bash
 curl https://<your-app>/api/health
 curl https://<your-app>/api/ready
+curl -X POST https://<your-app>/api/evaluate \
+  -H "Content-Type: application/json" \
+  -d '{"query":"沖縄の春キャンペーンを企画して","response":"# 企画書\n...","html":""}'
 ```
 
 `/api/ready` が `503` の場合、レスポンスの `missing` 配列に不足設定が出ます。
@@ -195,9 +206,17 @@ curl https://<your-app>/api/ready
 
 モック / デモモードになります。Azure 実行確認をしたい場合は設定が必要です。
 
+### Fabric Data Agent がフォールバックに落ちる
+
+`FABRIC_DATA_AGENT_URL` が Fabric の Published URL（`.../aiassistant/openai`）になっているか、Container App の ID に Fabric ワークスペース / Data Agent へのアクセス権があるかを確認してください。未設定または到達不可でもアプリ自体は `FABRIC_SQL_ENDPOINT` → CSV の順で動作を継続します。
+
 ### `/api/ready` が `degraded`
 
 `ENVIRONMENT=production` か `staging` で、必須変数が不足しています。
+
+### 評価ボタンが失敗する、または評価値が `score: -1` になる
+
+`AZURE_AI_PROJECT_ENDPOINT` が正しいこと、評価用 deployment を分けるなら `EVAL_MODEL_DEPLOYMENT` が存在することを確認してください。未設定時は `MODEL_NAME` を評価にも使います。
 
 ### 画像が透明 PNG で返る
 

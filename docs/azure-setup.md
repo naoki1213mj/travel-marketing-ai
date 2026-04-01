@@ -30,7 +30,9 @@
 | Azure AI Search の作成 | Foundry IQ / `search_knowledge_base()` の実データ検索 |
 | `regulations-index` の投入 | 規制ドキュメント検索 |
 | Foundry project への Azure AI Search 接続追加 | `connections.get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
-| `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse リアルタイムデータ検索（未設定時は CSV フォールバック） |
+| `FABRIC_DATA_AGENT_URL` の設定 | Agent1 が Fabric Data Agent Published URL を優先利用するため |
+| `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse SQL フォールバック検索（未設定時は CSV フォールバック） |
+| `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用に別 deployment を使いたい場合 |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（`casual-sitting` スタイル） |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
@@ -158,14 +160,42 @@ az containerapp update \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_REGION=eastus2 \
     LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
+    FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai \
     FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
 ```
 
-### 4.8 Fabric Lakehouse の設定
+評価専用 deployment を使う場合は、同じコマンドに `EVAL_MODEL_DEPLOYMENT=<deployment-name>` も追加してください。
+
+### 4.8 Fabric Data Agent の設定（推奨）
+
+Agent1 は `FABRIC_DATA_AGENT_URL` が設定されている場合、Fabric Data Agent の Published URL を最優先で使います。
+
+必要事項:
+
+1. Fabric 側で Data Agent を Publish する
+2. Published URL を取得する（末尾は `/aiassistant/openai`）
+3. Container App の実行主体に Fabric ワークスペース / Data Agent の利用権限を付与する
+4. `FABRIC_DATA_AGENT_URL` を Container App に設定する
+
+```bash
+az containerapp update \
+  --name <container-app-name> \
+  --resource-group <resource-group> \
+  --set-env-vars FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai
+```
+
+アプリ側では以下を自動処理します。
+
+- AAD トークン取得スコープ: `https://analysis.windows.net/powerbi/api/.default`
+- OpenAI Assistants 互換エンドポイント呼び出し
+- `api-version=2024-05-01-preview` の付与
+- 利用不可時の SQL / CSV フォールバック
+
+### 4.9 Fabric Lakehouse SQL フォールバックの設定
 
 Agent1 が Fabric Lakehouse にリアルタイム接続するには以下が必要です:
 
-1. Fabric Lakehouse に売上テーブル（`sales_history`）とレビューテーブル（`customer_reviews`）を作成
+1. Fabric Lakehouse `Travel_Lakehouse` に売上テーブル（`sales_results`）とレビューテーブル（`customer_reviews`）を作成
 2. SQL endpoint を取得（Fabric ポータル → Lakehouse → SQL analytics endpoint）
 3. Container App の Managed Identity に Fabric SQL への読み取り権限を付与
 4. `FABRIC_SQL_ENDPOINT` 環境変数を設定
@@ -179,7 +209,7 @@ az containerapp update \
 
 接続は pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で行います。`FABRIC_SQL_ENDPOINT` 未設定時は CSV ファイル (`data/sales_history.csv`, `data/customer_reviews.csv`) にフォールバックします。
 
-### 4.9 Voice Live の設定（Entra アプリ登録）
+### 4.10 Voice Live の設定（Entra アプリ登録）
 
 Voice Live API のフロントエンド認証には Entra アプリ登録が必要です:
 
@@ -236,19 +266,26 @@ curl https://<container-app-fqdn>/api/ready
 
 ### Fabric Lakehouse 疎通
 
-- `FABRIC_SQL_ENDPOINT` が設定済み
-- Agent1 の `search_sales_history()` が Fabric SQL クエリ結果を返す（CSV フォールバックではない）
+- `FABRIC_DATA_AGENT_URL` が設定済みなら、Agent1 が `query_data_agent()` を優先し、Lakehouse ベースの自然言語回答を返す
+- `FABRIC_SQL_ENDPOINT` が設定済みなら、Agent1 の `search_sales_history()` / `search_customer_reviews()` が Fabric SQL クエリ結果を返す（CSV フォールバックではない）
 - Managed Identity に Fabric SQL 読み取り権限が付与済み
+
+### Foundry Evaluation 疎通
+
+- `/api/evaluate` が `builtin` / `custom` / `marketing_quality` を返す
+- `EVAL_MODEL_DEPLOYMENT` を設定している場合、その deployment が存在する
+- 評価ログ成功時は `foundry_portal_url` が返る
 
 ## 6. 実装差分として知っておくこと
 
 - APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）とポリシーが自動構成される
-- Agent1 は Fabric Lakehouse SQL endpoint にリアルタイム接続し、CSV は フォールバック専用
+- Agent1 は `FABRIC_DATA_AGENT_URL` があれば Fabric Data Agent Published URL を優先利用し、利用不可時のみ Fabric SQL → CSV にフォールバックする
 - Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない
 - Agent5（動画生成）は Photo Avatar で `casual-sitting` スタイル、`ja-JP-NanamiNeural` 音声の販促動画を生成
 - Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
 - Code Interpreter は自動検出でグレースフルフォールバック
 - Voice Live API は MSAL.js + Entra アプリ登録で認証。Web Speech API への自動フォールバックあり
+- `/api/evaluate` は Built-in 評価器に加え、旅行業法準拠・コンバージョン期待度・訴求力・差別化・KPI 妥当性・ブランドトーンを返す
 - 会話履歴は Cosmos DB から `restoreConversation()` で再推論なしに復元
 - 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行する
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）
