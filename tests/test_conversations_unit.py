@@ -144,7 +144,7 @@ class TestSaveConversationDetails:
     """会話保存の詳細テスト"""
 
     async def test_save_with_artifacts_and_metrics(self):
-        """artifacts と metrics が保存されること"""
+        """artifacts がバージョン配列として保存されること"""
         await save_conversation(
             conversation_id="test-artifacts",
             user_input="テスト",
@@ -153,18 +153,21 @@ class TestSaveConversationDetails:
             metrics={"latency": 1.5},
         )
         doc = _memory_store["test-artifacts"]
-        assert doc["artifacts"] == {"html": "<p>test</p>"}
+        assert isinstance(doc["artifacts"], list)
+        assert len(doc["artifacts"]) == 1
+        assert doc["artifacts"][0]["html"] == "<p>test</p>"
+        assert doc["artifacts"][0]["version"] == 1
         assert doc["metadata"] == {"latency": 1.5}
 
     async def test_save_default_artifacts_and_metrics(self):
-        """artifacts/metrics 未指定時はデフォルト値"""
+        """artifacts/metrics 未指定時は空配列"""
         await save_conversation(
             conversation_id="test-defaults",
             user_input="テスト",
             events=[],
         )
         doc = _memory_store["test-defaults"]
-        assert doc["artifacts"] == {}
+        assert doc["artifacts"] == []
         assert doc["metadata"] == {}
 
     async def test_save_sets_user_id(self):

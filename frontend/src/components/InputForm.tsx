@@ -12,6 +12,13 @@ interface InputFormProps {
   initialValue?: string
 }
 
+const QUICK_CHIPS = [
+  { label: '🌸 春の沖縄ファミリー', prompt: '春の沖縄ファミリー向けプランを企画して' },
+  { label: '⛷ 冬の北海道カップル', prompt: '冬の北海道カップル向けプランを企画して' },
+  { label: '🍁 秋の京都シニア', prompt: '秋の京都シニア向けプランを企画して' },
+  { label: '🏖 夏のハワイ学生', prompt: '夏のハワイ学生旅行向けプランを企画して' },
+]
+
 export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, initialValue }: InputFormProps) {
   // initialValue が変わったら message にセットする（React 19 の key パターン）
   const [prevInitial, setPrevInitial] = useState('')
@@ -35,6 +42,21 @@ export function InputForm({ onSubmit, disabled, placeholder, sendLabel, label, i
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-1">
+      {!disabled && !message && (
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {QUICK_CHIPS.map(chip => (
+            <button
+              key={chip.label}
+              type="button"
+              onClick={() => setMessage(chip.prompt)}
+              className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs
+                         text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent-strong)]"
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="flex gap-3">
         <label className="sr-only" htmlFor="input-form-message">{label}</label>
         <textarea

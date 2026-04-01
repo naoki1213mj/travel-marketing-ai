@@ -133,23 +133,35 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
             "api_key": token.token,
         }
 
-        from azure.ai.evaluation import CoherenceEvaluator, FluencyEvaluator, RelevanceEvaluator
+        from azure.ai.evaluation import (
+            CoherenceEvaluator,
+            FluencyEvaluator,
+            GroundednessEvaluator,
+            RelevanceEvaluator,
+            TaskAdherenceEvaluator,
+        )
 
         evaluators = {
             "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
             "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
             "fluency": FluencyEvaluator(model_config=model_config, is_reasoning_model=True),
+            "groundedness": GroundednessEvaluator(model_config=model_config, is_reasoning_model=True),
+            "task_adherence": TaskAdherenceEvaluator(model_config=model_config, is_reasoning_model=True),
         }
 
         results: dict[str, dict] = {}
         for name, evaluator in evaluators.items():
             try:
-                result = evaluator(query=query, response=response)
+                # Groundedness は context パラメータが必要
+                if name == "groundedness":
+                    result = evaluator(query=query, response=response, context=response[:3000])
+                else:
+                    result = evaluator(query=query, response=response)
                 score = result.get(name, result.get(f"gpt_{name}"))
-                reason = result.get(f"{name}_reason", "")
+                reason = result.get(f"{name}_reason", result.get(f"{name}_label", ""))
                 results[name] = {
                     "score": float(score) if score is not None else -1,
-                    "reason": reason,
+                    "reason": str(reason),
                 }
             except (ValueError, OSError, RuntimeError) as exc:
                 logger.warning("Built-in 評価器 %s でエラー: %s", name, exc)

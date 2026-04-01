@@ -72,6 +72,19 @@ async def save_conversation(
     """会話をストアに保存する。"""
     now = datetime.now(timezone.utc).isoformat()
     existing = await get_conversation(conversation_id)
+    # 既存の artifacts バージョン配列を維持しつつ新しいバージョンを追加
+    existing_artifacts = existing.get("artifacts", []) if existing else []
+    if not isinstance(existing_artifacts, list):
+        # フラット dict→配列への移行互換: 旧形式はバージョン 1 として取り込む
+        existing_artifacts = [existing_artifacts] if existing_artifacts else []
+    new_artifact = artifacts or {}
+    if new_artifact:
+        new_artifact["version"] = len(existing_artifacts) + 1
+        new_artifact["created_at"] = now
+        artifact_versions = [*existing_artifacts, new_artifact]
+    else:
+        artifact_versions = existing_artifacts
+
     doc = {
         "id": conversation_id,
         "user_id": "demo-user",
@@ -80,7 +93,7 @@ async def save_conversation(
         "status": status,
         "input": user_input,
         "messages": events,
-        "artifacts": artifacts or {},
+        "artifacts": artifact_versions,
         "metadata": metrics or {},
     }
 
