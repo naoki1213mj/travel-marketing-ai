@@ -309,10 +309,12 @@ class TestCosmosDBPaths:
     async def test_list_conversations_cosmos_success(self, monkeypatch):
         """Cosmos DB から会話一覧を取得できる場合"""
         mock_container = MagicMock()
-        mock_container.query_items.return_value = iter([
-            {"id": "c1", "input": "q1"},
-            {"id": "c2", "input": "q2"},
-        ])
+        mock_container.query_items.return_value = iter(
+            [
+                {"id": "c1", "input": "q1"},
+                {"id": "c2", "input": "q2"},
+            ]
+        )
 
         with patch("src.conversations._get_container", return_value=mock_container):
             result = await list_conversations(limit=10)
@@ -357,9 +359,7 @@ class TestCosmosDBPaths:
     async def test_get_replay_data_cosmos_success(self, monkeypatch):
         """Cosmos DB からリプレイデータを取得"""
         mock_container = MagicMock()
-        mock_container.read_item.return_value = {
-            "events": [{"event": "text", "data": {"content": "test"}}]
-        }
+        mock_container.read_item.return_value = {"events": [{"event": "text", "data": {"content": "test"}}]}
 
         with patch("src.conversations._get_container", return_value=mock_container):
             result = await get_replay_data("replay-cosmos-get")
@@ -406,6 +406,7 @@ class TestCosmosClientCreation:
         # azure.cosmos モジュール自体をモックする
         import sys
         import types
+
         mock_cosmos_module = types.ModuleType("azure.cosmos")
         mock_cosmos_module.CosmosClient = MagicMock(side_effect=ValueError("Invalid URL"))
 

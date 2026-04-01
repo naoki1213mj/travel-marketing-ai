@@ -3,8 +3,8 @@
 毎リクエストで Credential + Client を再生成するオーバーヘッドを削減する。
 deployment_name をキーにキャッシュし、異なるモデル設定でも既存クライアントを再利用する。
 
-APIM_GATEWAY_URL が設定されている場合はモデル呼び出しを APIM AI Gateway 経由に
-ルーティングし、トークン制限・メトリクス・監視の恩恵を受ける。
+APIM AI Gateway は Foundry ポータルで Gateway を有効化することで自動経由される。
+アプリコード側での endpoint 差し替えは不要。
 """
 
 import logging
