@@ -198,6 +198,7 @@ export function useSSE() {
       status: 'running',
       error: null,
       approvalRequest: null,
+      agentProgress: null,
       userMessages: [...prev.userMessages, message],
     }))
     const handlers = createHandlers()
