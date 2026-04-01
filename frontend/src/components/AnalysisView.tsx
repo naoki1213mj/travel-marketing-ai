@@ -7,7 +7,7 @@ interface AnalysisViewProps {
 }
 
 export function AnalysisView({ contents, t }: AnalysisViewProps) {
-  const analysisContent = contents.find(c => c.agent === 'data-search-agent')
+  const analysisContent = contents.findLast(c => c.agent === 'data-search-agent')
   if (!analysisContent) return null
 
   return (

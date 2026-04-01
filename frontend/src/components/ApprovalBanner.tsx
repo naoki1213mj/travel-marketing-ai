@@ -26,13 +26,13 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
           <p className="flex-1 text-sm text-[var(--text-secondary)]">{request.prompt}</p>
           <button
             onClick={() => setMode('revise')}
-            className="rounded-full border border-[var(--panel-border)] bg-white/80 dark:bg-white/10 px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-white dark:hover:bg-white/20 transition-colors"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[var(--panel-border)] bg-white/80 dark:bg-white/10 px-4 py-2 text-sm font-medium text-[var(--text-secondary)] hover:bg-white dark:hover:bg-white/20 transition-colors"
           >
             <Pencil className="h-3.5 w-3.5" /> {t('approval.revise')}
           </button>
           <button
             onClick={() => onApprove(t('approval.approve'))}
-            className="rounded-full bg-green-600 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-green-600/25 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800 ring-2 ring-green-600/20 ring-offset-2 dark:ring-offset-gray-900 transition-all"
+            className="inline-flex items-center gap-1.5 rounded-full bg-green-600 px-6 py-2 text-sm font-semibold text-white shadow-lg shadow-green-600/25 hover:bg-green-700 dark:bg-green-700 dark:hover:bg-green-800 ring-2 ring-green-600/20 ring-offset-2 dark:ring-offset-gray-900 transition-all"
             autoFocus
           >
             <Check className="h-4 w-4" /> {t('approval.approve')}

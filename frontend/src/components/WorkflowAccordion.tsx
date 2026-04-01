@@ -113,10 +113,10 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [currentAgent])
 
-  const getStatusForRound = (stepKey: string, stepNum: number, isPastRound: boolean) => {
+  const getStatusForRound = (stepKey: string, stepNum: number, isPastRound: boolean, roundContents: TextContent[]) => {
     if (isPastRound) return 'completed'
     if (!agentProgress) return 'pending'
-    const hasContent = textContents.some(c => c.agent === stepKey)
+    const hasContent = roundContents.some(c => c.agent === stepKey)
     if (hasContent && agentProgress.agent !== stepKey) return 'completed'
     if (stepNum < agentProgress.step) return 'completed'
     if (agentProgress.agent === stepKey && agentProgress.status === 'running') return 'active'
@@ -132,7 +132,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     roundContents: TextContent[],
     isPastRound: boolean,
   ) => {
-    const status = getStatusForRound(step.key, step.step, isPastRound)
+    const status = getStatusForRound(step.key, step.step, isPastRound, roundContents)
     const content = roundContents.findLast(c => c.agent === step.key)
     const sectionCollapsed = isPastRound ? true : isSectionCollapsed(step.key)
     const isActive = status === 'active'

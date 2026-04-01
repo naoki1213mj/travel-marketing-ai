@@ -7,7 +7,7 @@ interface RegulationResultsProps {
 }
 
 export function RegulationResults({ contents, t }: RegulationResultsProps) {
-  const regulationContent = contents.find(c => c.agent === 'regulation-check-agent')
+  const regulationContent = contents.findLast(c => c.agent === 'regulation-check-agent')
   if (!regulationContent) return null
 
   return (
