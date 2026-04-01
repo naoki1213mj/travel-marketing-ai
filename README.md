@@ -162,4 +162,4 @@ docs/                API, deployment, Azure setup, architecture documentation
 - [docs/api-reference.md](docs/api-reference.md): REST and SSE contract for the current implementation
 - [docs/deployment-guide.md](docs/deployment-guide.md): local, Docker, CI/CD, and Azure deployment behavior
 - [docs/azure-setup.md](docs/azure-setup.md): Azure provisioning, post-provision steps, and auth model
-- [docs/requirements_v3.7.md](docs/requirements_v3.7.md): target requirements document
+- [docs/requirements_v4.0.md](docs/requirements_v4.0.md): requirements document (v4.0, aligned with current implementation)
