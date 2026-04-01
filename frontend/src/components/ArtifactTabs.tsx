@@ -40,7 +40,6 @@ export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
   if (activeTabs.length === 0) return null
 
   const effectiveActiveTab = activeTabs.some(tab => tab.key === activeTab) ? activeTab : activeTabs[0].key
-  const currentTab = activeTabs.find(tab => tab.key === effectiveActiveTab) || activeTabs[0]
 
   return (
     <div className="flex min-h-[0] flex-1 flex-col">
@@ -65,19 +64,22 @@ export function ArtifactTabs({ tabs, t, activeAgent }: ArtifactTabsProps) {
           </button>
         ))}
       </div>
-      <div
-        key={currentTab.key}
-        id={`artifact-panel-${currentTab.key}`}
-        role="tabpanel"
-        aria-labelledby={`artifact-tab-${currentTab.key}`}
-        className="min-h-[0] flex-1 py-4 animate-fade-slide-in"
-      >
-        {currentTab.content || (
-          <div className="rounded-3xl border border-dashed border-[var(--panel-border)] px-6 py-10 text-sm text-[var(--text-muted)]">
-            {t('preview.unavailable')}
-          </div>
-        )}
-      </div>
+      {/* 全タブを常にレンダリングし、非アクティブは非表示（state 保持のため） */}
+      {activeTabs.map(tab => (
+        <div
+          key={tab.key}
+          id={`artifact-panel-${tab.key}`}
+          role="tabpanel"
+          aria-labelledby={`artifact-tab-${tab.key}`}
+          className={`min-h-[0] flex-1 py-4 ${tab.key === effectiveActiveTab ? 'animate-fade-slide-in' : 'hidden'}`}
+        >
+          {tab.content || (
+            <div className="rounded-3xl border border-dashed border-[var(--panel-border)] px-6 py-10 text-sm text-[var(--text-muted)]">
+              {t('preview.unavailable')}
+            </div>
+          )}
+        </div>
+      ))}
     </div>
   )
 }
