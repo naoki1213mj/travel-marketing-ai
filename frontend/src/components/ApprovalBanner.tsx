@@ -12,7 +12,7 @@ export function ApprovalBanner({ request, onApprove, t }: ApprovalBannerProps) {
   const [revision, setRevision] = useState('')
 
   return (
-    <div className="absolute inset-x-0 bottom-0 z-30 mx-4 mb-4 rounded-2xl border border-amber-300 bg-white/95 dark:bg-slate-900/95 px-6 py-5 shadow-[0_8px_40px_rgba(251,191,36,0.2)] backdrop-blur-lg">
+    <div className="sticky bottom-0 z-30 mx-0 mt-2 rounded-2xl border border-amber-300 bg-white/95 dark:bg-slate-900/95 px-6 py-5 shadow-[0_-4px_30px_rgba(251,191,36,0.15)] backdrop-blur-lg">
         <h3 className="inline-flex items-center gap-2 text-sm font-semibold text-amber-800 dark:text-amber-200 mb-3">
           <span className="relative flex h-2.5 w-2.5">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />

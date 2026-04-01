@@ -140,9 +140,9 @@ function App() {
             />
           </div>
 
-          {/* 承認バナー（モーダル風オーバーレイ） */}
+          {/* 承認バナー（スクロール領域内、スティッキー） */}
           {state.status === 'approval' && state.approvalRequest && (
-            <div className="relative">
+            <div className="px-5 pb-3">
               <ApprovalBanner request={state.approvalRequest} onApprove={approve} t={t} />
             </div>
           )}

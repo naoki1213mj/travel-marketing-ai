@@ -83,19 +83,34 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   // 折りたたみ状態をステップから導出（最新ラウンドのみ適用）
   const autoCollapsed = useMemo(() => {
     const result: Record<string, boolean> = {}
+    // 最新ラウンドのコンテンツで「既に結果がある」ステップを判定
+    const latestRound = rounds[rounds.length - 1]
+    const latestContents = latestRound?.contents ?? []
+
     ALL_STEPS.forEach((step) => {
+      const hasContentInLatest = latestContents.some(c => c.agent === step.key)
+
+      if (!agentProgress) {
+        // agentProgress がない（改善開始直後 or 初期状態）: 結果があれば折りたたむ、なければ閉じる
+        result[step.key] = hasContentInLatest
+        return
+      }
+
       if (step.step < currentStep) {
         result[step.key] = true
       } else if (step.key === currentAgent) {
         result[step.key] = false
       } else if (currentAgent === 'approval' && step.step > currentStep) {
         result[step.key] = true
+      } else if (hasContentInLatest) {
+        // 結果があるが active でもない → 折りたたむ
+        result[step.key] = true
       } else {
         result[step.key] = false
       }
     })
     return result
-  }, [currentStep, currentAgent])
+  }, [currentStep, currentAgent, agentProgress, rounds])
 
   // 手動トグル用の state（ユーザー操作のみ）
   const [userToggled, setUserToggled] = useState<{ step: number; overrides: Record<string, boolean> }>({ step: 0, overrides: {} })
