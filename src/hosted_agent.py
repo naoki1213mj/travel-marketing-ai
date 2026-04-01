@@ -1,24 +1,21 @@
-"""Hosted Agent エントリポイント。
+"""Hosted Agent エントリポイント（将来用スタブ）。
 
 Foundry Agent Service に Hosted Agent としてデプロイする際のエントリポイント。
-SequentialBuilder で 4 エージェントの Workflow を構築し、
-Foundry のランタイムに登録する。
+現行アーキテクチャでは FastAPI (src.main) がオーケストレーションを担っており、
+このモジュールは使用されていない。Hosted Agent 化を検討する際の雛形として残す。
 """
 
 import asyncio
 import logging
-
-from src.workflows import create_pipeline_workflow
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    """Hosted Agent を起動する。"""
+    """Hosted Agent を起動する（スタブ）。"""
     logger.info("Hosted Agent を起動中...")
-    workflow = create_pipeline_workflow()
-    logger.info("パイプライン Workflow 構築完了 (%s)。Foundry Agent Service に登録します。", type(workflow).__name__)
+    logger.warning("現行はスタブです。実装は src.main (FastAPI) を参照してください。")
 
     # Foundry Agent Service のランタイムがこのプロセスを管理する
     # ワークフローは Conversations API 経由でトリガーされる
