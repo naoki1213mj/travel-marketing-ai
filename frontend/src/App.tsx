@@ -23,6 +23,7 @@ import { useElapsedTime } from './hooks/useElapsedTime'
 import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
+import { isApprovalResponseText, shouldHidePlanDuringPostApprovalRevision } from './lib/approval-flow'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 import { buildPlanVersions } from './lib/plan-versions'
 
@@ -44,6 +45,7 @@ function App() {
 
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
+  const [revisionInProgress, setRevisionInProgress] = useState(false)
 
   // Esc キーでリセット
   useEffect(() => {
@@ -75,12 +77,41 @@ function App() {
   )
   const activePlanVersion = planVersions[activePlanVersionIndex]
   const currentSnapshot = state.currentVersion > 0 ? state.versions[state.currentVersion - 1] : null
-  const displayedPlan = revisionContent?.content
+  const hasRegulationStageStarted = state.agentProgress?.agent === 'regulation-check-agent'
+    || state.agentProgress?.agent === 'plan-revision-agent'
+    || state.textContents.some(c => c.agent === 'regulation-check-agent')
+  const shouldHidePlan = shouldHidePlanDuringPostApprovalRevision({
+    status: state.status,
+    hasApprovalRequest: Boolean(state.approvalRequest),
+    hasRevisionContent: Boolean(revisionContent?.content),
+    hasRegulationStageStarted,
+  })
+  const displayedPlan = shouldHidePlan
+    ? ''
+    : revisionContent?.content
     || activePlanVersion?.content
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
   const showDraftPlanTabs = !revisionContent && planVersions.length > 1
+  const showRevisionNotice = revisionInProgress && state.status === 'running'
+  const handleSendMessage = (message: string) => {
+    setRevisionInProgress(false)
+    void sendMessage(message)
+  }
+  const handleReset = () => {
+    setRevisionInProgress(false)
+    reset()
+  }
+  const handleRestoreConversation = (conversationId: string) => {
+    setRevisionInProgress(false)
+    void restoreConversation(conversationId)
+  }
+  const handleApproval = (response: string) => {
+    const trimmed = response.trim()
+    setRevisionInProgress(!isApprovalResponseText(trimmed))
+    void approve(trimmed)
+  }
 
   return (
     <div className="min-h-screen bg-[var(--app-bg)] text-[var(--text-primary)]">
@@ -109,7 +140,7 @@ function App() {
 
           {/* 会話履歴（インラインパネル） */}
           <div className="px-5 pt-3">
-            <ConversationHistory onSelect={restoreConversation} t={t} locale={locale} />
+            <ConversationHistory onSelect={handleRestoreConversation} t={t} locale={locale} />
           </div>
 
           <div className="min-h-[0] flex-1 overflow-y-auto px-5 py-5 space-y-5">
@@ -153,7 +184,7 @@ function App() {
               toolEvents={state.toolEvents}
               metrics={state.metrics}
               error={state.error}
-              onRetry={reset}
+              onRetry={handleReset}
               t={t}
               locale={locale}
             />
@@ -162,7 +193,7 @@ function App() {
           {/* 承認バナー（スクロール領域内、スティッキー） */}
           {state.status === 'approval' && state.approvalRequest && (
             <div className="px-5 pb-3">
-              <ApprovalBanner request={state.approvalRequest} onApprove={approve} t={t} />
+              <ApprovalBanner request={state.approvalRequest} onApprove={handleApproval} t={t} />
             </div>
           )}
 
@@ -183,7 +214,7 @@ function App() {
                 <div className="flex-1">
                   {state.status === 'completed' ? (
                     <RefineChat
-                      onSubmit={sendMessage}
+                      onSubmit={handleSendMessage}
                       disabled={isRunning}
                       placeholder={t('refine.placeholder')}
                       sendLabel={t('input.send')}
@@ -192,7 +223,7 @@ function App() {
                   ) : (
                     <InputForm
                       key={voiceDraft.id}
-                      onSubmit={(msg) => { sendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
+                      onSubmit={(msg) => { handleSendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
                       disabled={isRunning}
                       placeholder={t('input.placeholder')}
                       sendLabel={t('input.send')}
@@ -248,6 +279,11 @@ function App() {
                 label: t('tab.plan'),
                 content: displayedPlan ? (
                   <>
+                    {showRevisionNotice && (
+                      <div className="mb-3 rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+                        {t('approval.revision_running')}
+                      </div>
+                    )}
                     {showDraftPlanTabs && (
                       <PlanVersionTabs
                         versions={planVersions}
@@ -279,13 +315,18 @@ function App() {
                       onSelectVersion={restoreVersion}
                       onEvaluationRecorded={saveEvaluation}
                       t={t}
-                      onRefine={state.status !== 'approval' ? sendMessage : undefined}
+                      onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
                     />
                   </>
                 ) : (
                   <div className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]">
                     <div className="h-6 w-6 animate-spin rounded-full border-2 border-[var(--accent)] border-t-transparent mb-3" />
                     <p className="text-sm">{pendingPlanLabel}…</p>
+                    {shouldHidePlan && (
+                      <p className="mt-2 max-w-sm text-center text-xs leading-5 text-[var(--text-muted)]">
+                        {t('plan.awaiting_revision')}
+                      </p>
+                    )}
                   </div>
                 ),
               },

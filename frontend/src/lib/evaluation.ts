@@ -36,7 +36,7 @@ function average(values: number[]): number {
 }
 
 export function hasBuiltinMetrics(builtin: BuiltinEvaluationResult | undefined): builtin is Record<string, EvaluationMetric> {
-  return Boolean(builtin) && !('error' in builtin)
+  return builtin !== undefined && !('error' in builtin)
 }
 
 export function cloneEvaluationResult(result: EvaluationResult): EvaluationResult {
