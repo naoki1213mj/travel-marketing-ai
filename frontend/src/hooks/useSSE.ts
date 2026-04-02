@@ -331,6 +331,12 @@ function hasLiveArtifacts(state: PipelineState): boolean {
   return state.textContents.length > 0 || state.images.length > 0 || state.toolEvents.length > 0
 }
 
+function hasUncommittedArtifacts(state: PipelineState, snapshot: ArtifactSnapshot): boolean {
+  return state.textContents.length > snapshot.textContents.length
+    || state.images.length > snapshot.images.length
+    || state.toolEvents.length > snapshot.toolEvents.length
+}
+
 function ensureDraftSnapshot(state: PipelineState): PipelineState {
   if (state.versions.length > 0 || !hasLiveArtifacts(state)) {
     return state
@@ -348,6 +354,37 @@ function ensureDraftSnapshot(state: PipelineState): PipelineState {
     ...state,
     versions: [snapshot],
     currentVersion: 1,
+  }
+}
+
+function inferPendingVersion(state: PipelineState): PendingVersion | null {
+  if (state.pendingVersion) {
+    return state.pendingVersion
+  }
+
+  if (!hasLiveArtifacts(state)) {
+    return null
+  }
+
+  const latestSnapshot = state.versions[state.versions.length - 1]
+  if (!latestSnapshot) {
+    return {
+      version: 1,
+      textOffset: 0,
+      imageOffset: 0,
+      toolEventOffset: 0,
+    }
+  }
+
+  if (!hasUncommittedArtifacts(state, latestSnapshot)) {
+    return null
+  }
+
+  return {
+    version: state.versions.length + 1,
+    textOffset: latestSnapshot.textContents.length,
+    imageOffset: latestSnapshot.images.length,
+    toolEventOffset: latestSnapshot.toolEvents.length,
   }
 }
 
@@ -506,23 +543,11 @@ export function useSSE() {
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
     setState(prev => ({
-      ...(() => {
-        const seeded = ensureDraftSnapshot(prev)
-        return {
-          ...seeded,
-          status: 'running',
-          approvalRequest: null,
-          error: null,
-          pendingVersion: seeded.versions.length > 0
-            ? {
-                version: seeded.versions.length + 1,
-                textOffset: seeded.textContents.length,
-                imageOffset: seeded.images.length,
-                toolEventOffset: seeded.toolEvents.length,
-              }
-            : null,
-        }
-      })(),
+      ...prev,
+      status: 'running',
+      approvalRequest: null,
+      error: null,
+      pendingVersion: inferPendingVersion(prev),
     }))
     const handlers = createHandlers(requestId)
     try {

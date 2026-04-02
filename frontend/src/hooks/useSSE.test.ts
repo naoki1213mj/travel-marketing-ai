@@ -199,4 +199,85 @@ describe('buildRestoredPipelineState', () => {
       })
     })
   })
+
+  it('keeps the first run as v1 after approval', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '沖縄の家族旅行を企画して',
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-first-run',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-first-run')
+    })
+
+    act(() => {
+      void result.current.approve('approve')
+    })
+
+    await waitFor(() => {
+      expect(result.current.state.pendingVersion).toEqual({
+        version: 1,
+        textOffset: 0,
+        imageOffset: 0,
+        toolEventOffset: 0,
+      })
+    })
+
+    expect(result.current.state.versions).toEqual([])
+    expect(sendApproval).toHaveBeenCalledTimes(1)
+  })
+
+  it('infers v2 after approving a restored refinement draft', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '京都の秋プランを企画して',
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        { event: 'done', data: { conversation_id: 'conv-refine', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+        { event: 'text', data: { content: '# Plan v2', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '改善案を確認してください',
+            conversation_id: 'conv-refine',
+            plan_markdown: '# Plan v2',
+          },
+        },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-refine')
+    })
+
+    act(() => {
+      void result.current.approve('approve')
+    })
+
+    await waitFor(() => {
+      expect(result.current.state.pendingVersion).toEqual({
+        version: 2,
+        textOffset: 1,
+        imageOffset: 0,
+        toolEventOffset: 0,
+      })
+    })
+
+    expect(sendApproval).toHaveBeenCalledTimes(1)
+  })
 })
