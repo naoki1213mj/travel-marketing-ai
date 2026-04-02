@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.conversations import get_conversation, get_replay_data, list_conversations
@@ -30,7 +30,7 @@ async def conversation_detail(conversation_id: str) -> JSONResponse:
 
 
 @router.get("/replay/{conversation_id}")
-async def replay(conversation_id: str, speed: float = 5.0) -> StreamingResponse:
+async def replay(conversation_id: str, speed: float = Query(5.0, gt=0.0)) -> StreamingResponse:
     """録画済み SSE イベントを高速リプレイする。
 
     Args:

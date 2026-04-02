@@ -22,7 +22,7 @@ from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import get_conversation, save_conversation
-from src.middleware import analyze_content, check_prompt_shield, check_tool_response
+from src.middleware import check_prompt_shield, check_tool_response
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -53,7 +53,6 @@ class SSEEventType(StrEnum):
     TEXT = "text"
     IMAGE = "image"
     APPROVAL_REQUEST = "approval_request"
-    SAFETY = "safety"
     ERROR = "error"
     DONE = "done"
 
@@ -72,7 +71,6 @@ def _is_approval_response(response_text: str) -> bool:
 # 制御文字除去パターン（改行は許可）
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
 _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.DOTALL)
-_DATA_URI_RE = re.compile(r"data:[^\"'\s>]+", re.IGNORECASE)
 _PIPELINE_TOTAL_STEPS = 5
 
 
@@ -135,16 +133,6 @@ def _sanitize_text(value: str) -> str:
     if not value:
         raise ValueError("メッセージが空です")
     return value
-
-
-def _sanitize_artifact_payload(value: str) -> str:
-    """安全性判定前に data URI を縮約する。"""
-    return _DATA_URI_RE.sub("[data-uri]", value)
-
-
-def _truncate_for_safety(value: str, limit: int = 9000) -> str:
-    """Content Safety の入力上限に収まるよう文字数を制限する。"""
-    return value if len(value) <= limit else value[:limit]
 
 
 def _extract_message_text(message: object) -> str:
@@ -389,18 +377,28 @@ async def _build_brochure_fallback_outcome(
     start_time: float,
 ) -> AgentExecutionOutcome:
     """Agent4 が失敗したときに最低限の販促物を返す。"""
-    from src.agents.brochure_gen import generate_banner_image, generate_hero_image
+    from src.agents.brochure_gen import (
+        _FALLBACK_IMAGE,
+        generate_banner_image,
+        generate_hero_image,
+        pop_pending_images,
+        set_current_conversation_id,
+    )
 
     title = _extract_plan_title(source_text)
-    hero_image = await generate_hero_image(
+    set_current_conversation_id(conversation_id)
+    await generate_hero_image(
         prompt="Bright family travel campaign hero image with resort atmosphere",
         destination=title,
         style="photorealistic",
     )
-    banner_image = await generate_banner_image(
+    await generate_banner_image(
         prompt=f"Travel promotion banner for {title}",
         platform="instagram",
     )
+    pending_images = pop_pending_images(conversation_id)
+    hero_image = pending_images.get("hero", _FALLBACK_IMAGE)
+    banner_image = pending_images.get("banner_instagram", _FALLBACK_IMAGE)
     escaped_source = escape(source_text).replace("\n", "<br />")
     html_content = f"""<!DOCTYPE html>
 <html lang=\"ja\">
@@ -436,7 +434,7 @@ async def _build_brochure_fallback_outcome(
 </body>
 </html>"""
 
-    for tool_name in _TOOL_EVENT_HINTS.get("brochure-gen-agent", []):
+    for tool_name in ["generate_hero_image", "generate_banner_image"]:
         events.append(
             format_sse(
                 SSEEventType.TOOL_EVENT,
@@ -465,35 +463,6 @@ async def _build_brochure_fallback_outcome(
         format_sse(
             SSEEventType.AGENT_PROGRESS,
             {"agent": "brochure-gen-agent", "status": "completed", "step": step, "total_steps": total_steps},
-        )
-    )
-
-    safety_input = _truncate_for_safety(_sanitize_artifact_payload(html_content))
-    safety_scores = await analyze_content(safety_input)
-    events.append(
-        format_sse(
-            SSEEventType.SAFETY,
-            {
-                "hate": safety_scores.hate,
-                "self_harm": safety_scores.self_harm,
-                "sexual": safety_scores.sexual,
-                "violence": safety_scores.violence,
-                "status": "error"
-                if safety_scores.check_failed
-                else (
-                    "safe"
-                    if all(
-                        value == 0
-                        for value in [
-                            safety_scores.hate,
-                            safety_scores.self_harm,
-                            safety_scores.sexual,
-                            safety_scores.violence,
-                        ]
-                    )
-                    else "warning"
-                ),
-            },
         )
     )
 
@@ -533,6 +502,89 @@ def _conversation_status_from_events(events: list[dict]) -> str:
     return "completed"
 
 
+_TOOL_CALL_TYPE_MAP = {
+    "code_interpreter_call": "code_interpreter",
+    "web_search_call": "web_search",
+    "bing_grounding_call": "web_search",
+}
+
+
+def _merge_tool_names(*tool_groups: list[str]) -> list[str]:
+    """ツール名の順序を保って重複排除する。"""
+    merged: list[str] = []
+    for group in tool_groups:
+        for tool_name in group:
+            if tool_name and tool_name not in merged:
+                merged.append(tool_name)
+    return merged
+
+
+def _collect_result_outputs(result: object) -> list[object]:
+    """agent.run() の戻り値から tool 呼び出し候補を再帰的に収集する。"""
+    if result is None:
+        return []
+
+    collected: list[object] = []
+    queue: list[object] = []
+
+    contents = getattr(result, "contents", None)
+    if isinstance(contents, list):
+        queue.extend(contents)
+
+    try:
+        outputs = result.get_outputs() if hasattr(result, "get_outputs") else []
+    except AttributeError, TypeError, RuntimeError, OSError:
+        outputs = []
+
+    if isinstance(outputs, list):
+        queue.extend(outputs)
+
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, list):
+            queue[:0] = item
+            continue
+        collected.append(item)
+
+        nested_contents = getattr(item, "contents", None)
+        if isinstance(nested_contents, list):
+            queue.extend(nested_contents)
+
+        nested_output = getattr(item, "output", None)
+        if isinstance(nested_output, list):
+            queue.extend(nested_output)
+
+    return collected
+
+
+def _extract_tool_names(result: object, agent_name: str, result_text: str) -> list[str]:
+    """Responses 出力から実際に使われたツール名を推定する。"""
+    tool_names: list[str] = []
+
+    for output in _collect_result_outputs(result):
+        output_type = getattr(output, "type", "")
+        if not isinstance(output_type, str) or not output_type:
+            continue
+
+        if output_type == "function_call":
+            name = getattr(output, "name", None)
+            if not isinstance(name, str) or not name:
+                function_obj = getattr(output, "function", None)
+                name = getattr(function_obj, "name", None)
+            if isinstance(name, str) and name:
+                tool_names.append(name)
+            continue
+
+        mapped = _TOOL_CALL_TYPE_MAP.get(output_type)
+        if mapped:
+            tool_names.append(mapped)
+
+    if agent_name == "video-gen-agent" and result_text.strip():
+        tool_names.append("generate_promo_video")
+
+    return _merge_tool_names(tool_names)
+
+
 async def _load_pending_approval_context(conversation_id: str) -> PendingApprovalContext | None:
     """承認待ちコンテキストをメモリまたは保存済み会話から復元する。"""
     context = _pending_approvals.get(conversation_id)
@@ -547,11 +599,15 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
 
     analysis_markdown = ""
     plan_markdown = ""
+    model_settings: dict | None = None
     for message in conversation.get("messages", []):
         event_name = message.get("event")
         data = message.get("data", {})
         if event_name == SSEEventType.APPROVAL_REQUEST.value:
             plan_markdown = data.get("plan_markdown", plan_markdown)
+            event_model_settings = data.get("model_settings")
+            if isinstance(event_model_settings, dict):
+                model_settings = event_model_settings
         if event_name != SSEEventType.TEXT.value:
             continue
         agent_name = data.get("agent")
@@ -567,7 +623,7 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
         "user_input": conversation.get("input", ""),
         "analysis_markdown": analysis_markdown,
         "plan_markdown": plan_markdown,
-        "model_settings": None,
+        "model_settings": model_settings,
     }
     _pending_approvals[conversation_id] = context
     return context
@@ -645,6 +701,10 @@ async def _execute_agent(
     # brochure-gen-agent の場合、side-channel の conversation_id を設定
     if agent_name == "brochure-gen-agent":
         from src.agents.brochure_gen import set_current_conversation_id
+
+        set_current_conversation_id(conversation_id)
+    if agent_name == "video-gen-agent":
+        from src.agents.video_gen import set_current_conversation_id
 
         set_current_conversation_id(conversation_id)
 
@@ -728,16 +788,10 @@ async def _execute_agent(
 
     result_text = _extract_result_text(result)
     total_tokens = _extract_total_tokens(result)
-    safety_input = _truncate_for_safety(_sanitize_artifact_payload(result_text))
+    tool_names = _extract_tool_names(result, agent_name, result_text)
 
-    tool_shield = await check_tool_response(safety_input)
+    tool_shield = await check_tool_response(result_text)
     if not tool_shield.is_safe:
-        events.append(
-            format_sse(
-                SSEEventType.SAFETY,
-                {"status": "blocked", "reason": "tool_response_unsafe", "details": tool_shield.details},
-            )
-        )
         events.append(
             format_sse(
                 SSEEventType.ERROR,
@@ -752,14 +806,6 @@ async def _execute_agent(
             "tool_calls": 0,
         }
 
-    for tool_name in _TOOL_EVENT_HINTS.get(agent_name, []):
-        events.append(
-            format_sse(
-                SSEEventType.TOOL_EVENT,
-                {"tool": tool_name, "status": "completed", "agent": agent_name},
-            )
-        )
-
     events.extend(_build_content_events(agent_name, result_text))
 
     # Side-channel 画像の取得（brochure-gen-agent のツールが画像を side-channel に保存する）
@@ -768,6 +814,12 @@ async def _execute_agent(
 
         set_current_conversation_id(conversation_id)
         pending = pop_pending_images(conversation_id)
+        brochure_tools: list[str] = []
+        if "hero" in pending:
+            brochure_tools.append("generate_hero_image")
+        if any(key.startswith("banner_") for key in pending):
+            brochure_tools.append("generate_banner_image")
+        tool_names = _merge_tool_names(tool_names, brochure_tools)
 
         # ブローシャ HTML に画像を埋め込む
         if pending:
@@ -802,6 +854,8 @@ async def _execute_agent(
     # Code Interpreter 画像の取得（data-search-agent がグラフを生成する場合）
     if agent_name == "data-search-agent" and result is not None:
         ci_images = _extract_code_interpreter_images(result)
+        if ci_images:
+            tool_names = _merge_tool_names(tool_names, ["code_interpreter"])
         for ci_img in ci_images:
             events.append(
                 format_sse(
@@ -810,6 +864,14 @@ async def _execute_agent(
                 )
             )
 
+    for tool_name in tool_names:
+        events.append(
+            format_sse(
+                SSEEventType.TOOL_EVENT,
+                {"tool": tool_name, "status": "completed", "agent": agent_name},
+            )
+        )
+
     events.append(
         format_sse(
             SSEEventType.AGENT_PROGRESS,
@@ -817,36 +879,8 @@ async def _execute_agent(
         )
     )
 
-    if safety_input.strip():
-        safety_scores = await analyze_content(safety_input)
-        safety_payload = {
-            "hate": safety_scores.hate,
-            "self_harm": safety_scores.self_harm,
-            "sexual": safety_scores.sexual,
-            "violence": safety_scores.violence,
-            "status": "error"
-            if safety_scores.check_failed
-            else (
-                "safe"
-                if all(
-                    value == 0
-                    for value in [
-                        safety_scores.hate,
-                        safety_scores.self_harm,
-                        safety_scores.sexual,
-                        safety_scores.violence,
-                    ]
-                )
-                else "warning"
-            ),
-        }
-    else:
-        safety_payload = {"hate": 0, "self_harm": 0, "sexual": 0, "violence": 0, "status": "safe"}
-
-    events.append(format_sse(SSEEventType.SAFETY, safety_payload))
-
     elapsed = round(time.monotonic() - start_time, 1)
-    tool_calls = len(_TOOL_EVENT_HINTS.get(agent_name, []))
+    tool_calls = len(tool_names)
 
     # OpenTelemetry スパンに結果を記録
     if span:
@@ -916,7 +950,7 @@ async def _maybe_run_quality_review(review_input: str) -> list[str]:
 class ChatRequest(BaseModel):
     """チャットリクエスト"""
 
-    message: str = Field(..., min_length=1, max_length=5000)
+    message: str = Field(..., min_length=1)
     conversation_id: str | None = Field(None, max_length=100)
     settings: dict | None = Field(None, description="モデルパラメータ設定")
 
@@ -931,7 +965,7 @@ class ApproveRequest(BaseModel):
     """承認/修正リクエスト"""
 
     conversation_id: str = Field(..., max_length=100)
-    response: str = Field(..., min_length=1, max_length=5000)
+    response: str = Field(..., min_length=1)
 
     @field_validator("response")
     @classmethod
@@ -1287,18 +1321,6 @@ async def _mock_post_approval_events(conversation_id: str):
         },
     )
 
-    # Content Safety 結果
-    yield format_sse(
-        SSEEventType.SAFETY,
-        {
-            "hate": 0,
-            "self_harm": 0,
-            "sexual": 0,
-            "violence": 0,
-            "status": "safe",
-        },
-    )
-
     # 完了
     yield format_sse(
         SSEEventType.DONE,
@@ -1421,6 +1443,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
                 "prompt": "修正した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
                 "conversation_id": conversation_id,
                 "plan_markdown": outcome["text"],
+                "model_settings": pending_context.get("model_settings"),
             },
         )
         return
@@ -1433,11 +1456,16 @@ async def _refine_events(refine_text: str, conversation_id: str):
         conversation = await get_conversation(conversation_id)
         original_plan = ""
         analysis_markdown = ""
+        model_settings: dict | None = None
         user_input = ""
         if conversation:
             user_input = conversation.get("input", "")
             for msg in conversation.get("messages", []):
                 data = msg.get("data", {})
+                if msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
+                    data.get("model_settings"), dict
+                ):
+                    model_settings = data["model_settings"]
                 if msg.get("event") == "text" and data.get("agent") == "data-search-agent" and not analysis_markdown:
                     analysis_markdown = data.get("content", "")
                 if msg.get("event") == "text" and data.get("agent") == "marketing-plan-agent":
@@ -1446,7 +1474,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
         revision_prompt = (
             f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
             f"## 元の依頼\n{user_input}\n\n"
-            f"## 現在の企画書\n{original_plan[:3000]}\n\n"
+            f"## 現在の企画書\n{original_plan}\n\n"
             f"## 改善指示\n{refine_text}"
         )
 
@@ -1455,6 +1483,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
             agent_step=2,
             user_input=revision_prompt,
             conversation_id=conversation_id,
+            model_settings=model_settings,
         )
         for event in outcome["events"]:
             yield event
@@ -1466,7 +1495,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
             "user_input": user_input,
             "analysis_markdown": analysis_markdown,
             "plan_markdown": outcome["text"],
-            "model_settings": None,
+            "model_settings": model_settings,
         }
         yield format_sse(
             SSEEventType.AGENT_PROGRESS,
@@ -1478,6 +1507,7 @@ async def _refine_events(refine_text: str, conversation_id: str):
                 "prompt": "改善した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
                 "conversation_id": conversation_id,
                 "plan_markdown": outcome["text"],
+                "model_settings": model_settings,
             },
         )
         return
@@ -1629,6 +1659,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         return
     total_tool_calls += revision_outcome["tool_calls"]
     total_tokens_sum += revision_outcome.get("total_tokens", 0)
+    revised_plan_markdown = revision_outcome["text"] or context["plan_markdown"]
 
     # 規制チェック+修正完了 → 販促物生成フェーズへ即座に遷移（UI の待ち時間解消）
     yield format_sse(
@@ -1637,7 +1668,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     )
 
     # Agent4 への入力は修正版企画書
-    brochure_input = revision_outcome["text"]
+    brochure_input = revised_plan_markdown
 
     # 旅行先を入力に明示（画像生成の精度向上）— 先行生成で抽出済みの destination_text を再利用
     if destination_text:
@@ -1685,7 +1716,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
     # Video polling
     from src.agents.video_gen import poll_video_job, pop_pending_video_job
 
-    video_job = pop_pending_video_job()
+    video_job = pop_pending_video_job(conversation_id)
     if video_job and video_job.get("job_id"):
         # ポーリング中は video-gen-agent を running に戻す（UI で brochure に完了チェックが付かないように）
         yield format_sse(
@@ -1723,7 +1754,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
         part
         for part in [
             context["analysis_markdown"],
-            context["plan_markdown"],
+            revised_plan_markdown,
             regulation_outcome["text"],
             brochure_outcome["text"],
         ]
@@ -1734,7 +1765,7 @@ async def _post_approval_events(user_response: str, conversation_id: str):
 
     await _trigger_logic_app(
         conversation_id=conversation_id,
-        plan_markdown=context["plan_markdown"],
+        plan_markdown=revised_plan_markdown,
         brochure_html=_extract_brochure_html(brochure_outcome["text"]) or "",
     )
     _pending_approvals.pop(conversation_id, None)
@@ -1834,6 +1865,7 @@ async def workflow_event_generator(user_input: str, conversation_id: str, model_
             "prompt": "上記の企画書を確認してください。承認する場合は「承認」、修正したい場合は修正内容を入力してください。",
             "conversation_id": conversation_id,
             "plan_markdown": plan_outcome["text"],
+            "model_settings": model_settings,
         },
     )
 
@@ -1844,7 +1876,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     """チャットメッセージを受け取り、SSE ストリームでパイプライン結果を返す"""
     conversation_id = body.conversation_id or str(uuid.uuid4())
 
-    # 入力 Content Safety チェック（層1: Prompt Shield）
+    # 入力ガード
     shield_result = await check_prompt_shield(body.message)
 
     async def guarded_generator():
@@ -1855,8 +1887,8 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             yield format_sse(
                 SSEEventType.ERROR,
                 {
-                    "message": "入力が安全性チェックに失敗しました",
-                    "code": "PROMPT_SHIELD_BLOCKED",
+                    "message": "入力が注入ガードによりブロックされました",
+                    "code": "INPUT_GUARD_BLOCKED",
                 },
             )
             return
@@ -1946,7 +1978,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 @limiter.limit("10/minute")
 async def approve(thread_id: str, request: Request, body: ApproveRequest) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
-    # 入力 Content Safety チェック（承認レスポンスにも適用）
+    # 入力ガード（承認レスポンスにも適用）
     shield_result = await check_prompt_shield(body.response)
     is_approved = _is_approval_response(body.response)
 
@@ -1957,7 +1989,7 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
         if not shield_result.is_safe:
             yield format_sse(
                 SSEEventType.ERROR,
-                {"message": "入力が安全性チェックに失敗しました", "code": "PROMPT_SHIELD_BLOCKED"},
+                {"message": "入力が注入ガードによりブロックされました", "code": "INPUT_GUARD_BLOCKED"},
             )
             return
 

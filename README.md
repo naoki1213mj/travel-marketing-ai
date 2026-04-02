@@ -15,12 +15,12 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - Photo Avatar video generation (`casual-sitting` style, MP4/H.264 with soft-embedded subtitles)
 - Voice Live API with MSAL.js authentication (Entra App Registration) and Web Speech API fallback
 - Code Interpreter auto-detection with graceful fallback for data analysis
-- Azure integrations for Microsoft Foundry, Content Safety, Azure AI Search, Cosmos DB, Logic Apps callback, Content Understanding, Speech / Photo Avatar, and Fabric Lakehouse
+- Azure integrations for Microsoft Foundry, Azure AI Search, Cosmos DB, Logic Apps callback, Content Understanding, Speech / Photo Avatar, and Fabric Lakehouse
 - `azd` + Bicep provisioning for Container Apps, ACR, APIM AI Gateway, Cosmos DB, Key Vault, VNet, Log Analytics, and Application Insights
 
 ## Current Implementation Notes
 
-- The Azure-backed runtime calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`.
+- The Azure-backed runtime calls the Microsoft Foundry project endpoint directly with `DefaultAzureCredential`, relying on deployment-level model guardrails plus lightweight local injection checks for obvious prompt override attempts.
 - APIM AI Gateway is provisioned and configured via `scripts/postprovision.py`, which creates a Foundry AI Gateway connection (`travel-ai-gateway`) and applies token-limit policies to the auto-generated foundry APIs.
 - `POST /api/chat` in Azure mode pauses for approval after Agent2 (marketing-plan-agent) and resumes Agent3a → Agent3b → Agent4 → Agent5 upon user approval.
 - The pipeline uses 5 user-facing steps powered by 7 internal agents (Agent3a+3b share step 4, Agent4+5 share step 5).
@@ -45,8 +45,7 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for the current Azu
 flowchart LR
     user[Marketing user] --> ui[React frontend]
     ui --> api[FastAPI SSE API]
-    api --> shield[Prompt Shield]
-    shield --> flow[SequentialBuilder workflow]
+    api --> flow[SequentialBuilder workflow]
     flow --> a1[data-search-agent]
     a1 --> fabric[Fabric Lakehouse SQL]
     a1 -.-> csv[CSV fallback]
@@ -62,8 +61,7 @@ flowchart LR
     a4 --> cu[Content Understanding]
     flow --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar]
-    flow --> output[Text Analysis]
-    output --> ui
+    flow --> ui
     api -. optional .-> review[quality-review-agent]
     api -. callback .-> logic[Logic Apps]
 ```
@@ -124,7 +122,6 @@ After provisioning, `scripts/postprovision.py` automatically configures the AI G
 | Variable | Required | Purpose |
 |---|---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | Production | Microsoft Foundry project endpoint for runtime agent calls |
-| `CONTENT_SAFETY_ENDPOINT` | Production | Content Safety / Text Analysis endpoint |
 | `MODEL_NAME` | Optional | Text deployment name, default `gpt-5-4-mini`. Frontend model selector also offers `gpt-5.4`, `gpt-4-1-mini`, `gpt-4.1` |
 | `EVAL_MODEL_DEPLOYMENT` | Recommended | Separate deployment name for `/api/evaluate`. Falls back to `MODEL_NAME` if unset |
 | `ENVIRONMENT` | Optional | `development`, `staging`, or `production` |

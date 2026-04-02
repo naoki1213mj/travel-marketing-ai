@@ -37,7 +37,6 @@ cp .env.example .env
 
 ```env
 AZURE_AI_PROJECT_ENDPOINT=https://your-foundry.services.ai.azure.com/api/projects/your-project
-CONTENT_SAFETY_ENDPOINT=https://your-foundry.cognitiveservices.azure.com/
 EVAL_MODEL_DEPLOYMENT=gpt-4-1-mini
 ```
 
@@ -129,7 +128,6 @@ azd deploy
 | 変数名 | 用途 |
 |---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | Microsoft Foundry project endpoint |
-| `CONTENT_SAFETY_ENDPOINT` | Content Safety / Text Analysis endpoint |
 
 ### よく使う任意変数
 

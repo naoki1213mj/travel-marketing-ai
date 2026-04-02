@@ -13,7 +13,6 @@ import { PdfUpload } from './components/PdfUpload'
 import { PipelineStepper } from './components/PipelineStepper'
 import { PlanVersionTabs } from './components/PlanVersionTabs'
 import { RefineChat } from './components/RefineChat'
-import { SafetyBadge } from './components/SafetyBadge'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ThemeToggle } from './components/ThemeToggle'
 import { VersionSelector } from './components/VersionSelector'
@@ -94,7 +93,6 @@ function App() {
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <SafetyBadge result={state.safetyResult} t={t} />
             <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
             <ThemeToggle theme={theme} onChange={setTheme} t={t} />
           </div>
@@ -273,7 +271,7 @@ function App() {
                       response={displayedPlan}
                       html={state.textContents.findLast(c => c.content_type === 'html')?.content || ''}
                       t={t}
-                      onRefine={state.status === 'completed' && !isRunning ? sendMessage : undefined}
+                      onRefine={state.status !== 'approval' ? sendMessage : undefined}
                     />
                   </>
                 ) : (

@@ -31,10 +31,10 @@ applyTo: 'src/**/*.py, tests/**/*.py'
 - ルーターは `src/api/` 配下に配置。`main.py` で `include_router` する
 - SSE ストリーミングは `StreamingResponse(media_type="text/event-stream")`
 - SSE イベント形式: `event: {type}\ndata: {json}\n\n`
-- イベント種別: `agent_progress`, `tool_event`, `text`, `image`, `approval_request`, `safety`, `error`, `done`
+- イベント種別: `agent_progress`, `tool_event`, `text`, `image`, `approval_request`, `error`, `done`
 - エラーハンドリング: 具体的な例外型で catch。bare except 禁止
-- Content Safety チェック: `/api/chat` のエンドポイントで入力時に Prompt Shield を実行
-- Content Safety の Text Analysis は入力上限 10,000 文字。超過時は `_truncate_for_safety()` で制限する
+- 入力ガード: `/api/chat` と `/api/chat/{thread_id}/approve` で明らかな指示上書き / プロンプト窃取パターンをブロックする
+- ツール応答ガード: 外部データをモデルへ渡す前に同種パターンを軽量チェックする
 - exception は `(ImportError, ValueError, OSError)` など具体的な型で catch し、最後に `Exception` で未知のエラーを捕捉する
 
 ### パッケージ管理

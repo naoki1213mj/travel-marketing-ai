@@ -30,4 +30,4 @@ tools: ['filesystem', 'terminal']
 
 - Agent Framework rc5 の API パターンに従っているか（`.github/skills/agent-framework-patterns/SKILL.md` 参照）
 - Structured Output（JSON Schema）を使っているか
-- Content Safety middleware が適用されているか
+- 軽量入力 / ツール応答ガードが必要な場所に適用されているか

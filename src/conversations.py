@@ -14,6 +14,11 @@ _cosmos_client = None
 _cosmos_initialized = False
 
 
+def _is_demo_replay_request(conversation_id: str) -> bool:
+    """デモ用 replay のみ JSON フォールバックを許可する。"""
+    return conversation_id.startswith("demo-")
+
+
 def _get_cosmos_client():
     """Cosmos DB クライアントを取得する。未設定時は None を返す。
 
@@ -192,7 +197,10 @@ async def get_replay_data(conversation_id: str) -> list[dict] | None:
     if doc:
         return doc.get("events", [])
 
-    # JSON ファイルからフォールバック
+    # JSON ファイルからのフォールバックはデモ replay のみ許可
+    if not _is_demo_replay_request(conversation_id):
+        return None
+
     import json
     from pathlib import Path
 

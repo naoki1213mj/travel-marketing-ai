@@ -118,26 +118,21 @@ describe('connectSSE', () => {
   it('dispatches multiple event types to their respective handlers', async () => {
     const sseBody =
       'event: tool_event\ndata: {"tool":"web_search","status":"completed","agent":"a1"}\n\n' +
-      'event: image\ndata: {"url":"http://img.png","alt":"test","agent":"a1"}\n\n' +
-      'event: safety\ndata: {"status":"safe","hate":0,"self_harm":0,"sexual":0,"violence":0}\n\n'
+      'event: image\ndata: {"url":"http://img.png","alt":"test","agent":"a1"}\n\n'
 
     mockFetch.mockResolvedValue(createMockResponse(sseBody))
 
     const toolHandler = vi.fn()
     const imageHandler = vi.fn()
-    const safetyHandler = vi.fn()
 
     await connectSSE('test', {
       tool_event: toolHandler,
       image: imageHandler,
-      safety: safetyHandler,
     })
 
     expect(toolHandler).toHaveBeenCalledTimes(1)
     expect(imageHandler).toHaveBeenCalledTimes(1)
-    expect(safetyHandler).toHaveBeenCalledTimes(1)
     expect(toolHandler).toHaveBeenCalledWith(expect.objectContaining({ tool: 'web_search' }))
     expect(imageHandler).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://img.png' }))
-    expect(safetyHandler).toHaveBeenCalledWith(expect.objectContaining({ status: 'safe' }))
   })
 })

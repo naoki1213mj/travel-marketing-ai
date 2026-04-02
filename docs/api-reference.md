@@ -56,7 +56,7 @@
 ```json
 {
   "status": "degraded",
-  "missing": ["AZURE_AI_PROJECT_ENDPOINT", "CONTENT_SAFETY_ENDPOINT"]
+  "missing": ["AZURE_AI_PROJECT_ENDPOINT"]
 }
 ```
 
@@ -65,7 +65,7 @@
 ユーザーメッセージを受け取り、SSE ストリームを返します。
 
 - レート制限: 10 リクエスト / 分
-- 入力は制御文字除去と Prompt Shield チェックを通過したものだけが実行されます
+- 入力は制御文字除去と軽量な注入ガードを通過したものだけが実行されます
 
 ### リクエストボディ
 
@@ -86,7 +86,7 @@
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---|---|
-| `message` | `string` | 必須 | 1〜5000 文字 |
+| `message` | `string` | 必須 | 1 文字以上 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
 | `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold` を送信できる。現行バックエンドで明示利用しているのは主に `model`、`temperature`、`max_tokens`、`top_p` |
 
@@ -94,7 +94,7 @@
 
 | 条件 | SSE の主な流れ |
 |---|---|
-| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `safety` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
+| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
 | `conversation_id` + 承認待ち中 | `marketing-plan-agent` で企画書を再生成し、新しい `approval_request` を返す |
 | `conversation_id` + 完了済み + 評価フィードバック | `marketing-plan-agent` で企画書を改善し、新しい `approval_request` を返す |
@@ -119,7 +119,7 @@ curl -N -X POST http://localhost:8000/api/chat \
 承認継続または修正継続のための SSE エンドポイントです。
 
 - レート制限: 10 リクエスト / 分
-- `response` も Prompt Shield チェック対象です
+- `response` も軽量な注入ガード対象です
 - パスの `thread_id` が実際に使われる会話 ID です
 
 ### リクエストボディ
@@ -409,20 +409,6 @@ data: <json>
 
 注: このイベントは Azure モードの主フローでも Agent2 完了後に送信されます。モック / デモ経路でも同様に使われます。
 
-### `safety`
-
-```json
-{
-  "hate": 0,
-  "self_harm": 0,
-  "sexual": 0,
-  "violence": 0,
-  "status": "safe"
-}
-```
-
-`status` は `safe`、`warning`、`error` のいずれかです。
-
 ### `error`
 
 ```json
@@ -434,7 +420,7 @@ data: <json>
 
 主な `code` 値:
 
-- `PROMPT_SHIELD_BLOCKED`
+- `INPUT_GUARD_BLOCKED`
 - `WORKFLOW_BUILD_ERROR`
 - `WORKFLOW_RUNTIME_ERROR`
 - `AGENT_RUNTIME_ERROR`
@@ -466,26 +452,24 @@ data: <json>
 3. text           (data-search-agent)
 4. image          (0..n, Code Interpreter グラフなど)
 5. agent_progress (data-search-agent, completed)
-6. safety
-7. agent_progress (marketing-plan-agent, running)
-8. tool_event     (0..n)
-9. text           (marketing-plan-agent)
-10. agent_progress (marketing-plan-agent, completed)
-11. safety
-12. agent_progress (approval, running)
-13. approval_request
+6. agent_progress (marketing-plan-agent, running)
+7. tool_event     (0..n)
+8. text           (marketing-plan-agent)
+9. agent_progress (marketing-plan-agent, completed)
+10. agent_progress (approval, running)
+11. approval_request
    — user approves via POST /api/chat/{thread_id}/approve —
-14. agent_progress (approval, completed)
-15. agent_progress (regulation-check-agent, running)
-16. tool_event / text / safety
-17. agent_progress (plan-revision-agent, running)
-18. text / safety
-19. agent_progress (brochure-gen-agent, running)
-20. tool_event / text(html) / image / safety
-21. agent_progress (video-gen-agent, running)
-22. text           (進捗メッセージ or video URL)
-23. text           (quality-review-agent, optional)
-24. done
+12. agent_progress (approval, completed)
+13. agent_progress (regulation-check-agent, running)
+14. tool_event / text
+15. agent_progress (plan-revision-agent, running)
+16. text
+17. agent_progress (brochure-gen-agent, running)
+18. tool_event / text(html) / image
+19. agent_progress (video-gen-agent, running)
+20. text           (進捗メッセージ or video URL)
+21. text           (quality-review-agent, optional)
+22. done
 ```
 
 ### モック / デモモードの新規会話
@@ -511,8 +495,7 @@ data: <json>
 6. text
 7. agent_progress (video-gen-agent)
 8. text
-9. safety
-10. done
+9. done
 ```
 
 ### 評価起点の改善
@@ -523,19 +506,17 @@ data: <json>
 3. POST /api/chat (conversation_id 付き) で改善フィードバックを送信
 4. agent_progress (marketing-plan-agent, running)
 5. text           (改善後の企画書)
-6. safety
-7. agent_progress (approval, running)
-8. approval_request
+6. agent_progress (approval, running)
+7. approval_request
 9. 承認後は通常の承認継続フローで下流成果物を再生成
 ```
 
-## Content Safety
+## Input Guard
 
-- 入力: `check_prompt_shield()` で Prompt Shield を実行
-- ツール応答: `check_tool_response()` を実行
-- 出力: `analyze_content()` で Text Analysis を実行
+- 入力: `check_prompt_shield()` で明らかな指示上書きやプロンプト窃取パターンをブロックします
+- ツール応答: `check_tool_response()` で外部データ中の同種パターンをブロックします
 
-本番相当環境では `CONTENT_SAFETY_ENDPOINT` が不足すると `/api/ready` は `503` を返します。
+本番相当環境で `/api/ready` が `503` を返すのは、`AZURE_AI_PROJECT_ENDPOINT` が不足している場合です。
 
 ## レート制限
 

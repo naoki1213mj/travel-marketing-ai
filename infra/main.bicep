@@ -149,7 +149,6 @@ module containerApp 'modules/container-app.bicep' = {
     appInsightsConnectionString: appInsights.outputs.connectionString
     modelName: defaultModelDeploymentName
     projectEndpoint: aiProjectEndpoint
-    contentSafetyEndpoint: aiFoundry.outputs.endpoint
     cosmosDbEndpoint: cosmosDb.outputs.endpoint
 
     contentUnderstandingEndpoint: aiServicesApiBase
@@ -241,6 +240,5 @@ output AZURE_APIM_NAME string = apim.outputs.name
 output AZURE_APIM_GATEWAY_URL string = apim.outputs.gatewayUrl
 output AZURE_LOGIC_APP_NAME string = logicApp.outputs.name
 output AZURE_RESOURCE_GROUP string = rg.name
-output CONTENT_SAFETY_ENDPOINT string = aiFoundry.outputs.endpoint
 output COSMOS_DB_ENDPOINT string = cosmosDb.outputs.endpoint
 output SERVICE_WEB_ENDPOINTS array = [containerApp.outputs.uri]

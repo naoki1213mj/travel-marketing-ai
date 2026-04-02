@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import threading
@@ -142,13 +143,20 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 # conversation_id でスコープし、並行リクエスト間の競合を防止する
 _images_lock = threading.Lock()
 _pending_images: dict[str, dict[str, str]] = {}
-_current_conversation_id: str = ""
+_conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "brochure_conversation_id",
+    default="",
+)
 
 
 def set_current_conversation_id(conversation_id: str) -> None:
     """現在実行中の conversation_id を設定する。"""
-    global _current_conversation_id
-    _current_conversation_id = conversation_id
+    _conversation_id_var.set(conversation_id)
+
+
+def _get_current_conversation_id() -> str:
+    """現在の非同期コンテキストに紐づく conversation_id を返す。"""
+    return _conversation_id_var.get()
 
 
 def pop_pending_images(conversation_id: str) -> dict[str, str]:
@@ -176,8 +184,9 @@ async def generate_hero_image(
     """
     full_prompt = f"{style} travel photo of {destination}. {prompt}"
     data_uri = await _generate_image(full_prompt, "1536x1024")
+    conversation_id = _get_current_conversation_id()
     with _images_lock:
-        _pending_images.setdefault(_current_conversation_id, {})["hero"] = data_uri
+        _pending_images.setdefault(conversation_id, {})["hero"] = data_uri
     return json.dumps(
         {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
     )
@@ -196,8 +205,9 @@ async def generate_banner_image(
     """
     size = "1024x1024" if platform == "instagram" else "1536x1024"
     data_uri = await _generate_image(prompt, size)
+    conversation_id = _get_current_conversation_id()
     with _images_lock:
-        _pending_images.setdefault(_current_conversation_id, {})[f"banner_{platform}"] = data_uri
+        _pending_images.setdefault(conversation_id, {})[f"banner_{platform}"] = data_uri
     return json.dumps(
         {
             "status": "generated",

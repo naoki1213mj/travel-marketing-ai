@@ -109,7 +109,7 @@ async def test_get_replay_data_fallback_to_json():
     if not replay_file.exists():
         pytest.skip("demo-replay.json が見つからない")
 
-    result = await get_replay_data("nonexistent-conv-id")
+    result = await get_replay_data("demo-replay-001")
     assert result is not None
     assert isinstance(result, list)
     assert len(result) > 0
@@ -221,11 +221,8 @@ class TestReplayData:
 
     async def test_get_replay_data_nonexistent_without_json(self, monkeypatch, tmp_path):
         """インメモリにもJSONファイルにもない場合"""
-        # get_replay_data は内部で Path を使って demo-replay.json を探す
-        # demo-replay.json が存在する場合はそのデータが返るため、
-        # 結果の型チェックのみ行う
         result = await get_replay_data("no-such-replay-id-xyz")
-        assert result is None or isinstance(result, list)
+        assert result is None
 
     async def test_replay_data_stored_with_prefix(self):
         """replay データが replay- プレフィックスで保存されること"""

@@ -14,7 +14,6 @@ class AppSettings(TypedDict):
 
     project_endpoint: str
     model_name: str
-    content_safety_endpoint: str
     applicationinsights_connection_string: str
     environment: str
     cosmos_db_endpoint: str
@@ -31,7 +30,6 @@ class AppSettings(TypedDict):
 _ENV_MAP: dict[str, str] = {
     "AZURE_AI_PROJECT_ENDPOINT": "project_endpoint",
     "MODEL_NAME": "model_name",
-    "CONTENT_SAFETY_ENDPOINT": "content_safety_endpoint",
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "applicationinsights_connection_string",
     "ENVIRONMENT": "environment",
     "COSMOS_DB_ENDPOINT": "cosmos_db_endpoint",
@@ -73,5 +71,5 @@ def get_missing_required_settings() -> list[str]:
     """現在の環境で不足している必須設定の環境変数名を返す。"""
     required: list[str] = []
     if is_production_environment():
-        required.extend(["AZURE_AI_PROJECT_ENDPOINT", "CONTENT_SAFETY_ENDPOINT"])
+        required.append("AZURE_AI_PROJECT_ENDPOINT")
     return [name for name in required if not os.environ.get(name)]

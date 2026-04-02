@@ -15,12 +15,12 @@
 - Photo Avatar 動画生成: `casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
 - Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
 - Code Interpreter の自動検出とグレースフルフォールバック
-- Microsoft Foundry、Content Safety、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar、Fabric Lakehouse との連携
+- Microsoft Foundry、Azure AI Search、Cosmos DB、Logic Apps、Content Understanding、Speech / Photo Avatar、Fabric Lakehouse との連携
 - `azd` + Bicep による Azure Container Apps、ACR、APIM、Key Vault、Cosmos DB、VNet、Log Analytics、Application Insights の構築
 
 ## 実装上の現在地
 
-- Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。
+- Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。コンテンツフィルタはモデル配備側に寄せ、アプリ側では明らかな指示上書きだけを軽量ガードで弾きます。
 - APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシーの適用を行います。
 - Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行します。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
@@ -45,8 +45,7 @@ Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azu
 flowchart LR
     user[マーケ担当者] --> ui[React フロントエンド]
     ui --> api[FastAPI SSE API]
-    api --> shield[Prompt Shield]
-    shield --> flow[SequentialBuilder workflow]
+    api --> flow[SequentialBuilder workflow]
     flow --> a1[data-search-agent]
     a1 --> fabric[Fabric Lakehouse SQL]
     a1 -.-> csv[CSV フォールバック]
@@ -62,8 +61,7 @@ flowchart LR
     a4 --> cu[Content Understanding]
     flow --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar]
-    flow --> output[Text Analysis]
-    output --> ui
+    flow --> ui
     api -. optional .-> review[quality-review-agent]
     api -. callback .-> logic[Logic Apps]
 ```
@@ -121,7 +119,6 @@ azd up
 | 変数名 | 必須 | 用途 |
 |---|---|---|
 | `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Microsoft Foundry project endpoint |
-| `CONTENT_SAFETY_ENDPOINT` | 本番 | Content Safety / Text Analysis のエンドポイント |
 | `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini`。フロントエンドのモデルセレクターでは `gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` も選択可 |
 | `EVAL_MODEL_DEPLOYMENT` | 推奨 | `/api/evaluate` 用の専用 deployment 名。未設定時は `MODEL_NAME` を使用 |
 | `ENVIRONMENT` | 任意 | `development`、`staging`、`production` |

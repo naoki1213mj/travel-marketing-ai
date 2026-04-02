@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import threading
@@ -20,23 +21,31 @@ logger = logging.getLogger(__name__)
 # --- Side-channel 動画ジョブストア ---
 # Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
 _video_lock = threading.Lock()
-_pending_video_job: dict[str, str] | None = None
+_pending_video_jobs: dict[str, dict[str, str]] = {}
+_conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "video_conversation_id",
+    default="",
+)
 
 
-def pop_pending_video_job() -> dict[str, str] | None:
+def set_current_conversation_id(conversation_id: str) -> None:
+    """現在実行中の conversation_id を設定する。"""
+    _conversation_id_var.set(conversation_id)
+
+
+def pop_pending_video_job(conversation_id: str | None = None) -> dict[str, str] | None:
     """保留中の動画生成ジョブ情報を取得してクリアする（スレッドセーフ）。"""
-    global _pending_video_job
+    scoped_conversation_id = conversation_id or _conversation_id_var.get()
     with _video_lock:
-        job = _pending_video_job
-        _pending_video_job = None
+        job = _pending_video_jobs.pop(scoped_conversation_id, None)
         return job
 
 
 def store_pending_video_job(job: dict[str, str]) -> None:
     """動画生成ジョブ情報を保存する（スレッドセーフ）。"""
-    global _pending_video_job
+    conversation_id = _conversation_id_var.get()
     with _video_lock:
-        _pending_video_job = job
+        _pending_video_jobs[conversation_id] = job
 
 
 async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:

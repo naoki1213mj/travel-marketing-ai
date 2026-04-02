@@ -13,7 +13,6 @@ export type SSEEventType =
   | 'text'
   | 'image'
   | 'approval_request'
-  | 'safety'
   | 'error'
   | 'done'
 

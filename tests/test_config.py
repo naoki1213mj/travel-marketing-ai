@@ -9,7 +9,6 @@ def test_get_settings_returns_all_fields(monkeypatch):
     for key in [
         "AZURE_AI_PROJECT_ENDPOINT",
         "MODEL_NAME",
-        "CONTENT_SAFETY_ENDPOINT",
         "APPLICATIONINSIGHTS_CONNECTION_STRING",
         "ENVIRONMENT",
         "COSMOS_DB_ENDPOINT",
@@ -43,11 +42,10 @@ def test_get_missing_required_settings(monkeypatch):
     """本番環境で project_endpoint 未設定時に不足リストに含まれる"""
     monkeypatch.setenv("ENVIRONMENT", "production")
     monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
-    monkeypatch.delenv("CONTENT_SAFETY_ENDPOINT", raising=False)
 
     missing = get_missing_required_settings()
     assert "AZURE_AI_PROJECT_ENDPOINT" in missing
-    assert "CONTENT_SAFETY_ENDPOINT" in missing
+    assert len(missing) == 1
 
 
 def test_default_values(monkeypatch):

@@ -1,5 +1,5 @@
 ---
-description: 'セキュリティレビューを実行する。シークレット漏洩、認証設定、Content Safety、ネットワーク分離を点検する。'
+description: 'セキュリティレビューを実行する。シークレット漏洩、認証設定、AI ガードレール、ネットワーク分離を点検する。'
 mode: agent
 tools: ['filesystem', 'terminal', 'search']
 ---
@@ -24,13 +24,12 @@ tools: ['filesystem', 'terminal', 'search']
 - OIDC Workload Identity Federation が CI/CD で使われているか
 - API キーベースの認証が残っていないか
 
-### 3. Content Safety
+### 3. AI ガードレール
 
-- 入力時: Prompt Shield が `/api/chat` で実行されているか
+- 入力時: `/api/chat` で明らかなプロンプト注入 / 指示上書きパターンをブロックしているか
 - モデル: Content Filter がデプロイメント設定で有効か
-- ツール応答: Prompt Shield for tool response が有効か
-- 出力時: Text Analysis が実行されているか
-- AI Gateway: `llm-content-safety` ポリシーが設定されているか
+- ツール応答: 外部データをモデルに渡す前の軽量ガードがあるか
+- AI Gateway: `llm-content-safety` など追加ポリシーが必要なら適切に設定されているか
 
 ### 4. ネットワーク
 

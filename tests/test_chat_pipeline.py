@@ -334,39 +334,6 @@ class TestSanitizeText:
             chat_module._sanitize_text("   ")
 
 
-# --- _sanitize_artifact_payload テスト ---
-
-
-class TestSanitizeArtifactPayload:
-    """_sanitize_artifact_payload のテスト"""
-
-    def test_replaces_data_uri(self):
-        text = 'img src="data:image/png;base64,abc123def"'
-        result = chat_module._sanitize_artifact_payload(text)
-        assert "[data-uri]" in result
-        assert "base64" not in result
-
-    def test_no_data_uri_unchanged(self):
-        text = "plain text without any URIs"
-        assert chat_module._sanitize_artifact_payload(text) == text
-
-
-# --- _truncate_for_safety テスト ---
-
-
-class TestTruncateForSafety:
-    """_truncate_for_safety のテスト"""
-
-    def test_short_text_unchanged(self):
-        text = "short"
-        assert chat_module._truncate_for_safety(text) == text
-
-    def test_long_text_truncated(self):
-        text = "a" * 10000
-        result = chat_module._truncate_for_safety(text)
-        assert len(result) == 9000
-
-
 # --- _build_content_events テスト ---
 
 
@@ -485,6 +452,40 @@ class TestLoadPendingApprovalContext:
         result = await chat_module._load_pending_approval_context("missing-ctx")
         assert result is None
 
+    @pytest.mark.asyncio
+    async def test_restores_model_settings_from_saved_approval_request(self, monkeypatch):
+        """保存済み approval_request から model_settings を復元できる"""
+        chat_module._pending_approvals.clear()
+
+        async def mock_get_conv(_cid):
+            return {
+                "status": "awaiting_approval",
+                "input": "沖縄プラン",
+                "messages": [
+                    {
+                        "event": "text",
+                        "data": {"agent": "data-search-agent", "content": "分析結果"},
+                    },
+                    {
+                        "event": "text",
+                        "data": {"agent": "marketing-plan-agent", "content": "企画書本文"},
+                    },
+                    {
+                        "event": "approval_request",
+                        "data": {
+                            "conversation_id": "saved-approval",
+                            "plan_markdown": "企画書本文",
+                            "model_settings": {"temperature": 0.4},
+                        },
+                    },
+                ],
+            }
+
+        monkeypatch.setattr("src.api.chat.get_conversation", mock_get_conv)
+        result = await chat_module._load_pending_approval_context("saved-approval")
+        assert result is not None
+        assert result["model_settings"] == {"temperature": 0.4}
+
 
 # --- _extract_message_text テスト ---
 
@@ -522,6 +523,34 @@ class TestExtractMessageText:
         msg = MagicMock()
         msg.contents = [content]
         assert chat_module._extract_message_text(msg) == ""
+
+
+class TestExtractToolNames:
+    """実際のツール呼び出し推定のテスト"""
+
+    def test_extracts_function_and_web_search_calls(self):
+        function_call = MagicMock()
+        function_call.type = "function_call"
+        function_call.name = "generate_hero_image"
+
+        web_search_call = MagicMock()
+        web_search_call.type = "web_search_call"
+
+        result = MagicMock()
+        result.contents = None
+        result.get_outputs.return_value = [function_call, web_search_call]
+
+        assert chat_module._extract_tool_names(result, "brochure-gen-agent", "") == [
+            "generate_hero_image",
+            "web_search",
+        ]
+
+    def test_video_agent_falls_back_to_single_actual_tool(self):
+        result = MagicMock()
+        result.contents = None
+        result.get_outputs.return_value = []
+
+        assert chat_module._extract_tool_names(result, "video-gen-agent", "submitted") == ["generate_promo_video"]
 
 
 # --- format_sse テスト ---
@@ -596,6 +625,10 @@ async def test_workflow_event_generator_creates_pending_approval(monkeypatch) ->
     parsed = [_parse_sse(event) for event in events]
 
     assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
+    approval_payload = next(
+        payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.APPROVAL_REQUEST
+    )
+    assert approval_payload["model_settings"] == {"temperature": 0.2}
 
     assert chat_module._pending_approvals["conv-azure"]["analysis_markdown"] == "data-search-agent output"
     assert chat_module._pending_approvals["conv-azure"]["model_settings"] == {"temperature": 0.2}
@@ -648,6 +681,99 @@ async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
     assert "現在の企画書" in str(captured["user_input"])
     assert captured["model_settings"] == {"top_p": 0.9}
     assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
+
+
+@pytest.mark.asyncio
+async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypatch) -> None:
+    """承認後の品質レビューと Logic Apps 連携は修正版企画書を使う"""
+
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
+    )
+
+    async def fake_load_pending(_conversation_id):
+        return {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "旧企画書",
+            "model_settings": {"temperature": 0.3},
+        }
+
+    review_inputs: list[str] = []
+    logic_app_calls: list[dict[str, str]] = []
+    popped_video_conversation_ids: list[str] = []
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        payload_by_agent = {
+            "regulation-check-agent": "規制チェック結果",
+            "plan-revision-agent": "修正版企画書",
+            "brochure-gen-agent": "```html\n<html><body>brochure</body></html>\n```",
+            "video-gen-agent": '{"status": "submitted"}',
+        }
+        text = payload_by_agent[agent_name]
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": text, "agent": agent_name},
+                )
+            ],
+            "text": text,
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 10,
+        }
+
+    async def fake_quality_review(review_input: str):
+        review_inputs.append(review_input)
+        return []
+
+    async def fake_trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_html: str):
+        logic_app_calls.append(
+            {
+                "conversation_id": conversation_id,
+                "plan_markdown": plan_markdown,
+                "brochure_html": brochure_html,
+            }
+        )
+
+    def fake_pop_pending_video_job(conversation_id: str):
+        popped_video_conversation_ids.append(conversation_id)
+        return None
+
+    async def fake_poll_video_job(job_id: str, max_wait: int = 120):
+        return None
+
+    monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "_maybe_run_quality_review", fake_quality_review)
+    monkeypatch.setattr(chat_module, "_trigger_logic_app", fake_trigger_logic_app)
+    monkeypatch.setattr("src.agents.video_gen.pop_pending_video_job", fake_pop_pending_video_job)
+    monkeypatch.setattr("src.agents.video_gen.poll_video_job", fake_poll_video_job)
+
+    events = [event async for event in chat_module._post_approval_events("承認", "conv-revised")]
+    assert events
+    assert review_inputs and "修正版企画書" in review_inputs[0]
+    assert "旧企画書" not in review_inputs[0]
+    assert logic_app_calls == [
+        {
+            "conversation_id": "conv-revised",
+            "plan_markdown": "修正版企画書",
+            "brochure_html": "<html><body>brochure</body></html>",
+        }
+    ]
+    assert popped_video_conversation_ids == ["conv-revised"]
 
 
 # --- _get_reference_brochure_path テスト ---

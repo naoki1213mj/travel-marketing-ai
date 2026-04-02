@@ -1,6 +1,6 @@
 ---
 name: travel-marketing-dev
-description: '旅行マーケティング AI パイプラインの開発支援エージェント。Agent Framework のコード生成、Foundry Workflows の設計、SSE ストリーミングの実装、Content Safety の多層防御を支援する。'
+description: '旅行マーケティング AI パイプラインの開発支援エージェント。Agent Framework のコード生成、Foundry Workflows の設計、SSE ストリーミングの実装、軽量ガードレールの適用を支援する。'
 tools: ['filesystem', 'terminal', 'search', 'fetch']
 ---
 
@@ -14,7 +14,7 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 1. **Microsoft Agent Framework (Python)**: rc5 準拠の API パターンでエージェントを実装する
 2. **Foundry Agent Service Workflows**: Sequential + Human-in-the-Loop のワークフロー設計
 3. **FastAPI + SSE**: リアルタイムストリーミング API の実装
-4. **Content Safety**: Prompt Shield + Content Filter + Text Analysis の多層防御
+4. **ガードレール**: モデル配備側の Content Filter と軽量な入力 / ツール応答ガード
 5. **Azure Functions MCP**: Flex Consumption プランでの MCP サーバー実装
 6. **Voice Live**: 音声入力チャネルの統合（WebSocket 接続）
 7. **Content Understanding**: 既存パンフレット PDF の解析と Agent4 への参考入力
@@ -26,7 +26,7 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 - Agent Framework は rc5 の API パターンを使う（AGENTS.md の「間違えやすい API」を確認）
 - `@tool` デコレータでツールを定義する
 - DefaultAzureCredential で認証する
-- SSE イベントは 8 種類（agent_progress, tool_event, text, image, approval_request, safety, error, done）に分類する
+- SSE イベントは 7 種類（agent_progress, tool_event, text, image, approval_request, error, done）に分類する
 - Python の型ヒントを必ず付ける
 
 ## Ask first

@@ -29,7 +29,7 @@ def test_format_sse_handles_japanese():
 
 
 def test_sse_event_types():
-    """SSEEventType が 8 種類定義されている"""
-    assert len(SSEEventType) == 8
+    """SSEEventType が現行の 7 種類定義されている"""
+    assert len(SSEEventType) == 7
     assert SSEEventType.AGENT_PROGRESS == "agent_progress"
     assert SSEEventType.DONE == "done"

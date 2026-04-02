@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "16433862356528391565"
+      "templateHash": "1636240421444398149"
     }
   },
   "parameters": {
@@ -30,6 +30,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "コンテナイメージ名（azd が自動設定する）"
+      }
+    },
+    "voiceSpaClientId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Voice Live SPA アプリの Client ID（postprovision で設定）"
       }
     }
   },
@@ -930,9 +937,6 @@
           "projectEndpoint": {
             "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.name.value, reference('aiProject').outputs.name.value)]"
           },
-          "contentSafetyEndpoint": {
-            "value": "[reference('aiFoundry').outputs.endpoint.value]"
-          },
           "cosmosDbEndpoint": {
             "value": "[reference('cosmosDb').outputs.endpoint.value]"
           },
@@ -947,6 +951,12 @@
           },
           "logicAppCallbackUrl": {
             "value": "[listOutputsWithSecureValues('logicApp', '2025-04-01').callbackUrl]"
+          },
+          "voiceSpaClientId": {
+            "value": "[parameters('voiceSpaClientId')]"
+          },
+          "tenantId": {
+            "value": "[tenant().tenantId]"
           }
         },
         "template": {
@@ -956,7 +966,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "11789987973578532678"
+              "templateHash": "6328614384890675374"
             }
           },
           "parameters": {
@@ -993,10 +1003,6 @@
               "type": "string",
               "defaultValue": ""
             },
-            "contentSafetyEndpoint": {
-              "type": "string",
-              "defaultValue": ""
-            },
             "cosmosDbEndpoint": {
               "type": "string",
               "defaultValue": ""
@@ -1013,6 +1019,14 @@
               "type": "string",
               "defaultValue": ""
             },
+            "voiceSpaClientId": {
+              "type": "string",
+              "defaultValue": ""
+            },
+            "tenantId": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "logicAppCallbackUrl": {
               "type": "securestring",
               "defaultValue": ""
@@ -1020,7 +1034,7 @@
           },
           "variables": {
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('contentSafetyEndpoint'))), createArray(createObject('name', 'CONTENT_SAFETY_ENDPOINT', 'value', parameters('contentSafetyEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
           },
           "resources": [
             {
@@ -1958,10 +1972,6 @@
     "AZURE_RESOURCE_GROUP": {
       "type": "string",
       "value": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]"
-    },
-    "CONTENT_SAFETY_ENDPOINT": {
-      "type": "string",
-      "value": "[reference('aiFoundry').outputs.endpoint.value]"
     },
     "COSMOS_DB_ENDPOINT": {
       "type": "string",

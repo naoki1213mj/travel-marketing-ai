@@ -42,7 +42,7 @@
 1. **Hosted Agent 優先**: Foundry Agent Service の VNet 分離は Hosted Agent 未対応なので、ネットワーク分離は Container Apps 層と Key Vault 層に限定する
 2. **Flex Consumption**: Azure Functions の MCP サーバーは Flex Consumption プラン（旧 Consumption はレガシー）
 3. **FastAPI 中継**: フロントエンドは直接 Foundry API を叩かず、FastAPI バックエンド経由で SSE ストリーミングする
-4. **Content Safety 4 層**: 入力(Prompt Shield) → モデル(Content Filter) → ツール応答(Prompt Shield for tool response) → 出力(Text Analysis)
+4. **ガードレール方針**: モデル配備側の Content Filter を主軸にし、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードで弾く
 5. **East US 2 推奨**: Code Interpreter のリージョン可用性の制約により Japan East ではなく East US 2 または Sweden Central を使う
 6. **Web Search のデータ境界**: DPA 対象外。クエリデータが Azure の geo boundary 外に流れる可能性がある
 7. **Photo Avatar の位置づけ**: 「AI アシスタントの顔」ではなく「販促素材の一部」として使う。マーケ担当者が作る成果物に組み込む
@@ -55,7 +55,6 @@
 - 要件定義書: `docs/requirements_v3.5.md`
 - Agent Framework パターン: `.github/skills/agent-framework-patterns/SKILL.md`
 - Hosted Agent デプロイ: `.github/skills/foundry-hosted-agent/SKILL.md`
-- SSE + Content Safety: `.github/skills/sse-content-safety/SKILL.md`
 - Foundry Workflows: `.github/skills/foundry-workflows/SKILL.md`
 - フロントエンド UI 設計: `.github/skills/agent-demo-frontend/SKILL.md`
 

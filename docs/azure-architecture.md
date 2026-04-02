@@ -10,8 +10,7 @@ flowchart LR
     ui --> api[FastAPI SSE API]
     ui -. evaluate / refine .-> eval[/POST /api/evaluate/]
     eval --> foundryEval[Foundry Evaluations]
-    api --> inputshield[Prompt Shield]
-    inputshield --> flow[SequentialBuilder workflow in FastAPI]
+    api --> flow[SequentialBuilder workflow in FastAPI]
 
     flow --> a1[data-search-agent]
     a1 --> dataAgent[Fabric Data Agent Published URL]
@@ -36,8 +35,6 @@ flowchart LR
     flow --> a5[video-gen-agent]
     a5 --> speech[Speech / Photo Avatar video]
 
-    flow --> outputsafety[Text Analysis]
-
     subgraph fabricLayer[Fabric Data]
         fabricSQL[Fabric SQL Endpoint]
         fabricAgent[Published Data Agent]
@@ -46,7 +43,7 @@ flowchart LR
     fabric --> fabricSQL
     dataAgent --> fabricAgent
     fabricSQL --> fabricDelta
-    outputsafety --> ui
+    flow --> ui
 
     api -. optional .-> review[quality-review-agent]
     api -. approval continuation .-> logic[Logic Apps callback]
@@ -116,7 +113,7 @@ flowchart TB
 
 | 実行主体 | 認証方式 | 主な用途 |
 |---|---|---|
-| FastAPI / Container App | `DefaultAzureCredential` | Foundry、Fabric Data Agent / Fabric SQL、Cosmos DB、Azure AI Search、Content Safety |
+| FastAPI / Container App | `DefaultAzureCredential` | Foundry、Fabric Data Agent / Fabric SQL、Cosmos DB、Azure AI Search |
 | APIM | Managed Identity | Foundry バックエンドへの認証 |
 | AI Search bootstrap script | Foundry 接続または API key | 初期インデックス投入 |
 
@@ -135,6 +132,7 @@ Container App の Managed Identity には、Bicep で Foundry 関連ロール、
 - フロントエンドは各 `done` イベントごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
 - 品質レビューは主フロー後の追加 `text` イベントとして返ります。主 workflow participant ではありません。
 - パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
+- モデル配備側のガードレールを主軸にしつつ、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードでブロックします。
 - Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
 - Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
 - 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。

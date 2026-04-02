@@ -20,13 +20,12 @@ applyTo: 'src/**,frontend/src/**,infra/**,scripts/**,Dockerfile,azure.yaml,.gith
 - Azure サブスクリプション ID・テナント ID・リソース名をコードに含めない
 - ACR のログイン情報はコードに書かない（OIDC で認証）
 
-### Content Safety
+### AI Guardrails
 
-- 入力: Prompt Shield でプロンプトインジェクション検出（FastAPI 側）
+- 入力: FastAPI 側で明らかなプロンプト注入 / 指示上書き / 窃取パターンを軽量ブロック
 - モデル: Content Filter をデプロイメント設定で有効化
-- ツール応答: Prompt Shield for tool response で間接攻撃を検出
-- 出力: Text Analysis で 4 カテゴリ（Hate/SelfHarm/Sexual/Violence）スキャン
-- AI Gateway: `llm-content-safety` ポリシーで追加フィルタリング
+- ツール応答: 外部データをモデルへ渡す前に同種パターンを軽量チェック
+- AI Gateway: 必要に応じて `llm-content-safety` などのポリシーで追加フィルタリング
 
 ### ネットワーク
 

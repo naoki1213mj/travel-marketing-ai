@@ -17,8 +17,8 @@ interface EvaluationPanelProps {
   onRefine?: (feedback: string) => void
 }
 
-function buildEvaluationKey(query: string, response: string, html: string): string {
-  return JSON.stringify([query, response.slice(0, 5000), html.slice(0, 5000)])
+function buildEvaluationKey(query: string, response: string): string {
+  return JSON.stringify([query, response])
 }
 
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
@@ -104,7 +104,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
   const [histories, setHistories] = useState<Record<string, EvaluationResult[]>>({})
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const evaluationKey = useMemo(() => buildEvaluationKey(query, response, html), [query, response, html])
+  const evaluationKey = useMemo(() => buildEvaluationKey(query, response), [query, response])
   const history = histories[evaluationKey] ?? []
 
   const result = history.length > 0 ? history[history.length - 1] : null
@@ -117,7 +117,7 @@ export function EvaluationPanel({ query, response, html, t, onRefine }: Evaluati
       const res = await fetch('/api/evaluate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query, response: response.slice(0, 5000), html: html.slice(0, 5000) }),
+        body: JSON.stringify({ query, response, html }),
       })
       if (!res.ok) {
         setError(`HTTP ${res.status}`)

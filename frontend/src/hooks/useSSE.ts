@@ -41,14 +41,6 @@ export interface ApprovalRequest {
   plan_markdown?: string
 }
 
-export interface SafetyResult {
-  hate: number
-  self_harm: number
-  sexual: number
-  violence: number
-  status: 'safe' | 'warning' | 'error'
-}
-
 export interface PipelineMetrics {
   latency_seconds: number
   tool_calls: number
@@ -67,7 +59,6 @@ export interface ArtifactSnapshot {
   images: ImageContent[]
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
-  safetyResult: SafetyResult | null
 }
 
 interface SnapshotSource {
@@ -75,7 +66,6 @@ interface SnapshotSource {
   images: ImageContent[]
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
-  safetyResult: SafetyResult | null
 }
 
 export interface ConversationEvent {
@@ -98,7 +88,6 @@ export interface PipelineState {
   textContents: TextContent[]
   images: ImageContent[]
   approvalRequest: ApprovalRequest | null
-  safetyResult: SafetyResult | null
   metrics: PipelineMetrics | null
   error: ErrorData | null
   versions: ArtifactSnapshot[]
@@ -115,7 +104,6 @@ const initialState: PipelineState = {
   textContents: [],
   images: [],
   approvalRequest: null,
-  safetyResult: null,
   metrics: null,
   error: null,
   versions: [],
@@ -142,7 +130,6 @@ export function createArtifactSnapshot(source: SnapshotSource): ArtifactSnapshot
     images: cloneImages(source.images),
     toolEvents: cloneToolEvents(source.toolEvents),
     metrics: source.metrics ? { ...source.metrics } : null,
-    safetyResult: source.safetyResult ? { ...source.safetyResult } : null,
   }
 }
 
@@ -164,7 +151,6 @@ export function buildRestoredPipelineState(
   const textContents: TextContent[] = []
   const images: ImageContent[] = []
   let toolEvents: ToolEvent[] = []
-  let safetyResult: SafetyResult | null = null
   let metrics: PipelineMetrics | null = null
   let error: ErrorData | null = null
   let approvalRequest: ApprovalRequest | null = null
@@ -220,15 +206,6 @@ export function buildRestoredPipelineState(
           total_steps: PIPELINE_TOTAL_STEPS,
         }
         break
-      case 'safety':
-        safetyResult = {
-          hate: Number(data.hate || 0),
-          self_harm: Number(data.self_harm || 0),
-          sexual: Number(data.sexual || 0),
-          violence: Number(data.violence || 0),
-          status: data.status === 'warning' || data.status === 'error' ? data.status : 'safe',
-        }
-        break
       case 'error':
         error = {
           message: String(data.message || ''),
@@ -237,7 +214,7 @@ export function buildRestoredPipelineState(
         break
       case 'done':
         metrics = (data.metrics as PipelineMetrics | undefined) ?? null
-        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, safetyResult }))
+        versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics }))
         break
     }
   }
@@ -256,7 +233,7 @@ export function buildRestoredPipelineState(
       : 'completed'
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
-    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics, safetyResult }))
+    versions.push(createArtifactSnapshot({ textContents, images, toolEvents, metrics }))
   }
 
   return {
@@ -281,7 +258,6 @@ export function buildRestoredPipelineState(
           plan_markdown: getLatestPlanMarkdown(textContents),
         }
       : null,
-    safetyResult,
     metrics,
     error,
     versions,
@@ -303,7 +279,6 @@ function syncToLatestSnapshot(state: PipelineState): PipelineState {
     images: cloneImages(latestSnapshot.images),
     toolEvents: cloneToolEvents(latestSnapshot.toolEvents),
     metrics: latestSnapshot.metrics ? { ...latestSnapshot.metrics } : null,
-    safetyResult: latestSnapshot.safetyResult ? { ...latestSnapshot.safetyResult } : null,
     currentVersion: state.versions.length,
   }
 }
@@ -381,13 +356,6 @@ export function useSSE() {
         },
       }))
     },
-    safety: (data) => {
-      if (requestId !== activeRequestIdRef.current) return
-      setState(prev => ({
-        ...prev,
-        safetyResult: data as SafetyResult,
-      }))
-    },
     error: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       setState(prev => ({
@@ -405,7 +373,6 @@ export function useSSE() {
           images: prev.images,
           toolEvents: prev.toolEvents,
           metrics: doneData.metrics,
-          safetyResult: prev.safetyResult,
         })
         const newVersions = [...prev.versions, snapshot]
         return {
@@ -483,7 +450,6 @@ export function useSSE() {
         images: snapshot.images,
         toolEvents: snapshot.toolEvents,
         metrics: snapshot.metrics,
-        safetyResult: snapshot.safetyResult,
         approvalRequest: null,
         error: null,
         currentVersion: version,

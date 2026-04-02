@@ -42,6 +42,24 @@ class TestDataSearchTools:
         for item in parsed:
             assert item.get("rating", 0) >= 4
 
+    @pytest.mark.asyncio
+    async def test_query_fabric_falls_back_on_credential_error(self, monkeypatch):
+        """Fabric SQL のトークン取得失敗時も CSV フォールバックに流せる"""
+        from azure.identity import CredentialUnavailableError
+
+        import src.agents.data_search as ds
+
+        class DummyCredential:
+            def get_token(self, _scope):
+                raise CredentialUnavailableError("credential unavailable")
+
+        monkeypatch.setattr(ds, "_HAS_PYODBC", True)
+        monkeypatch.setattr(ds, "DefaultAzureCredential", DummyCredential)
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_sql_endpoint": "test.sql.fabric.microsoft.com"})
+
+        result = ds._query_fabric("SELECT 1")
+        assert result == []
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""
@@ -137,6 +155,7 @@ class TestBrochureGenTools:
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+        bg.set_current_conversation_id("hero-test")
 
         result = await bg.generate_hero_image(
             prompt="beautiful beach",
@@ -147,7 +166,7 @@ class TestBrochureGenTools:
         assert parsed["status"] == "generated"
         assert parsed["type"] == "hero"
         # side-channel に保存されていること
-        images = bg.pop_pending_images(bg._current_conversation_id)
+        images = bg.pop_pending_images("hero-test")
         assert "hero" in images
         assert images["hero"].startswith("data:image/png;base64,")
 
@@ -209,17 +228,17 @@ class TestBrochureGenTools:
         """pop_pending_video_job がジョブ情報を返しクリアする"""
         import src.agents.video_gen as vg
 
-        vg._pending_video_job = {"job_id": "promo-123", "status": "submitted"}
-        result = vg.pop_pending_video_job()
+        vg._pending_video_jobs = {"video-test": {"job_id": "promo-123", "status": "submitted"}}
+        result = vg.pop_pending_video_job("video-test")
         assert result == {"job_id": "promo-123", "status": "submitted"}
-        assert vg._pending_video_job is None
+        assert vg._pending_video_jobs == {}
 
     def test_pop_pending_video_job_none(self):
         """ジョブがない場合は None を返す"""
         import src.agents.video_gen as vg
 
-        vg._pending_video_job = None
-        result = vg.pop_pending_video_job()
+        vg._pending_video_jobs = {}
+        result = vg.pop_pending_video_job("missing")
         assert result is None
 
     def test_get_image_openai_client_no_endpoint(self, monkeypatch):

@@ -8,7 +8,8 @@ import struct
 from pathlib import Path
 
 from agent_framework import tool
-from azure.identity import DefaultAzureCredential
+from azure.core.exceptions import ClientAuthenticationError
+from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 from pydantic import BaseModel
 
 from src.config import get_settings
@@ -222,7 +223,7 @@ def _query_fabric(query: str, params: list | None = None) -> list[dict]:
         logger.info("Fabric SQL クエリ成功: %d 行取得", len(rows))
         return rows
 
-    except (pyodbc.Error, ValueError, OSError) as exc:
+    except (pyodbc.Error, ValueError, OSError, ClientAuthenticationError, CredentialUnavailableError) as exc:
         logger.warning("Fabric SQL 接続エラー（CSV にフォールバック）: %s", exc)
         return []
 

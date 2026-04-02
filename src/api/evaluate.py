@@ -6,7 +6,7 @@ import os
 import re
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from slowapi import Limiter
@@ -154,7 +154,7 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
             try:
                 # Groundedness は context パラメータが必要
                 if name == "groundedness":
-                    result = evaluator(query=query, response=response, context=response[:3000])
+                    result = evaluator(query=query, response=response, context=response)
                 else:
                     result = evaluator(query=query, response=response)
                 score = result.get(name, result.get(f"gpt_{name}"))
@@ -233,7 +233,7 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
             model=eval_model,
             messages=[
                 {"role": "system", "content": "JSON のみ出力してください。"},
-                {"role": "user", "content": judge_prompt.format(query=query, response=response[:3000])},
+                {"role": "user", "content": judge_prompt.format(query=query, response=response)},
             ],
             temperature=0.1,
             max_completion_tokens=500,
@@ -272,7 +272,7 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
         import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
-            json.dump({"query": query, "response": response[:3000]}, f, ensure_ascii=False)
+            json.dump({"query": query, "response": response}, f, ensure_ascii=False)
             f.write("\n")
             temp_path = f.name
 
@@ -321,7 +321,9 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
 
 @router.post("/evaluate")
 @limiter.limit("5/minute")
-async def evaluate_artifacts(request: Request, body: EvaluateRequest) -> JSONResponse:
+async def evaluate_artifacts(
+    request: Request, body: EvaluateRequest, background_tasks: BackgroundTasks
+) -> JSONResponse:
     """パイプライン成果物の品質を評価する。
 
     Built-in 評価器（Relevance / Coherence / Fluency）+
@@ -342,9 +344,7 @@ async def evaluate_artifacts(request: Request, body: EvaluateRequest) -> JSONRes
     # Prompt-based カスタム評価器（LLM ジャッジ）
     results["marketing_quality"] = await _run_marketing_quality_evaluator(body.query, body.response)
 
-    # Foundry ポータル連携（バックグラウンド）
-    portal_url = await _log_to_foundry(body.query, body.response, results)
-    if portal_url:
-        results["foundry_portal_url"] = portal_url
+    # Foundry ポータル連携はレスポンスを待たずに非同期実行する
+    background_tasks.add_task(_log_to_foundry, body.query, body.response, results.copy())
 
     return JSONResponse(results)
