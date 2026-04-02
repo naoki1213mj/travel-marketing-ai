@@ -4,10 +4,19 @@ interface VersionSelectorProps {
   onChange: (version: number) => void
   t: (key: string) => string
   pendingVersion?: number | null
-  disabled?: boolean
+  viewingPending?: boolean
+  onSelectPending?: () => void
 }
 
-export function VersionSelector({ versions, current, onChange, t, pendingVersion = null, disabled = false }: VersionSelectorProps) {
+export function VersionSelector({
+  versions,
+  current,
+  onChange,
+  t,
+  pendingVersion = null,
+  viewingPending = false,
+  onSelectPending,
+}: VersionSelectorProps) {
   if (versions.length <= 1 && !pendingVersion) return null
 
   return (
@@ -18,10 +27,9 @@ export function VersionSelector({ versions, current, onChange, t, pendingVersion
           <button
             key={v}
             type="button"
-            disabled={disabled}
             onClick={() => onChange(v)}
             className={`rounded-full px-2.5 py-1 text-xs font-medium
-              ${v === current && !pendingVersion
+              ${v === current && !viewingPending
                 ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
                 : 'bg-[var(--panel-strong)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
               }`}
@@ -30,10 +38,18 @@ export function VersionSelector({ versions, current, onChange, t, pendingVersion
           </button>
         ))}
         {pendingVersion && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-[var(--accent-soft)] px-2.5 py-1 text-xs font-medium text-[var(--accent-strong)]">
+          <button
+            type="button"
+            onClick={onSelectPending}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition-colors
+              ${viewingPending
+                ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                : 'bg-[var(--panel-strong)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+              }`}
+          >
             <span className="h-2 w-2 animate-spin rounded-full border border-[var(--accent-strong)] border-t-transparent" />
             {t('version.generating').replace('{n}', String(pendingVersion))}
-          </span>
+          </button>
         )}
       </div>
     </div>

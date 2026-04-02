@@ -46,6 +46,10 @@ function App() {
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
   const [revisionInProgress, setRevisionInProgress] = useState(false)
+  const [selectedCommittedPreviewVersion, setSelectedCommittedPreviewVersion] = useState<{
+    pendingVersion: number
+    committedVersion: number
+  } | null>(null)
 
   // Esc キーでリセット
   useEffect(() => {
@@ -59,13 +63,27 @@ function App() {
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
-  const previewVersionNumber = state.pendingVersion?.version ?? state.currentVersion
-  const previewTextContents = state.pendingVersion
-    ? state.textContents.slice(state.pendingVersion.textOffset)
-    : state.textContents
-  const previewImages = state.pendingVersion
-    ? state.images.slice(state.pendingVersion.imageOffset)
-    : state.images
+  const selectedPendingPreviewVersion = state.pendingVersion
+    && selectedCommittedPreviewVersion?.pendingVersion === state.pendingVersion.version
+      ? selectedCommittedPreviewVersion.committedVersion
+      : null
+  const previewSnapshot = selectedPendingPreviewVersion && state.pendingVersion
+    ? state.versions[selectedPendingPreviewVersion - 1] ?? null
+    : null
+  const isViewingCommittedPreview = Boolean(previewSnapshot)
+  const previewVersionNumber = isViewingCommittedPreview
+    ? selectedPendingPreviewVersion
+    : (state.pendingVersion?.version ?? state.currentVersion)
+  const previewTextContents = previewSnapshot
+    ? previewSnapshot.textContents
+    : state.pendingVersion
+      ? state.textContents.slice(state.pendingVersion.textOffset)
+      : state.textContents
+  const previewImages = previewSnapshot
+    ? previewSnapshot.images
+    : state.pendingVersion
+      ? state.images.slice(state.pendingVersion.imageOffset)
+      : state.images
   const planContent = previewTextContents.findLast(c => c.agent === 'marketing-plan-agent')
   const revisionContent = previewTextContents.findLast(c => c.agent === 'plan-revision-agent')
   const planVersions = buildPlanVersions(previewTextContents)
@@ -117,10 +135,16 @@ function App() {
     <div className="mb-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--accent-strong)]">
       <div className="flex items-center gap-2 font-medium">
         <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-[var(--accent)]" />
-        {t('version.generating').replace('{n}', String(state.pendingVersion.version))}
+        {isViewingCommittedPreview
+          ? t('preview.pending.viewing_previous')
+            .replace('{current}', String(selectedPendingPreviewVersion))
+            .replace('{pending}', String(state.pendingVersion.version))
+          : t('version.generating').replace('{n}', String(state.pendingVersion.version))}
       </div>
       <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">
-        {t('preview.pending.subtitle')}
+        {isViewingCommittedPreview
+          ? t('preview.pending.return_live').replace('{n}', String(state.pendingVersion.version))
+          : t('preview.pending.subtitle')}
       </p>
       {state.versions.length > 0 && (
         <p className="mt-1 text-[11px] text-[var(--text-muted)]">
@@ -139,12 +163,28 @@ function App() {
   }
   const handleRestoreConversation = (conversationId: string) => {
     setRevisionInProgress(false)
+    setSelectedCommittedPreviewVersion(null)
     void restoreConversation(conversationId)
   }
   const handleApproval = (response: string) => {
     const trimmed = response.trim()
     setRevisionInProgress(!isApprovalResponseText(trimmed))
     void approve(trimmed)
+  }
+  const handleVersionChange = (version: number) => {
+    if (state.pendingVersion) {
+      setSelectedCommittedPreviewVersion({
+        pendingVersion: state.pendingVersion.version,
+        committedVersion: version,
+      })
+      return
+    }
+
+    setSelectedCommittedPreviewVersion(null)
+    restoreVersion(version)
+  }
+  const handleSelectPendingVersion = () => {
+    setSelectedCommittedPreviewVersion(null)
   }
 
   return (
@@ -301,11 +341,12 @@ function App() {
               <div className="mb-3 flex items-center justify-center">
                 <VersionSelector
                   versions={state.versions.map((_, i) => i + 1)}
-                  current={state.currentVersion}
-                  onChange={restoreVersion}
+                  current={selectedPendingPreviewVersion ?? state.currentVersion}
+                  onChange={handleVersionChange}
                   t={t}
                   pendingVersion={state.pendingVersion?.version}
-                  disabled={Boolean(state.pendingVersion)}
+                  viewingPending={Boolean(state.pendingVersion) && !selectedPendingPreviewVersion}
+                  onSelectPending={handleSelectPendingVersion}
                 />
               </div>
             )}
