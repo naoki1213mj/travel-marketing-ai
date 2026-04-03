@@ -12,6 +12,22 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api", tags=["voice"])
 
 
+def _get_foundry_voice_target() -> tuple[str, str, str]:
+    """Voice Live 接続先に必要なリソース名・プロジェクト名・エンドポイントを返す。"""
+    project_endpoint = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    if not project_endpoint:
+        return "", "", ""
+
+    try:
+        resource_name = project_endpoint.split("//", 1)[1].split(".", 1)[0]
+        project_name = project_endpoint.rstrip("/").rsplit("/", 1)[1]
+    except IndexError, AttributeError:
+        return "", "", ""
+
+    endpoint = f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime"
+    return resource_name, project_name, endpoint
+
+
 @router.get("/voice-token")
 async def get_voice_token() -> JSONResponse:
     """Voice Live API 接続用の AAD トークンを取得する。
@@ -25,17 +41,18 @@ async def get_voice_token() -> JSONResponse:
         token = credential.get_token("https://ai.azure.com/.default")
 
         # Voice Live 接続情報も返す
-        resource_name = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "").split("//")[1].split(".")[0] if os.environ.get("AZURE_AI_PROJECT_ENDPOINT") else ""
-        project_name = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "").rstrip("/").split("/")[-1] if os.environ.get("AZURE_AI_PROJECT_ENDPOINT") else ""
+        resource_name, project_name, endpoint = _get_foundry_voice_target()
 
-        return JSONResponse(content={
-            "token": token.token,
-            "expires_on": token.expires_on,
-            "resource_name": resource_name,
-            "project_name": project_name,
-            "endpoint": f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime",
-            "api_version": "2026-01-01-preview",
-        })
+        return JSONResponse(
+            content={
+                "token": token.token,
+                "expires_on": token.expires_on,
+                "resource_name": resource_name,
+                "project_name": project_name,
+                "endpoint": endpoint,
+                "api_version": "2026-01-01-preview",
+            }
+        )
     except Exception as exc:
         logger.warning("Voice token 取得失敗: %s", exc)
         return JSONResponse(status_code=503, content={"error": "Voice token unavailable"})
@@ -47,24 +64,18 @@ async def get_voice_config() -> JSONResponse:
     agent_name = os.environ.get("VOICE_AGENT_NAME", "travel-voice-orchestrator")
     client_id = os.environ.get("VOICE_SPA_CLIENT_ID", "")
     tenant_id = os.environ.get("AZURE_TENANT_ID", "")
-    resource_name = ""
-    project_name = ""
-    ep = os.environ.get("AZURE_AI_PROJECT_ENDPOINT", "")
-    if ep:
-        try:
-            resource_name = ep.split("//")[1].split(".")[0]
-            project_name = ep.rstrip("/").split("/")[-1]
-        except (IndexError, AttributeError):
-            pass
+    resource_name, project_name, endpoint = _get_foundry_voice_target()
 
-    return JSONResponse(content={
-        "agent_name": agent_name,
-        "client_id": client_id,
-        "tenant_id": tenant_id,
-        "resource_name": resource_name,
-        "project_name": project_name,
-        "voice": "ja-JP-NanamiNeural",
-        "vad_type": "azure_semantic_vad",
-        "endpoint": f"wss://{resource_name}.services.ai.azure.com/voice-live/realtime" if resource_name else "",
-        "api_version": "2026-01-01-preview",
-    })
+    return JSONResponse(
+        content={
+            "agent_name": agent_name,
+            "client_id": client_id,
+            "tenant_id": tenant_id,
+            "resource_name": resource_name,
+            "project_name": project_name,
+            "voice": "ja-JP-NanamiNeural",
+            "vad_type": "azure_semantic_vad",
+            "endpoint": endpoint,
+            "api_version": "2026-01-01-preview",
+        }
+    )

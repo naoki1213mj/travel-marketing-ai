@@ -103,7 +103,7 @@ function App() {
     defaultPlanVersionIndex,
   )
   const activePlanVersion = planVersions[activePlanVersionIndex]
-  const currentSnapshot = !state.pendingVersion && state.currentVersion > 0
+  const currentSnapshot = state.currentVersion > 0
     ? state.versions[state.currentVersion - 1]
     : null
   const hasRegulationStageStarted = state.agentProgress?.agent === 'regulation-check-agent'
@@ -122,11 +122,18 @@ function App() {
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
-  const evaluationVersion = !state.pendingVersion && displayedPlan ? (state.currentVersion || 1) : undefined
-  const evaluationSnapshot = !state.pendingVersion && evaluationVersion
+  const evaluationVersion = displayedPlan
+    ? (isViewingCommittedPreview
+        ? selectedPendingPreviewVersion ?? undefined
+        : !state.pendingVersion
+          ? (state.currentVersion || 1)
+          : undefined)
+    : undefined
+  const evaluationSnapshot = evaluationVersion
     ? state.versions[evaluationVersion - 1] ?? null
     : null
   const latestCommittedVersion = evaluationVersion ? Math.max(state.versions.length, evaluationVersion) : state.versions.length
+  const showEvaluationPanel = Boolean(displayedPlan && (isViewingCommittedPreview || !state.pendingVersion))
   const showDraftPlanTabs = !revisionContent && planVersions.length > 1
   const showRevisionNotice = revisionInProgress && state.status === 'running'
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
@@ -376,27 +383,27 @@ function App() {
                     )}
                     <MarkdownView content={displayedPlan} />
                     {!state.pendingVersion && (
-                      <>
-                        <button
-                          onClick={() => exportPlanMarkdown(state.textContents)}
-                          className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
-                        >
-                          <Download className="h-3.5 w-3.5" /> {t('export.plan')}
-                        </button>
-                        <EvaluationPanel
-                          query={state.userMessages[0] || ''}
-                          response={displayedPlan}
-                          html={previewHtml}
-                          conversationId={state.conversationId}
-                          artifactVersion={evaluationVersion}
-                          versions={state.versions}
-                          evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
-                          isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
-                          onEvaluationRecorded={saveEvaluation}
-                          t={t}
-                          onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
-                        />
-                      </>
+                      <button
+                        onClick={() => exportPlanMarkdown(state.textContents)}
+                        className="mt-3 inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] transition-colors"
+                      >
+                        <Download className="h-3.5 w-3.5" /> {t('export.plan')}
+                      </button>
+                    )}
+                    {showEvaluationPanel && (
+                      <EvaluationPanel
+                        query={state.userMessages[0] || ''}
+                        response={displayedPlan}
+                        html={previewHtml}
+                        conversationId={state.conversationId}
+                        artifactVersion={evaluationVersion}
+                        versions={state.versions}
+                        evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
+                        isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
+                        onEvaluationRecorded={saveEvaluation}
+                        t={t}
+                        onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
+                      />
                     )}
                   </>
                 ) : (

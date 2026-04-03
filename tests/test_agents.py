@@ -388,6 +388,98 @@ class TestBrochureGenTools:
         assert "gesture.wave-left-1" in ssml_content
         assert "詳しくはブローシャをご確認のうえ" in ssml_content
 
+    @pytest.mark.asyncio
+    async def test_generate_promo_video_respects_env_overrides(self, monkeypatch):
+        """動画生成は env の voice / avatar / bitrate 上書きを反映する"""
+        import src.agents.video_gen as vg
+
+        captured: dict[str, object] = {}
+
+        class _Token:
+            token = "test-token"
+
+        class _Credential:
+            def get_token(self, _scope: str) -> _Token:
+                return _Token()
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"id": "promo-job-456"}'
+
+        def _fake_urlopen(request, timeout: int = 0):
+            del timeout
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return _Response()
+
+        monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://test.cognitiveservices.azure.com")
+        monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
+        monkeypatch.setenv("VIDEO_GEN_VOICE", "ja-JP-Masaru:DragonHDLatestNeural")
+        monkeypatch.setenv("VIDEO_GEN_AVATAR_CHARACTER", "meg")
+        monkeypatch.setenv("VIDEO_GEN_AVATAR_STYLE", "business-standing")
+        monkeypatch.setenv("VIDEO_GEN_BACKGROUND_COLOR", "#11223344")
+        monkeypatch.setenv("VIDEO_GEN_BITRATE_KBPS", "5500")
+        monkeypatch.setattr(vg, "DefaultAzureCredential", lambda: _Credential())
+        monkeypatch.setattr(vg.urllib.request, "urlopen", _fake_urlopen)
+
+        result = await vg.generate_promo_video("沖縄の海と文化を体験できる旅です。", "guide")
+        parsed = json.loads(result)
+        payload = captured["payload"]
+
+        assert parsed["status"] == "submitted"
+        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "meg"
+        assert payload["avatarConfig"]["talkingAvatarStyle"] == "business-standing"
+        assert payload["avatarConfig"]["backgroundColor"] == "#11223344"
+        assert payload["avatarConfig"]["bitrateKbps"] == 5500
+        assert "ja-JP-Masaru:DragonHDLatestNeural" in payload["inputs"][0]["content"]
+
+    @pytest.mark.asyncio
+    async def test_generate_promo_video_falls_back_when_bitrate_is_invalid(self, monkeypatch):
+        """bitrate の env が不正でも既定値で送信する"""
+        import src.agents.video_gen as vg
+
+        captured: dict[str, object] = {}
+
+        class _Token:
+            token = "test-token"
+
+        class _Credential:
+            def get_token(self, _scope: str) -> _Token:
+                return _Token()
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"id": "promo-job-789"}'
+
+        def _fake_urlopen(request, timeout: int = 0):
+            del timeout
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return _Response()
+
+        monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://test.cognitiveservices.azure.com")
+        monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
+        monkeypatch.setenv("VIDEO_GEN_BITRATE_KBPS", "invalid")
+        monkeypatch.setattr(vg, "DefaultAzureCredential", lambda: _Credential())
+        monkeypatch.setattr(vg.urllib.request, "urlopen", _fake_urlopen)
+
+        result = await vg.generate_promo_video("札幌のグルメを巡る旅です。", "concierge")
+        parsed = json.loads(result)
+        payload = captured["payload"]
+
+        assert parsed["status"] == "submitted"
+        assert payload["avatarConfig"]["bitrateKbps"] == 4000
+
     def test_create_brochure_gen_agent_with_mock(self, monkeypatch):
         """ブローシャ生成エージェントが正しいツール数で作成されること"""
         from unittest.mock import MagicMock
