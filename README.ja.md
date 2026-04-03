@@ -132,6 +132,7 @@ azd up
 | `FABRIC_DATA_AGENT_URL` | 推奨 | `/aiassistant/openai` で終わる Fabric Data Agent Published URL。Agent1 はこれを最優先で利用 |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric Data Agent が使えない場合や追加の構造化検索が必要な場合の SQL endpoint |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | 任意 | PDF 解析用 |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint。設定時のみ UI から選択可能 |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Speech / Photo Avatar 動画生成用 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
 | `VOICE_AGENT_NAME` | 任意 | `/api/voice-config` で返す Voice Live エージェント名 |
@@ -141,6 +142,8 @@ azd up
 | `APPLICATIONINSIGHTS_CONNECTION_STRING` | 任意 | Application Insights の接続文字列 |
 
 詳細は [.env.example](.env.example) を参照してください。
+
+Azure へのプロビジョニングや GitHub Actions deploy では、Container App の Managed Identity に別 MAI アカウントの RBAC を付与するため、追加で `MAI_RESOURCE_NAME` の設定も必要です。
 
 ## ディレクトリ構成
 

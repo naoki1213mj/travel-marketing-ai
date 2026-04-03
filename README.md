@@ -146,6 +146,8 @@ After provisioning, `scripts/postprovision.py` automatically configures the AI G
 
 See [.env.example](.env.example) for the complete local example file.
 
+For Azure provisioning and GitHub Actions deploys, MAI-Image-2 also needs `MAI_RESOURCE_NAME` so the Container App managed identity can receive RBAC on the separate Azure AI / Foundry account.
+
 ## Repository Layout
 
 ```text

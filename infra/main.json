@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "1636240421444398149"
+      "templateHash": "7479762358216534567"
     }
   },
   "parameters": {
@@ -37,6 +37,20 @@
       "defaultValue": "",
       "metadata": {
         "description": "Voice Live SPA アプリの Client ID（postprovision で設定）"
+      }
+    },
+    "imageProjectEndpointMai": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint（任意）"
+      }
+    },
+    "maiResourceName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "MAI-Image-2 用の別 Azure AI / Foundry アカウント名（同一 RG 前提、任意）"
       }
     }
   },
@@ -937,6 +951,9 @@
           "projectEndpoint": {
             "value": "[format('https://{0}.services.ai.azure.com/api/projects/{1}', reference('aiFoundry').outputs.name.value, reference('aiProject').outputs.name.value)]"
           },
+          "imageProjectEndpointMai": {
+            "value": "[parameters('imageProjectEndpointMai')]"
+          },
           "cosmosDbEndpoint": {
             "value": "[reference('cosmosDb').outputs.endpoint.value]"
           },
@@ -966,7 +983,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "6328614384890675374"
+              "templateHash": "11554787753241360118"
             }
           },
           "parameters": {
@@ -1003,6 +1020,10 @@
               "type": "string",
               "defaultValue": ""
             },
+            "imageProjectEndpointMai": {
+              "type": "string",
+              "defaultValue": ""
+            },
             "cosmosDbEndpoint": {
               "type": "string",
               "defaultValue": ""
@@ -1034,7 +1055,7 @@
           },
           "variables": {
             "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
-            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
+            "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()))]"
           },
           "resources": [
             {
@@ -1178,7 +1199,7 @@
         },
         "mode": "Incremental",
         "parameters": {
-          "aiFoundryName": {
+          "aiAccountName": {
             "value": "[reference('aiFoundry').outputs.name.value]"
           },
           "principalId": {
@@ -1192,11 +1213,11 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "1345069344158203863"
+              "templateHash": "2627172113968741176"
             }
           },
           "parameters": {
-            "aiFoundryName": {
+            "aiAccountName": {
               "type": "string"
             },
             "principalId": {
@@ -1207,8 +1228,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1218,8 +1239,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1229,8 +1250,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1240,8 +1261,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1251,8 +1272,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1264,6 +1285,107 @@
       },
       "dependsOn": [
         "aiFoundry",
+        "containerApp",
+        "rg"
+      ]
+    },
+    "maiResourceAppAccess": {
+      "condition": "[not(empty(parameters('maiResourceName')))]",
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
+      "name": "mai-resource-app-access",
+      "resourceGroup": "[format('{0}{1}', variables('abbrs').resourceGroup, parameters('environmentName'))]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "aiAccountName": {
+            "value": "[parameters('maiResourceName')]"
+          },
+          "principalId": {
+            "value": "[reference('containerApp').outputs.principalId.value]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.41.2.15936",
+              "templateHash": "2627172113968741176"
+            }
+          },
+          "parameters": {
+            "aiAccountName": {
+              "type": "string"
+            },
+            "principalId": {
+              "type": "string"
+            }
+          },
+          "resources": [
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d')]"
+              }
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
+              "properties": {
+                "principalId": "[parameters('principalId')]",
+                "principalType": "ServicePrincipal",
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908')]"
+              }
+            }
+          ]
+        }
+      },
+      "dependsOn": [
         "containerApp",
         "rg"
       ]
@@ -1420,7 +1542,7 @@
         },
         "mode": "Incremental",
         "parameters": {
-          "aiFoundryName": {
+          "aiAccountName": {
             "value": "[reference('aiFoundry').outputs.name.value]"
           },
           "principalId": {
@@ -1434,11 +1556,11 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "1345069344158203863"
+              "templateHash": "2627172113968741176"
             }
           },
           "parameters": {
-            "aiFoundryName": {
+            "aiAccountName": {
               "type": "string"
             },
             "principalId": {
@@ -1449,8 +1571,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '25fbc0a9-bd7c-42a3-aa1a-3b75d497ee68'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1460,8 +1582,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1471,8 +1593,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '64702f94-c441-49e6-a78b-ef80e0188fee'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1482,8 +1604,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '53ca6127-db72-4b80-b1b0-d745d6d5456d'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",
@@ -1493,8 +1615,8 @@
             {
               "type": "Microsoft.Authorization/roleAssignments",
               "apiVersion": "2022-04-01",
-              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName'))]",
-              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiFoundryName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('aiAccountName')), subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'a97b65f3-24c7-4388-baec-2e87135dc908'), parameters('principalId'))]",
               "properties": {
                 "principalId": "[parameters('principalId')]",
                 "principalType": "ServicePrincipal",

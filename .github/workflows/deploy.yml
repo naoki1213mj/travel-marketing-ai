@@ -56,6 +56,41 @@ jobs:
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --image ${{ vars.ACR_NAME }}.azurecr.io/travel-agents:${{ github.sha }}
 
+      - name: Configure optional MAI endpoint
+        if: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI != '' }}
+        run: |
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI='${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}'
+
+      - name: Bootstrap optional MAI RBAC
+        if: ${{ vars.MAI_RESOURCE_NAME != '' }}
+        run: |
+          PRINCIPAL_ID=$(az containerapp show \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query 'identity.principalId' -o tsv)
+          MAI_SCOPE=$(az cognitiveservices account show \
+            --name ${{ vars.MAI_RESOURCE_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --query 'id' -o tsv)
+
+          for ROLE in \
+            "Cognitive Services Contributor" \
+            "Cognitive Services OpenAI User" \
+            "Azure AI Developer" \
+            "Azure AI User" \
+            "Cognitive Services User"
+          do
+            az role assignment create \
+              --assignee-object-id "$PRINCIPAL_ID" \
+              --assignee-principal-type ServicePrincipal \
+              --role "$ROLE" \
+              --scope "$MAI_SCOPE" \
+              --only-show-errors >/dev/null 2>&1 || true
+          done
+
       - name: Health check
         run: |
           APP_URL=$(az containerapp show \

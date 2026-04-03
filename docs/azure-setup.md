@@ -178,7 +178,7 @@ Foundry ポータルで Azure AI Search connection を追加し、既定 connect
 
 ### 4.7 Container App に追加環境変数を入れる
 
-最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` を自動注入します。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
+最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` を入れておけば `IMAGE_PROJECT_ENDPOINT_MAI` も自動注入されます。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
 
 ```bash
 az containerapp update \
@@ -186,6 +186,7 @@ az containerapp update \
   --resource-group <resource-group> \
   --set-env-vars \
     CONTENT_UNDERSTANDING_ENDPOINT=https://<endpoint> \
+    IMAGE_PROJECT_ENDPOINT_MAI=https://<mai-resource-account>.services.ai.azure.com \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
     SPEECH_SERVICE_REGION=eastus2 \
     LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
@@ -194,6 +195,8 @@ az containerapp update \
 ```
 
 評価専用 deployment を使う場合は、同じコマンドに `EVAL_MODEL_DEPLOYMENT=<deployment-name>` も追加してください。
+
+MAI-Image-2 を既存の Container App から使うには、環境変数だけでなく Managed Identity に別 MAI アカウントへの RBAC も必要です。最新 IaC では `azd env set MAI_RESOURCE_NAME <mai-resource-account-name>` のうえで `azd provision` を再実行すると、Container App MI に必要な Azure AI / Cognitive Services ロールが付与されます。
 
 ### 4.8 Fabric Data Agent の設定（推奨）
 
@@ -277,7 +280,7 @@ curl https://<container-app-fqdn>/api/ready
 ### 画像生成疎通
 
 - `gpt-image-1.5` が配備済み
-- MAI-Image-2 利用時: `IMAGE_PROJECT_ENDPOINT_MAI` が設定済み、別リソースに `MAI-Image-2` が配備済み
+- MAI-Image-2 利用時: `IMAGE_PROJECT_ENDPOINT_MAI` が設定済み、別リソースに `MAI-Image-2` が配備済み、Container App の Managed Identity にそのリソースへの RBAC が付与済み
 - 画像生成が透明 PNG に落ちていない
 
 ### 音声 / 動画疎通
@@ -327,3 +330,4 @@ curl https://<container-app-fqdn>/api/ready
 
 - `gpt-image-1.5` は IaC で自動配備される。古いテンプレートで作成済みの環境のみ手動追加が必要
 - `MAI-Image-2` は別リソース（East US）に手動配備し、`IMAGE_PROJECT_ENDPOINT_MAI` で接続する
+- `MAI_RESOURCE_NAME` を `azd env` または GitHub Variables に設定しておくと、最新 IaC / deploy workflow が Container App MI の RBAC bootstrap に利用する

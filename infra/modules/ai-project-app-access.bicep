@@ -1,10 +1,10 @@
-// Container App MI に Foundry リソースへのアクセス権を付与する
+// Container App MI に Azure AI / Foundry アカウントへのアクセス権を付与する
 
-param aiFoundryName string
+param aiAccountName string
 param principalId string
 
-resource aiFoundry 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = {
-  name: aiFoundryName
+resource aiAccount 'Microsoft.CognitiveServices/accounts@2025-06-01' existing = {
+  name: aiAccountName
 }
 
 // Cognitive Services Contributor（モデル呼び出し + エージェント操作）
@@ -14,8 +14,8 @@ resource cogContributorRole 'Microsoft.Authorization/roleDefinitions@2022-04-01'
 }
 
 resource cogContributorAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiFoundry.id, cogContributorRole.id, principalId)
-  scope: aiFoundry
+  name: guid(aiAccount.id, cogContributorRole.id, principalId)
+  scope: aiAccount
   properties: {
     principalId: principalId
     principalType: 'ServicePrincipal'
@@ -30,8 +30,8 @@ resource cogOpenAIUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' 
 }
 
 resource cogOpenAIUserAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiFoundry.id, cogOpenAIUserRole.id, principalId)
-  scope: aiFoundry
+  name: guid(aiAccount.id, cogOpenAIUserRole.id, principalId)
+  scope: aiAccount
   properties: {
     principalId: principalId
     principalType: 'ServicePrincipal'
@@ -46,8 +46,8 @@ resource aiDeveloperRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' ex
 }
 
 resource aiDeveloperAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiFoundry.id, aiDeveloperRole.id, principalId)
-  scope: aiFoundry
+  name: guid(aiAccount.id, aiDeveloperRole.id, principalId)
+  scope: aiAccount
   properties: {
     principalId: principalId
     principalType: 'ServicePrincipal'
@@ -62,8 +62,8 @@ resource aiUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existin
 }
 
 resource aiUserAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiFoundry.id, aiUserRole.id, principalId)
-  scope: aiFoundry
+  name: guid(aiAccount.id, aiUserRole.id, principalId)
+  scope: aiAccount
   properties: {
     principalId: principalId
     principalType: 'ServicePrincipal'
@@ -78,8 +78,8 @@ resource cogUserRole 'Microsoft.Authorization/roleDefinitions@2022-04-01' existi
 }
 
 resource cogUserAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aiFoundry.id, cogUserRole.id, principalId)
-  scope: aiFoundry
+  name: guid(aiAccount.id, cogUserRole.id, principalId)
+  scope: aiAccount
   properties: {
     principalId: principalId
     principalType: 'ServicePrincipal'

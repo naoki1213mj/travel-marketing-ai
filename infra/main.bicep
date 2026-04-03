@@ -18,6 +18,12 @@ param imageName string = ''
 @description('Voice Live SPA アプリの Client ID（postprovision で設定）')
 param voiceSpaClientId string = ''
 
+@description('MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint（任意）')
+param imageProjectEndpointMai string = ''
+
+@description('MAI-Image-2 用の別 Azure AI / Foundry アカウント名（同一 RG 前提、任意）')
+param maiResourceName string = ''
+
 var abbrs = loadJsonContent('abbreviations.json')
 var resourceToken = toLower(uniqueString(subscription().id, environmentName, location))
 var tags = {
@@ -149,6 +155,7 @@ module containerApp 'modules/container-app.bicep' = {
     appInsightsConnectionString: appInsights.outputs.connectionString
     modelName: defaultModelDeploymentName
     projectEndpoint: aiProjectEndpoint
+    imageProjectEndpointMai: imageProjectEndpointMai
     cosmosDbEndpoint: cosmosDb.outputs.endpoint
 
     contentUnderstandingEndpoint: aiServicesApiBase
@@ -165,7 +172,17 @@ module aiFoundryAppAccess 'modules/ai-project-app-access.bicep' = {
   name: 'ai-foundry-app-access'
   scope: rg
   params: {
-    aiFoundryName: aiFoundry.outputs.name
+    aiAccountName: aiFoundry.outputs.name
+    principalId: containerApp.outputs.principalId
+  }
+}
+
+// Optional: grant the app MI access to a separate MAI account used for MAI-Image-2
+module maiResourceAppAccess 'modules/ai-project-app-access.bicep' = if (!empty(maiResourceName)) {
+  name: 'mai-resource-app-access'
+  scope: rg
+  params: {
+    aiAccountName: maiResourceName
     principalId: containerApp.outputs.principalId
   }
 }
@@ -188,7 +205,7 @@ module aiFoundryApimAccess 'modules/ai-project-app-access.bicep' = {
   name: 'ai-foundry-apim-access'
   scope: rg
   params: {
-    aiFoundryName: aiFoundry.outputs.name
+    aiAccountName: aiFoundry.outputs.name
     principalId: apim.outputs.principalId
   }
 }

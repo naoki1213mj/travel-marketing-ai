@@ -10,6 +10,7 @@ param keyVaultName string
 param appInsightsConnectionString string
 param modelName string = 'gpt-5-4-mini'
 param projectEndpoint string = ''
+param imageProjectEndpointMai string = ''
 param cosmosDbEndpoint string = ''
 
 param contentUnderstandingEndpoint string = ''
@@ -43,6 +44,11 @@ var containerEnv = concat([
   {
     name: 'AZURE_AI_PROJECT_ENDPOINT'
     value: projectEndpoint
+  }
+] : [], !empty(imageProjectEndpointMai) ? [
+  {
+    name: 'IMAGE_PROJECT_ENDPOINT_MAI'
+    value: imageProjectEndpointMai
   }
 ] : [], !empty(cosmosDbEndpoint) ? [
   {

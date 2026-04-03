@@ -117,7 +117,7 @@ azd deploy
 ### 重要な補足
 
 - IaC は既定のテキストモデル (`gpt-5-4-mini`) と画像モデル (`gpt-image-1.5`) を自動配備します
-- MAI-Image-2 を使う場合は別リソースにデプロイし、`IMAGE_PROJECT_ENDPOINT_MAI` を設定してください（UI から選択可能になります）
+- MAI-Image-2 を使う場合は別リソースにデプロイし、`IMAGE_PROJECT_ENDPOINT_MAI` に加えて `MAI_RESOURCE_NAME` も設定してください（Container App の Managed Identity に別リソース RBAC を付与するため）
 - Container App には Content Understanding / Speech / Logic Apps callback の基本設定も自動注入されます
 - post-provision で残る主作業は Azure AI Search の接続・`regulations-index` の投入、必要に応じた `FABRIC_DATA_AGENT_URL` または `FABRIC_SQL_ENDPOINT` の設定、評価専用モデルを分ける場合の `EVAL_MODEL_DEPLOYMENT` 設定です
 - 詳細は [azure-setup.md](azure-setup.md) を参照してください
@@ -142,6 +142,7 @@ azd deploy
 | `FABRIC_DATA_AGENT_URL` | Fabric Data Agent Published URL（優先経路） |
 | `FABRIC_SQL_ENDPOINT` | Fabric Lakehouse SQL 接続（フォールバック経路） |
 | `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析 |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | MAI-Image-2 の別 Azure AI / Foundry アカウント endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 動画生成 |
 | `SPEECH_SERVICE_REGION` | 動画生成 |
 | `VOICE_AGENT_NAME` | Voice Live エージェント名 |
@@ -190,8 +191,10 @@ curl -X POST https://<your-app>/api/evaluate \
 1. Azure OIDC ログイン
 2. `az acr build`
 3. `az containerapp update`
-4. `/api/health` チェック
-5. `/api/ready` チェック
+4. 任意で `IMAGE_PROJECT_ENDPOINT_MAI` を Container App に反映
+5. 任意で `MAI_RESOURCE_NAME` を使って別 MAI アカウントへの RBAC を bootstrap
+6. `/api/health` チェック
+7. `/api/ready` チェック
 
 ### Security Scan
 
@@ -221,7 +224,7 @@ curl -X POST https://<your-app>/api/evaluate \
 
 選択中の画像モデルの配備を確認してください:
 - **GPT Image 1.5**: `gpt-image-1.5` がメインプロジェクトに配備されていること
-- **MAI-Image-2**: `IMAGE_PROJECT_ENDPOINT_MAI` が設定され、別リソースに `MAI-Image-2` が配備されていること
+- **MAI-Image-2**: `IMAGE_PROJECT_ENDPOINT_MAI` が設定され、別リソースに `MAI-Image-2` が配備され、Container App の Managed Identity にそのリソースへの RBAC が付与されていること
 
 ### Azure モードで `approval_request` が出ない
 
