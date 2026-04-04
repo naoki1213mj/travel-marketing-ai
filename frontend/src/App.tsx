@@ -62,12 +62,6 @@ function App() {
     committedVersion: number | null
   } | null>(null)
 
-  useEffect(() => {
-    if (!state.pendingVersion) {
-      setPendingPreviewSelection(null)
-    }
-  }, [state.pendingVersion])
-
   // Esc キーでリセット
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
