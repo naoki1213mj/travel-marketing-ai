@@ -1,5 +1,7 @@
 """チャットエンドポイントのバリデーションテスト"""
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -262,6 +264,110 @@ def test_chat_refine_with_conversation_id():
     assert "event: agent_progress" in content
     # 修正対話はモック経路で approval_request を返す（再承認フロー）
     assert "event: text" in content or "event: approval_request" in content
+
+
+def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
+    """既存 conversation_id での修正時も確定済み履歴を保持して保存する"""
+    saved: dict[str, object] = {}
+
+    async def fake_get_conversation(conversation_id: str):
+        assert conversation_id == "existing-conv"
+        return {
+            "input": "春の沖縄ファミリー向けプランを企画して",
+            "messages": [
+                {"event": "text", "data": {"content": "# Plan v1", "agent": "marketing-plan-agent"}},
+                {"event": "done", "data": {"conversation_id": "existing-conv", "metrics": {}}},
+            ],
+            "metadata": {},
+        }
+
+    async def fake_refine_events(_message: str, _conversation_id: str):
+        yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
+        yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
+
+    async def fake_save_conversation(
+        conversation_id: str,
+        user_input: str,
+        events: list[dict],
+        artifacts: dict | None = None,
+        metrics: dict | None = None,
+        status: str = "completed",
+    ) -> None:
+        saved.update(
+            {
+                "conversation_id": conversation_id,
+                "user_input": user_input,
+                "events": events,
+                "artifacts": artifacts,
+                "metrics": metrics,
+                "status": status,
+            }
+        )
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr("src.api.chat._refine_events", fake_refine_events)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+
+    response = client.post(
+        "/api/chat",
+        json={"message": "キャッチコピーをもっとポップに", "conversation_id": "existing-conv"},
+    )
+
+    assert response.status_code == 200
+    assert saved["conversation_id"] == "existing-conv"
+    assert saved["user_input"] == "春の沖縄ファミリー向けプランを企画して"
+    assert saved["status"] == "awaiting_approval"
+    assert [event["event"] for event in saved["events"]] == ["text", "done", "text", "approval_request"]
+    assert saved["events"][0]["data"]["content"] == "# Plan v1"
+    assert saved["events"][2]["data"]["content"] == "# Plan v2"
+
+
+def test_load_pending_approval_context_restores_previous_versions(monkeypatch):
+    """保存済み会話から承認待ちコンテキストを復元する際に比較用バージョンも再構築する"""
+    from src.api import chat as chat_module
+
+    async def fake_get_conversation(conversation_id: str):
+        assert conversation_id == "conv-manager"
+        return {
+            "input": "沖縄プラン",
+            "status": "awaiting_manager_approval",
+            "messages": [
+                {"event": "text", "data": {"content": "# 初版企画書", "agent": "marketing-plan-agent"}},
+                {"event": "done", "data": {"conversation_id": "conv-manager", "metrics": {}}},
+                {"event": "text", "data": {"content": "# 修正版企画書", "agent": "plan-revision-agent"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "prompt": "修正版企画書を上司へ共有してください。",
+                        "conversation_id": "conv-manager",
+                        "plan_markdown": "# 修正版企画書",
+                        "approval_scope": "manager",
+                        "model_settings": {"temperature": 0.3},
+                        "workflow_settings": {
+                            "manager_approval_enabled": True,
+                            "manager_email": "manager@example.com",
+                        },
+                    },
+                },
+            ],
+            "metadata": {"manager_approval_callback_token": "token-123"},
+        }
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    chat_module._pending_approvals.clear()
+
+    context = asyncio.run(chat_module._load_pending_approval_context("conv-manager"))
+
+    assert context is not None
+    assert context["approval_scope"] == "manager"
+    assert context["manager_callback_token"] == "token-123"
+    assert context["previous_versions"] == [
+        {
+            "version": 1,
+            "plan_title": "初版企画書",
+            "plan_markdown": "# 初版企画書",
+        }
+    ]
 
 
 def test_manager_approval_callback_reopens_conversation(monkeypatch):

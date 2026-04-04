@@ -916,6 +916,7 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
 
     analysis_markdown = ""
     plan_markdown = ""
+    previous_versions = _extract_committed_plan_versions(conversation)
     model_settings: dict | None = None
     workflow_settings: WorkflowSettings | None = None
     approval_scope = "manager" if conversation.get("status") == "awaiting_manager_approval" else "user"
@@ -956,6 +957,8 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
         "approval_scope": approval_scope,
         "manager_callback_token": manager_callback_token or None,
     }
+    if previous_versions:
+        context["previous_versions"] = previous_versions
     _pending_approvals[conversation_id] = context
     return context
 
@@ -2666,12 +2669,14 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
         # 会話を非同期で保存（レスポンスには影響しない）
         try:
-            conversation_status = _conversation_status_from_events(collected_events)
             existing_conversation = await get_conversation(conversation_id)
+            previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
+            merged_messages = [*previous_messages, *collected_events] if body.conversation_id else collected_events
+            conversation_status = _conversation_status_from_events(merged_messages)
             await save_conversation(
                 conversation_id,
-                body.message,
-                collected_events,
+                existing_conversation.get("input", body.message) if existing_conversation else body.message,
+                merged_messages,
                 metrics=_build_conversation_metadata_for_save(
                     conversation_id,
                     existing_conversation,
