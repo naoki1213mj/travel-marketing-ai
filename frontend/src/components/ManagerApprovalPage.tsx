@@ -10,9 +10,15 @@ interface ManagerApprovalPageProps {
 
 interface ManagerApprovalPayload {
   conversation_id: string
+  current_version: number
   plan_title: string
   plan_markdown: string
   manager_email?: string
+  previous_versions?: Array<{
+    version: number
+    plan_title: string
+    plan_markdown: string
+  }>
 }
 
 type ManagerApprovalPageStatus = 'loading' | 'ready' | 'submitting' | 'approved' | 'rejected' | 'error'
@@ -22,6 +28,7 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
   const [payload, setPayload] = useState<ManagerApprovalPayload | null>(null)
   const [comment, setComment] = useState('')
   const [errorMessage, setErrorMessage] = useState('')
+  const [selectedPreviousVersion, setSelectedPreviousVersion] = useState<number | null>(null)
 
   const loadApprovalRequest = useCallback(async () => {
     setStatus('loading')
@@ -41,6 +48,8 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
 
       const nextPayload = await response.json() as ManagerApprovalPayload
       setPayload(nextPayload)
+      const latestPreviousVersion = nextPayload.previous_versions?.at(-1)?.version ?? null
+      setSelectedPreviousVersion(latestPreviousVersion)
       setStatus('ready')
     } catch (error) {
       setPayload(null)
@@ -144,6 +153,9 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
     )
   }
 
+  const previousVersions = payload.previous_versions ?? []
+  const comparisonTarget = previousVersions.find(version => version.version === selectedPreviousVersion) ?? previousVersions.at(-1) ?? null
+
   return (
     <div className="space-y-4 rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-bg)] px-6 py-6 shadow-[0_18px_55px_rgba(15,23,42,0.06)]">
       <div className="border-b border-[var(--panel-border)] pb-4">
@@ -154,9 +166,66 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
         )}
       </div>
 
-      <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
-        <MarkdownView content={payload.plan_markdown} />
-      </div>
+      {previousVersions.length > 0 && (
+        <div className="space-y-3 rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+              {t('approval.manager.portal.compare')}
+            </span>
+            {previousVersions.map((version) => (
+              <button
+                key={version.version}
+                type="button"
+                onClick={() => setSelectedPreviousVersion(version.version)}
+                className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${comparisonTarget?.version === version.version
+                  ? 'bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                  : 'bg-[var(--panel-bg)] text-[var(--text-muted)] hover:text-[var(--text-primary)]'
+                }`}
+              >
+                v{version.version}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-[20px] border border-[var(--accent)]/25 bg-[var(--panel-bg)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--accent-strong)]">
+                    {t('approval.manager.portal.current_version')}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                    v{payload.current_version} · {payload.plan_title}
+                  </p>
+                </div>
+              </div>
+              <MarkdownView content={payload.plan_markdown} />
+            </div>
+
+            <div className="rounded-[20px] border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    {t('approval.manager.portal.previous_version')}
+                  </p>
+                  <p className="mt-1 text-sm font-semibold text-[var(--text-primary)]">
+                    {comparisonTarget ? `v${comparisonTarget.version} · ${comparisonTarget.plan_title}` : t('approval.manager.portal.previous_version.empty')}
+                  </p>
+                </div>
+              </div>
+              {comparisonTarget
+                ? <MarkdownView content={comparisonTarget.plan_markdown} />
+                : <p className="text-sm text-[var(--text-secondary)]">{t('approval.manager.portal.previous_version.empty')}</p>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {previousVersions.length === 0 && (
+        <div className="rounded-[24px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+          <MarkdownView content={payload.plan_markdown} />
+        </div>
+      )}
 
       <div className="space-y-2">
         <label htmlFor="manager-approval-comment" className="text-sm font-medium text-[var(--text-primary)]">

@@ -1,4 +1,4 @@
-import { FileText, Image, Layout, Video } from 'lucide-react'
+import { FileText, Image, Layout, LineChart, Video } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 
 interface Tab {
@@ -15,6 +15,7 @@ interface ArtifactTabsProps {
 
 const TAB_ICONS: Record<string, React.ReactNode> = {
   plan: <FileText className="h-3.5 w-3.5" />,
+  evaluation: <LineChart className="h-3.5 w-3.5" />,
   brochure: <Layout className="h-3.5 w-3.5" />,
   images: <Image className="h-3.5 w-3.5" />,
   video: <Video className="h-3.5 w-3.5" />,

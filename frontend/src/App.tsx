@@ -95,6 +95,17 @@ function App() {
     : state.pendingVersion
       ? state.images.slice(state.pendingVersion.imageOffset)
       : state.images
+  const workflowTextContents = previewSnapshot
+    ? previewSnapshot.textContents
+    : state.textContents
+  const workflowToolEvents = previewSnapshot
+    ? previewSnapshot.toolEvents
+    : state.toolEvents
+  const workflowMetrics = previewSnapshot
+    ? previewSnapshot.metrics
+    : state.metrics
+  const workflowAgentProgress = previewSnapshot ? null : state.agentProgress
+  const workflowError = previewSnapshot ? null : state.error
   const planContent = previewTextContents.findLast(c => c.agent === 'marketing-plan-agent')
   const revisionContent = previewTextContents.findLast(c => c.agent === 'plan-revision-agent')
   const planVersions = buildPlanVersions(previewTextContents)
@@ -149,21 +160,23 @@ function App() {
   const showRevisionNotice = revisionInProgress && state.status === 'running'
   const previewHtml = previewTextContents.findLast(c => c.content_type === 'html')?.content || ''
   const previewVideoUrl = previewTextContents.findLast(c => c.content_type === 'video')?.content
+  const previewVideoStatus = previewTextContents.findLast(c => c.agent === 'video-gen-agent' && c.content_type !== 'video')?.content
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
   const showManagerApprovalPhase = state.hasManagerApprovalPhase
   const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
-  const shouldPollManagerApprovalFlow = state.managerApprovalPolling && Boolean(state.conversationId)
+  const shouldPollConversationUpdates = Boolean(state.conversationId)
+    && (state.managerApprovalPolling || state.backgroundUpdatesPending)
 
   useEffect(() => {
     if (managerPortalRequest) return
-    if (!shouldPollManagerApprovalFlow || !state.conversationId) return
+    if (!shouldPollConversationUpdates || !state.conversationId) return
 
     const intervalId = window.setInterval(() => {
       void restoreConversation(state.conversationId || '')
     }, 5000)
 
     return () => window.clearInterval(intervalId)
-  }, [managerPortalRequest, restoreConversation, shouldPollManagerApprovalFlow, state.conversationId])
+  }, [managerPortalRequest, restoreConversation, shouldPollConversationUpdates, state.conversationId])
 
   const pendingVersionNotice = state.pendingVersion ? (
     <div className="mb-3 rounded-2xl border border-[var(--accent)]/20 bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--accent-strong)]">
@@ -318,12 +331,20 @@ function App() {
               </div>
             )}
 
+            {previewSnapshot && selectedPendingPreviewVersion && (
+              <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-3 text-sm text-[var(--text-secondary)]">
+                {t('preview.pending.viewing_previous')
+                  .replace('{current}', String(selectedPendingPreviewVersion))
+                  .replace('{pending}', String(state.pendingVersion?.version ?? ''))}
+              </div>
+            )}
+
             <WorkflowAccordion
-              agentProgress={state.agentProgress}
-              textContents={state.textContents}
-              toolEvents={state.toolEvents}
-              metrics={state.metrics}
-              error={state.error}
+              agentProgress={workflowAgentProgress}
+              textContents={workflowTextContents}
+              toolEvents={workflowToolEvents}
+              metrics={workflowMetrics}
+              error={workflowError}
               onRetry={handleReset}
               t={t}
               locale={locale}
@@ -453,21 +474,6 @@ function App() {
                         <Download className="h-3.5 w-3.5" /> {t('export.plan')}
                       </button>
                     )}
-                    {showEvaluationPanel && (
-                      <EvaluationPanel
-                        query={state.userMessages[0] || ''}
-                        response={displayedPlan}
-                        html={previewHtml}
-                        conversationId={state.conversationId}
-                        artifactVersion={evaluationVersion}
-                        versions={state.versions}
-                        evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
-                        isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
-                        onEvaluationRecorded={saveEvaluation}
-                        t={t}
-                        onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
-                      />
-                    )}
                   </>
                 ) : (
                   <>
@@ -488,11 +494,44 @@ function App() {
                   </>
                 ),
               },
+              {
+                key: 'evaluation',
+                label: t('tab.evaluation'),
+                content: showEvaluationPanel ? (
+                  <>
+                    {pendingVersionNotice}
+                    <EvaluationPanel
+                      query={state.userMessages[0] || ''}
+                      response={displayedPlan}
+                      html={previewHtml}
+                      conversationId={state.conversationId}
+                      artifactVersion={evaluationVersion}
+                      versions={state.versions}
+                      evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
+                      isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
+                      onEvaluationRecorded={saveEvaluation}
+                      t={t}
+                      onRefine={state.status !== 'approval' ? handleSendMessage : undefined}
+                    />
+                  </>
+                ) : (
+                  <div className="rounded-[24px] border border-dashed border-[var(--panel-border)] bg-[var(--panel-strong)] px-6 py-10 text-center">
+                    <p className="text-sm font-medium text-[var(--text-primary)]">{t('tab.evaluation')}</p>
+                    <p className="mt-2 text-sm text-[var(--text-secondary)]">
+                      {state.pendingVersion
+                        ? t('eval.pending.latest_only')
+                        : t('eval.empty')}
+                    </p>
+                  </div>
+                ),
+              },
               { key: 'brochure', label: t('tab.brochure'), content: <BrochurePreview contents={previewTextContents} t={t} /> },
               { key: 'images', label: t('tab.images'), content: <ImageGallery images={previewImages} t={t} /> },
               { key: 'video', label: t('tab.video') || '動画', content: (
                 <VideoPreview
                   videoUrl={previewVideoUrl}
+                  statusMessage={previewVideoStatus}
+                  backgroundPending={state.backgroundUpdatesPending}
                   t={t}
                 />
               )},

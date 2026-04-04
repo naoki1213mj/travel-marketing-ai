@@ -106,7 +106,16 @@ def test_get_manager_approval_request_returns_context(monkeypatch):
             "manager_callback_token": "token-123",
         }
 
+    async def fake_get_conversation(_conversation_id: str):
+        return {
+            "messages": [
+                {"event": "text", "data": {"content": "# 初版企画書\n\n本文", "agent": "marketing-plan-agent"}},
+                {"event": "done", "data": {"conversation_id": "conv-manager", "metrics": {}}},
+            ]
+        }
+
     monkeypatch.setattr("src.api.chat._load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
 
     response = client.get(
         "/api/chat/conv-manager/manager-approval-request",
@@ -117,9 +126,17 @@ def test_get_manager_approval_request_returns_context(monkeypatch):
     assert response.headers["Cache-Control"].startswith("no-store")
     assert response.json() == {
         "conversation_id": "conv-manager",
+        "current_version": 2,
         "plan_title": "修正版企画書",
         "plan_markdown": "# 修正版企画書\n\n本文",
         "manager_email": "manager@example.com",
+        "previous_versions": [
+            {
+                "version": 1,
+                "plan_title": "初版企画書",
+                "plan_markdown": "# 初版企画書\n\n本文",
+            }
+        ],
     }
 
 

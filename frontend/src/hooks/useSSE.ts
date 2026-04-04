@@ -93,12 +93,14 @@ export interface ConversationDocument {
   input?: string
   status?: string
   messages?: ConversationEvent[]
+  metadata?: Record<string, unknown>
 }
 
 export interface PipelineState {
   status: PipelineStatus
   conversationId: string | null
   managerApprovalPolling: boolean
+  backgroundUpdatesPending: boolean
   hasManagerApprovalPhase: boolean
   agentProgress: AgentProgress | null
   toolEvents: ToolEvent[]
@@ -118,6 +120,7 @@ const initialState: PipelineState = {
   status: 'idle',
   conversationId: null,
   managerApprovalPolling: false,
+  backgroundUpdatesPending: false,
   hasManagerApprovalPhase: false,
   agentProgress: null,
   toolEvents: [],
@@ -187,6 +190,26 @@ function getLatestPlanMarkdown(textContents: TextContent[]): string | undefined 
   return undefined
 }
 
+function isBackgroundUpdate(data: Record<string, unknown>): boolean {
+  return data.background_update === true
+}
+
+function syncLatestCompletedSnapshot(
+  prev: PipelineState,
+  source: SnapshotSource,
+): ArtifactSnapshot[] {
+  if (prev.status !== 'completed' || prev.pendingVersion || prev.currentVersion === 0 || prev.currentVersion !== prev.versions.length) {
+    return prev.versions
+  }
+
+  const latestIndex = prev.versions.length - 1
+  return prev.versions.map((snapshot, index) => (
+    index === latestIndex
+      ? createArtifactSnapshot(source)
+      : snapshot
+  ))
+}
+
 export function buildRestoredPipelineState(
   doc: ConversationDocument,
   conversationId: string,
@@ -201,6 +224,8 @@ export function buildRestoredPipelineState(
   let latestAgentProgress: AgentProgress | null = null
   let hasManagerApprovalPhase = false
   const versions: ArtifactSnapshot[] = []
+  const metadata = doc.metadata && typeof doc.metadata === 'object' ? doc.metadata : {}
+  const backgroundUpdatesPending = metadata.background_updates_pending === true
 
   for (const event of doc.messages ?? []) {
     const data = event.data ?? {}
@@ -220,6 +245,15 @@ export function buildRestoredPipelineState(
           agent: String(data.agent || ''),
           content_type: data.content_type ? String(data.content_type) : undefined,
         })
+        if (isBackgroundUpdate(data) && versions.length > 0) {
+          versions[versions.length - 1] = createArtifactSnapshot({
+            textContents,
+            images,
+            toolEvents,
+            metrics: versions[versions.length - 1].metrics,
+            evaluations: versions[versions.length - 1].evaluations,
+          })
+        }
         break
       case 'image':
         images.push({
@@ -227,6 +261,15 @@ export function buildRestoredPipelineState(
           alt: String(data.alt || ''),
           agent: String(data.agent || ''),
         })
+        if (isBackgroundUpdate(data) && versions.length > 0) {
+          versions[versions.length - 1] = createArtifactSnapshot({
+            textContents,
+            images,
+            toolEvents,
+            metrics: versions[versions.length - 1].metrics,
+            evaluations: versions[versions.length - 1].evaluations,
+          })
+        }
         break
       case 'tool_event':
         toolEvents = [
@@ -237,6 +280,15 @@ export function buildRestoredPipelineState(
             agent: String(data.agent || ''),
           },
         ].slice(-MAX_TOOL_EVENTS)
+        if (isBackgroundUpdate(data) && versions.length > 0) {
+          versions[versions.length - 1] = createArtifactSnapshot({
+            textContents,
+            images,
+            toolEvents,
+            metrics: versions[versions.length - 1].metrics,
+            evaluations: versions[versions.length - 1].evaluations,
+          })
+        }
         break
       case 'approval_request':
         hasManagerApprovalPhase = hasManagerApprovalPhase || data.approval_scope === 'manager'
@@ -273,6 +325,15 @@ export function buildRestoredPipelineState(
         const snapshot = versions[evaluation.version - 1]
         if (!snapshot) break
         snapshot.evaluations = [...snapshot.evaluations, cloneEvaluationRecord(evaluation)]
+        if (isBackgroundUpdate(data) && versions.length > 0) {
+          versions[versions.length - 1] = createArtifactSnapshot({
+            textContents,
+            images,
+            toolEvents,
+            metrics: versions[versions.length - 1].metrics,
+            evaluations: versions[versions.length - 1].evaluations,
+          })
+        }
         break
       }
     }
@@ -315,6 +376,7 @@ export function buildRestoredPipelineState(
     status,
     conversationId,
     managerApprovalPolling,
+    backgroundUpdatesPending,
     hasManagerApprovalPhase: hasManagerApprovalPhase || doc.status === 'awaiting_manager_approval',
     agentProgress: status === 'approval'
       ? latestAgentProgress ?? {
@@ -454,26 +516,56 @@ export function useSSE() {
     },
     tool_event: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      setState(prev => ({
-        ...prev,
-        toolEvents: [...prev.toolEvents, data as ToolEvent].slice(-MAX_TOOL_EVENTS),
-      }))
+      setState(prev => {
+        const toolEvents = [...prev.toolEvents, data as ToolEvent].slice(-MAX_TOOL_EVENTS)
+        return {
+          ...prev,
+          toolEvents,
+          versions: syncLatestCompletedSnapshot(prev, {
+            textContents: prev.textContents,
+            images: prev.images,
+            toolEvents,
+            metrics: prev.metrics,
+            evaluations: prev.versions[prev.versions.length - 1]?.evaluations ?? [],
+          }),
+        }
+      })
     },
     text: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      setState(prev => ({
-        ...prev,
-        textContents: [...prev.textContents, data as TextContent],
-      }))
+      setState(prev => {
+        const textContents = [...prev.textContents, data as TextContent]
+        return {
+          ...prev,
+          textContents,
+          versions: syncLatestCompletedSnapshot(prev, {
+            textContents,
+            images: prev.images,
+            toolEvents: prev.toolEvents,
+            metrics: prev.metrics,
+            evaluations: prev.versions[prev.versions.length - 1]?.evaluations ?? [],
+          }),
+        }
+      })
     },
     image: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       const image = data as ImageContent
       if (!image.url?.trim()) return
-      setState(prev => ({
-        ...prev,
-        images: [...prev.images, image],
-      }))
+      setState(prev => {
+        const images = [...prev.images, image]
+        return {
+          ...prev,
+          images,
+          versions: syncLatestCompletedSnapshot(prev, {
+            textContents: prev.textContents,
+            images,
+            toolEvents: prev.toolEvents,
+            metrics: prev.metrics,
+            evaluations: prev.versions[prev.versions.length - 1]?.evaluations ?? [],
+          }),
+        }
+      })
     },
     approval_request: (data) => {
       if (requestId !== activeRequestIdRef.current) return
@@ -482,6 +574,7 @@ export function useSSE() {
       setState(prev => ({
         ...prev,
         managerApprovalPolling: request.approval_scope === 'manager',
+        backgroundUpdatesPending: false,
         hasManagerApprovalPhase: prev.hasManagerApprovalPhase || request.approval_scope === 'manager',
         approvalRequest: {
           ...request,
@@ -504,12 +597,13 @@ export function useSSE() {
         error: data as ErrorData,
         status: 'error',
         managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
         pendingVersion: null,
       }))
     },
     done: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      const doneData = data as { conversation_id: string; metrics: PipelineMetrics }
+      const doneData = data as { conversation_id: string; metrics: PipelineMetrics; background_updates_pending?: boolean }
       setState(prev => {
         const snapshot = createArtifactSnapshot({
           textContents: prev.textContents,
@@ -524,6 +618,7 @@ export function useSSE() {
           metrics: doneData.metrics,
           status: 'completed',
           managerApprovalPolling: false,
+          backgroundUpdatesPending: doneData.background_updates_pending === true,
           conversationId: doneData.conversation_id,
           versions: newVersions,
           currentVersion: newVersions.length,
@@ -547,6 +642,7 @@ export function useSSE() {
           ...synced,
           status: 'running' as const,
           managerApprovalPolling: false,
+          backgroundUpdatesPending: false,
           hasManagerApprovalPhase: currentSettings.managerApprovalEnabled,
           error: null,
           approvalRequest: null,
@@ -586,6 +682,7 @@ export function useSSE() {
       ...prev,
       status: 'running',
       managerApprovalPolling: false,
+      backgroundUpdatesPending: false,
       approvalRequest: null,
       error: null,
       pendingVersion: inferPendingVersion(prev),

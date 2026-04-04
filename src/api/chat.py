@@ -10,6 +10,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Callable
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
@@ -75,6 +76,7 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x09\x0b-\x1f\x7f]")
 _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
+_BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
 _PIPELINE_TOTAL_STEPS = 5
 
 
@@ -106,6 +108,16 @@ class AgentExecutionOutcome(TypedDict):
     latency_seconds: float
     tool_calls: int
     total_tokens: int
+
+
+class PostCompletionUpdateContext(TypedDict):
+    """完了後にバックグラウンドで継続する処理の入力。"""
+
+    conversation_id: str
+    review_input: str
+    revised_plan_markdown: str
+    brochure_html: str
+    video_job_id: str | None
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
@@ -212,10 +224,17 @@ def _get_manager_callback_token_from_conversation(conversation: dict | None) -> 
     return _sanitize_optional_text(str(value) if value is not None else "")
 
 
+def _has_background_updates_pending(conversation: dict | None) -> bool:
+    """保存済み会話 metadata から background update の pending 状態を返す。"""
+    metadata = _get_conversation_metadata(conversation)
+    return _to_bool(metadata.get(_BACKGROUND_UPDATES_PENDING_METADATA_KEY))
+
+
 def _build_conversation_metadata_for_save(
     conversation_id: str,
     existing_conversation: dict | None,
     conversation_status: str,
+    background_updates_pending: bool | None = None,
 ) -> dict | None:
     """会話保存時の metadata を構築する。"""
     metadata = _get_conversation_metadata(existing_conversation)
@@ -230,6 +249,11 @@ def _build_conversation_metadata_for_save(
             metadata[_MANAGER_APPROVAL_TOKEN_METADATA_KEY] = callback_token
     else:
         metadata.pop(_MANAGER_APPROVAL_TOKEN_METADATA_KEY, None)
+
+    if background_updates_pending is True:
+        metadata[_BACKGROUND_UPDATES_PENDING_METADATA_KEY] = True
+    elif background_updates_pending is False:
+        metadata.pop(_BACKGROUND_UPDATES_PENDING_METADATA_KEY, None)
 
     return metadata or None
 
@@ -363,6 +387,61 @@ def _record_sse_event(collected_events: list[dict], event: str, start: float) ->
         collected_events.append({"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data})
     except Exception as exc:
         logger.warning("SSE イベント収集のパースに失敗: %s", exc)
+
+
+def _sse_to_event_dict(event: str, *, background_update: bool = False) -> dict | None:
+    """SSE 文字列を会話保存用イベント dict に変換する。"""
+    try:
+        lines = event.strip().split("\n")
+        ev_type = lines[0].replace("event: ", "") if lines else ""
+        ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+    except Exception as exc:
+        logger.warning("SSE イベントの変換に失敗: %s", exc)
+        return None
+
+    if background_update and isinstance(ev_data, dict):
+        ev_data = {**ev_data, "background_update": True}
+
+    return {"event": ev_type, "data": ev_data}
+
+
+def _extract_committed_plan_versions(conversation: dict | None) -> list[dict[str, object]]:
+    """保存済み会話から確定済み企画書バージョン一覧を抽出する。"""
+    if not isinstance(conversation, dict):
+        return []
+
+    messages = conversation.get("messages")
+    if not isinstance(messages, list):
+        return []
+
+    versions: list[dict[str, object]] = []
+    latest_plan_markdown = ""
+
+    for event in messages:
+        if not isinstance(event, dict):
+            continue
+        event_name = event.get("event")
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+
+        if event_name == "text" and data.get("agent") in {"marketing-plan-agent", "plan-revision-agent"}:
+            latest_plan_markdown = _sanitize_optional_text(str(data.get("content") or ""))
+            continue
+
+        if event_name != SSEEventType.DONE.value or not latest_plan_markdown:
+            continue
+
+        version_number = len(versions) + 1
+        versions.append(
+            {
+                "version": version_number,
+                "plan_title": _extract_plan_title(latest_plan_markdown),
+                "plan_markdown": latest_plan_markdown,
+            }
+        )
+
+    return versions
 
 
 def _extract_message_text(message: object) -> str:
@@ -1884,6 +1963,7 @@ async def _post_approval_events(
     conversation_id: str,
     base_url: str | None = None,
     approval_context: PendingApprovalContext | None = None,
+    register_background_job: Callable[[PostCompletionUpdateContext], None] | None = None,
 ):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
     settings = get_settings()
@@ -1914,6 +1994,7 @@ async def _post_approval_events(
     revised_plan_markdown = context["plan_markdown"]
     hero_image_task = None
     destination_text = None
+    video_outcome_task = None
 
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
@@ -2056,6 +2137,18 @@ async def _post_approval_events(
                     destination_text = place
                     break
 
+    video_summary = _extract_plan_summary(revised_plan_markdown)
+    if video_summary:
+        video_outcome_task = asyncio.create_task(
+            _execute_agent(
+                agent_name="video-gen-agent",
+                agent_step=5,
+                user_input=video_summary,
+                conversation_id=conversation_id,
+                model_settings=context.get("model_settings"),
+            )
+        )
+
     # 規制チェック+修正完了 → 販促物生成フェーズへ即座に遷移（UI の待ち時間解消）
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
@@ -2088,61 +2181,32 @@ async def _post_approval_events(
     for event in brochure_outcome["events"]:
         yield event
     if not brochure_outcome["success"]:
+        if video_outcome_task is not None:
+            video_outcome_task.cancel()
         return
     total_tool_calls += brochure_outcome["tool_calls"]
     total_tokens_sum += brochure_outcome.get("total_tokens", 0)
 
-    # Agent5: 販促動画生成（Photo Avatar）
-    # 企画書サマリを渡して動画を生成
-    video_summary = _extract_plan_summary(revised_plan_markdown)
-    if video_summary:
-        video_outcome = await _execute_agent(
-            agent_name="video-gen-agent",
-            agent_step=5,
-            user_input=video_summary,
-            conversation_id=conversation_id,
-            model_settings=context.get("model_settings"),
-        )
+    if video_outcome_task is not None:
+        video_outcome = await video_outcome_task
         for event in video_outcome["events"]:
             yield event
         total_tool_calls += video_outcome["tool_calls"]
         total_tokens_sum += video_outcome.get("total_tokens", 0)
 
-    # Video polling
-    from src.agents.video_gen import poll_video_job, pop_pending_video_job
+    from src.agents.video_gen import pop_pending_video_job
 
     video_job = pop_pending_video_job(conversation_id)
-    if video_job and video_job.get("job_id"):
-        # ポーリング中は video-gen-agent を running に戻す（UI で brochure に完了チェックが付かないように）
-        yield format_sse(
-            SSEEventType.AGENT_PROGRESS,
-            {"agent": "video-gen-agent", "status": "running", "step": 5, "total_steps": _PIPELINE_TOTAL_STEPS},
-        )
+    video_job_id = _sanitize_optional_text(video_job.get("job_id")) if isinstance(video_job, dict) else ""
+
+    if video_job_id:
         yield format_sse(
             SSEEventType.TEXT,
             {
-                "content": "販促動画を生成中です...",
+                "content": "販促動画をバックグラウンドで生成しています。動画タブは完了後に自動更新されます。",
                 "agent": "video-gen-agent",
                 "content_type": "text",
             },
-        )
-        video_url = await poll_video_job(video_job["job_id"], max_wait=120)
-        if video_url and video_url.startswith("https://"):
-            yield format_sse(
-                SSEEventType.TEXT,
-                {
-                    "content": video_url,
-                    "agent": "video-gen-agent",
-                    "content_type": "video",
-                },
-            )
-        elif video_url:
-            logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
-
-        # ポーリング完了 → video-gen-agent を completed に
-        yield format_sse(
-            SSEEventType.AGENT_PROGRESS,
-            {"agent": "video-gen-agent", "status": "completed", "step": 5, "total_steps": _PIPELINE_TOTAL_STEPS},
         )
 
     review_input = "\n\n".join(
@@ -2155,20 +2219,53 @@ async def _post_approval_events(
         ]
         if part
     )
-    for event in await _maybe_run_quality_review(review_input):
-        yield event
+    brochure_html = _extract_brochure_html(brochure_outcome["text"]) or ""
+    background_updates_pending = bool(video_job_id or review_input.strip() or settings["logic_app_callback_url"])
 
-    await _trigger_logic_app(
-        conversation_id=conversation_id,
-        plan_markdown=revised_plan_markdown,
-        brochure_html=_extract_brochure_html(brochure_outcome["text"]) or "",
-    )
+    if background_updates_pending and register_background_job is None:
+        if video_job_id:
+            from src.agents.video_gen import poll_video_job
+
+            video_url = await poll_video_job(video_job_id, max_wait=120)
+            if video_url and video_url.startswith("https://"):
+                yield format_sse(
+                    SSEEventType.TEXT,
+                    {
+                        "content": video_url,
+                        "agent": "video-gen-agent",
+                        "content_type": "video",
+                    },
+                )
+            elif video_url:
+                logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
+
+        for event in await _maybe_run_quality_review(review_input):
+            yield event
+
+        await _trigger_logic_app(
+            conversation_id=conversation_id,
+            plan_markdown=revised_plan_markdown,
+            brochure_html=brochure_html,
+        )
+        background_updates_pending = False
+    elif background_updates_pending and register_background_job is not None:
+        register_background_job(
+            {
+                "conversation_id": conversation_id,
+                "review_input": review_input,
+                "revised_plan_markdown": revised_plan_markdown,
+                "brochure_html": brochure_html,
+                "video_job_id": video_job_id or None,
+            }
+        )
+
     _pending_approvals.pop(conversation_id, None)
 
     yield format_sse(
         SSEEventType.DONE,
         {
             "conversation_id": conversation_id,
+            "background_updates_pending": background_updates_pending,
             "metrics": {
                 "latency_seconds": round(time.monotonic() - approval_start, 1),
                 "tool_calls": total_tool_calls,
@@ -2176,6 +2273,94 @@ async def _post_approval_events(
             },
         },
     )
+
+
+async def _append_post_completion_updates(
+    conversation_id: str,
+    update_context: PostCompletionUpdateContext,
+) -> None:
+    """完了後の動画・品質レビュー・通知をバックグラウンドで追記する。"""
+    existing_conversation = await get_conversation(conversation_id)
+    if not existing_conversation:
+        logger.warning("background update 対象の会話が見つかりません: %s", conversation_id)
+        return
+
+    appended_events: list[dict] = []
+
+    video_job_id = _sanitize_optional_text(update_context.get("video_job_id"))
+    if video_job_id:
+        from src.agents.video_gen import poll_video_job
+
+        video_url = await poll_video_job(video_job_id, max_wait=120)
+        if video_url and video_url.startswith("https://"):
+            appended_events.append(
+                {
+                    "event": SSEEventType.TEXT.value,
+                    "data": {
+                        "content": video_url,
+                        "agent": "video-gen-agent",
+                        "content_type": "video",
+                        "background_update": True,
+                    },
+                }
+            )
+        elif video_url:
+            logger.warning("Photo Avatar: 無効な background video_url を無視: %s", video_url[:100])
+
+    review_input = _sanitize_optional_text(update_context.get("review_input"))
+    if review_input:
+        for event in await _maybe_run_quality_review(review_input):
+            event_dict = _sse_to_event_dict(event, background_update=True)
+            if event_dict is not None:
+                appended_events.append(event_dict)
+
+    await _trigger_logic_app(
+        conversation_id=conversation_id,
+        plan_markdown=update_context["revised_plan_markdown"],
+        brochure_html=update_context["brochure_html"],
+    )
+
+    merged_messages = [*existing_conversation.get("messages", []), *appended_events]
+    conversation_status = _conversation_status_from_events(merged_messages)
+    await save_conversation(
+        conversation_id=conversation_id,
+        user_input=existing_conversation.get("input", ""),
+        events=merged_messages,
+        metrics=_build_conversation_metadata_for_save(
+            conversation_id,
+            existing_conversation,
+            conversation_status,
+            background_updates_pending=False,
+        ),
+        status=conversation_status,
+    )
+
+
+async def _append_post_completion_updates_safe(
+    conversation_id: str,
+    update_context: PostCompletionUpdateContext,
+) -> None:
+    """完了後の background update を安全に実行し、必ず pending 状態を解除する。"""
+    try:
+        await _append_post_completion_updates(conversation_id, update_context)
+    except Exception:
+        logger.exception("完了後の background update に失敗: conversation_id=%s", conversation_id)
+        existing_conversation = await get_conversation(conversation_id)
+        if not existing_conversation:
+            return
+
+        await save_conversation(
+            conversation_id=conversation_id,
+            user_input=existing_conversation.get("input", ""),
+            events=existing_conversation.get("messages", []),
+            metrics=_build_conversation_metadata_for_save(
+                conversation_id,
+                existing_conversation,
+                str(existing_conversation.get("status", "completed")),
+                background_updates_pending=False,
+            ),
+            status=str(existing_conversation.get("status", "completed")),
+        )
 
 
 async def _trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_html: str) -> None:
@@ -2316,7 +2501,17 @@ async def _run_manager_approval_continuation(
 
     collected_events: list[dict] = []
     start = time.monotonic()
-    async for event in _post_approval_events("承認", conversation_id, approval_context=approval_context):
+    background_update_jobs: list[PostCompletionUpdateContext] = []
+
+    def _register_background_job(update_context: PostCompletionUpdateContext) -> None:
+        background_update_jobs.append(update_context)
+
+    async for event in _post_approval_events(
+        "承認",
+        conversation_id,
+        approval_context=approval_context,
+        register_background_job=_register_background_job,
+    ):
         _record_sse_event(collected_events, event, start)
 
     merged_messages = [*existing_conversation.get("messages", []), *collected_events]
@@ -2329,9 +2524,13 @@ async def _run_manager_approval_continuation(
             conversation_id,
             existing_conversation,
             conversation_status,
+            background_updates_pending=bool(background_update_jobs),
         ),
         status=conversation_status,
     )
+
+    for update_job in background_update_jobs:
+        asyncio.create_task(_append_post_completion_updates_safe(conversation_id, update_job))
 
 
 # --- エンドポイント ---
@@ -2520,11 +2719,17 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
 @router.post("/chat/{thread_id}/approve")
 @limiter.limit("10/minute")
-async def approve(thread_id: str, request: Request, body: ApproveRequest) -> StreamingResponse:
+async def approve(
+    thread_id: str, request: Request, body: ApproveRequest, background_tasks: BackgroundTasks
+) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
     # 入力ガード（承認レスポンスにも適用）
     shield_result = await check_prompt_shield(body.response)
     is_approved = _is_approval_response(body.response)
+    background_update_jobs: list[PostCompletionUpdateContext] = []
+
+    def _register_background_job(update_context: PostCompletionUpdateContext) -> None:
+        background_update_jobs.append(update_context)
 
     async def approval_event_generator():
         collected_events: list[dict] = []
@@ -2545,7 +2750,14 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
         existing_conversation = await get_conversation(thread_id)
         base_url = _build_public_base_url(request)
         if is_approved:
-            async for event in _collect_and_yield(_post_approval_events(body.response, thread_id, base_url)):
+            async for event in _collect_and_yield(
+                _post_approval_events(
+                    body.response,
+                    thread_id,
+                    base_url,
+                    register_background_job=_register_background_job,
+                )
+            ):
                 yield event
         else:
             async for event in _collect_and_yield(_refine_events(body.response, thread_id)):
@@ -2565,6 +2777,7 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
                     thread_id,
                     existing_conversation,
                     conversation_status,
+                    background_updates_pending=bool(background_update_jobs),
                 ),
                 status=conversation_status,
             )
@@ -2572,6 +2785,9 @@ async def approve(thread_id: str, request: Request, body: ApproveRequest) -> Str
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
         except RuntimeError, TypeError:
             logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
+
+        for update_job in background_update_jobs:
+            background_tasks.add_task(_append_post_completion_updates_safe, thread_id, update_job)
 
     return StreamingResponse(
         approval_event_generator(),
@@ -2591,6 +2807,9 @@ async def get_manager_approval_request(thread_id: str, request: Request) -> JSON
     if context is None or context.get("approval_scope") != "manager":
         return JSONResponse(status_code=404, content={"error": "manager approval context not found"})
 
+    existing_conversation = await get_conversation(thread_id)
+    previous_versions = _extract_committed_plan_versions(existing_conversation)
+
     callback_token = _extract_manager_approval_token(request)
     expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
     if not expected_token or callback_token != expected_token:
@@ -2601,9 +2820,11 @@ async def get_manager_approval_request(thread_id: str, request: Request) -> JSON
     return JSONResponse(
         content={
             "conversation_id": thread_id,
+            "current_version": len(previous_versions) + 1,
             "plan_title": _extract_plan_title(plan_markdown),
             "plan_markdown": plan_markdown,
             "manager_email": workflow_settings.get("manager_email"),
+            "previous_versions": previous_versions,
         },
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate",

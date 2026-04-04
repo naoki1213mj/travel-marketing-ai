@@ -31,6 +31,7 @@ vi.mock('./hooks/useI18n', () => ({
         'panel.preview': 'Preview',
         'panel.preview.subtitle': 'Preview subtitle',
         'tab.plan': 'Plan',
+        'tab.evaluation': 'Evaluation',
         'tab.brochure': 'Brochure',
         'tab.images': 'Images',
         'tab.video': 'Video',
@@ -60,7 +61,13 @@ vi.mock('./hooks/useElapsedTime', () => ({
 
 vi.mock('./components/ArtifactTabs', () => ({
   ArtifactTabs: ({ tabs }: { tabs: Array<{ key: string; content: ReactNode }> }) => (
-    <div>{tabs.find((tab) => tab.key === 'plan')?.content ?? null}</div>
+    <div>
+      {tabs.map((tab) => (
+        <div key={tab.key} data-testid={`tab-${tab.key}`}>
+          {tab.content}
+        </div>
+      ))}
+    </div>
   ),
 }))
 
@@ -130,6 +137,7 @@ describe('App', () => {
           step: 2,
           total_steps: 5,
         },
+        backgroundUpdatesPending: false,
         toolEvents: [],
         textContents: [
           {
@@ -215,6 +223,7 @@ describe('App', () => {
           step: 5,
           total_steps: 5,
         },
+        backgroundUpdatesPending: false,
         toolEvents: [],
         textContents: [
           {

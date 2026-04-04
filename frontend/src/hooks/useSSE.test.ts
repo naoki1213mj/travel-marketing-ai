@@ -185,6 +185,33 @@ describe('buildRestoredPipelineState', () => {
     expect(state.metrics?.total_tokens).toBe(180)
   })
 
+  it('keeps polling metadata and merges background updates into the latest completed version', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '京都の秋プランを企画して',
+        metadata: {
+          background_updates_pending: true,
+        },
+        messages: [
+          { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-background', background_updates_pending: true, metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'text', data: { content: 'https://example.com/video.mp4', agent: 'video-gen-agent', content_type: 'video', background_update: true } },
+        ],
+      },
+      'conv-background',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('completed')
+    expect(state.backgroundUpdatesPending).toBe(true)
+    expect(state.versions).toHaveLength(1)
+    expect(state.versions[0].textContents).toEqual([
+      { content: 'plan v1', agent: 'marketing-plan-agent', content_type: undefined },
+      { content: 'https://example.com/video.mp4', agent: 'video-gen-agent', content_type: 'video' },
+    ])
+  })
+
   it('tracks a pending version while a refinement round is running', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',
