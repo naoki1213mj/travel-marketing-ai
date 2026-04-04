@@ -15,6 +15,7 @@ const t = (key: string) => ({
   'workflow.video.running': 'アバター動画を生成中…',
   'workflow.round': 'ラウンド {n}',
   'workflow.tool_count': 'ツール {n}件',
+  'workflow.tool_none': 'このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。',
   'round.initial': '初回実行',
   'round.improvement': '改善',
   'section.analysis': 'データ分析結果',
@@ -109,5 +110,24 @@ describe('WorkflowAccordion', () => {
 
     expect(screen.getAllByText('ブローシャと画像の生成が完了しました。').length).toBeGreaterThan(0)
     expect(screen.queryByText(/<!DOCTYPE html>/)).toBeNull()
+  })
+
+  it('shows an explicit message when no tool log is available for a step', () => {
+    render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={textContents}
+        toolEvents={[]}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    fireEvent.click(screen.getAllByRole('button', { name: /施策生成/ }).at(-1) as HTMLButtonElement)
+
+    expect(screen.getByText('このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。')).toBeInTheDocument()
   })
 })

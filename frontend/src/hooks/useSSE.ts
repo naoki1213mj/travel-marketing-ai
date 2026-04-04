@@ -4,12 +4,14 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
+import { isApprovalResponseText } from '../lib/approval-flow'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type SSEHandlers } from '../lib/sse-client'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50
 const PIPELINE_TOTAL_STEPS = 5
+const DRAFT_EVALUATION_CACHE_KEY = '__draft__'
 
 export interface AgentProgress {
   agent: string
@@ -168,6 +170,56 @@ function cloneEvaluations(evaluations: EvaluationRecord[]): EvaluationRecord[] {
   return evaluations.map(cloneEvaluationRecord)
 }
 
+function getEvaluationCacheKey(conversationId: string | null | undefined): string {
+  return conversationId ? `conversation:${conversationId}` : DRAFT_EVALUATION_CACHE_KEY
+}
+
+function getEvaluationRecordKey(record: EvaluationRecord): string {
+  return `${record.version}:${record.round}:${record.createdAt}`
+}
+
+function mergeEvaluationRecords(existing: EvaluationRecord[], incoming: EvaluationRecord[]): EvaluationRecord[] {
+  const merged = [...existing]
+  const seen = new Set(existing.map(getEvaluationRecordKey))
+
+  for (const record of incoming) {
+    const key = getEvaluationRecordKey(record)
+    if (seen.has(key)) continue
+    merged.push(cloneEvaluationRecord(record))
+    seen.add(key)
+  }
+
+  return merged
+}
+
+function applyEvaluationRecord(state: PipelineState, record: EvaluationRecord): PipelineState {
+  const seeded = ensureDraftSnapshot(state)
+  const targetIndex = record.version - 1
+  const targetSnapshot = seeded.versions[targetIndex]
+  if (!targetSnapshot) return state
+
+  const evaluationKey = getEvaluationRecordKey(record)
+  if (targetSnapshot.evaluations.some(existing => getEvaluationRecordKey(existing) == evaluationKey)) {
+    return seeded
+  }
+
+  return {
+    ...seeded,
+    currentVersion: Math.max(seeded.currentVersion, record.version),
+    versions: seeded.versions.map((snapshot, index) => {
+      if (index !== targetIndex) return snapshot
+      return {
+        ...snapshot,
+        evaluations: [...snapshot.evaluations, cloneEvaluationRecord(record)],
+      }
+    }),
+  }
+}
+
+function mergeCachedEvaluationsIntoState(state: PipelineState, records: EvaluationRecord[]): PipelineState {
+  return records.reduce((currentState, record) => applyEvaluationRecord(currentState, record), state)
+}
+
 function buildEvaluationRecord(data: Record<string, unknown>, fallbackVersion: number): EvaluationRecord | null {
   const version = Number(data.version || fallbackVersion)
   const round = Number(data.round || 1)
@@ -205,6 +257,29 @@ function getLatestPlanMarkdown(textContents: TextContent[]): string | undefined 
     }
   }
   return undefined
+}
+
+function getRestoredUserMessages(doc: ConversationDocument): string[] {
+  const metadata = doc.metadata && typeof doc.metadata === 'object' ? doc.metadata : {}
+  const metadataMessages = Array.isArray(metadata.user_messages)
+    ? metadata.user_messages
+    : Array.isArray(metadata.userMessages)
+      ? metadata.userMessages
+      : null
+
+  if (metadataMessages) {
+    const restored = metadataMessages
+      .filter((message): message is string => typeof message === 'string')
+      .map(message => message.trim())
+      .filter(Boolean)
+
+    if (restored.length > 0) {
+      return restored
+    }
+  }
+
+  const fallbackInput = doc.input?.trim()
+  return fallbackInput ? [fallbackInput] : []
 }
 
 function isBackgroundUpdate(data: Record<string, unknown>): boolean {
@@ -473,7 +548,7 @@ export function buildRestoredPipelineState(
     currentVersion: versions.length,
     pendingVersion,
     settings: { ...settings },
-    userMessages: doc.input ? [doc.input] : [],
+    userMessages: getRestoredUserMessages(doc),
   }
 }
 
@@ -570,6 +645,30 @@ export function useSSE() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const stateRef = useRef<PipelineState>(initialState)
   const activeRequestIdRef = useRef(0)
+  const localEvaluationCacheRef = useRef<Record<string, EvaluationRecord[]>>({})
+
+  const cacheEvaluationRecord = useCallback((conversationId: string | null | undefined, record: EvaluationRecord) => {
+    const cacheKey = getEvaluationCacheKey(conversationId)
+    const existing = localEvaluationCacheRef.current[cacheKey] ?? []
+    localEvaluationCacheRef.current[cacheKey] = mergeEvaluationRecords(existing, [record])
+  }, [])
+
+  const migrateCachedEvaluations = useCallback((fromConversationId: string | null | undefined, toConversationId: string | null | undefined) => {
+    const fromKey = getEvaluationCacheKey(fromConversationId)
+    const toKey = getEvaluationCacheKey(toConversationId)
+    if (fromKey === toKey) return
+
+    const fromRecords = localEvaluationCacheRef.current[fromKey]
+    if (!fromRecords || fromRecords.length === 0) return
+
+    const toRecords = localEvaluationCacheRef.current[toKey] ?? []
+    localEvaluationCacheRef.current[toKey] = mergeEvaluationRecords(toRecords, fromRecords)
+    delete localEvaluationCacheRef.current[fromKey]
+  }, [])
+
+  const getCachedEvaluationRecords = useCallback((conversationId: string | null | undefined) => {
+    return localEvaluationCacheRef.current[getEvaluationCacheKey(conversationId)] ?? []
+  }, [])
 
   // stateRef を常に最新に保つ（effect 内で更新）
   useEffect(() => {
@@ -657,6 +756,7 @@ export function useSSE() {
     approval_request: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       const request = data as ApprovalRequest
+      migrateCachedEvaluations(stateRef.current.conversationId, request.conversation_id)
       conversationIdRef.current = request.conversation_id
       setState(prev => ({
         ...prev,
@@ -691,6 +791,7 @@ export function useSSE() {
     done: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       const doneData = data as { conversation_id: string; metrics: PipelineMetrics; background_updates_pending?: boolean }
+      migrateCachedEvaluations(stateRef.current.conversationId, doneData.conversation_id)
       setState(prev => {
         const latestSnapshot = prev.versions[prev.versions.length - 1]
         const shouldReplaceDraft = Boolean(latestSnapshot?.isDraft)
@@ -765,6 +866,8 @@ export function useSSE() {
   const approve = useCallback(async (response: string) => {
     const threadId = conversationIdRef.current
     if (!threadId) return
+    const normalizedResponse = response.trim()
+    const shouldAppendUserMessage = normalizedResponse.length > 0 && !isApprovalResponseText(normalizedResponse)
     abortControllerRef.current?.abort()
     const controller = new AbortController()
     abortControllerRef.current = controller
@@ -777,11 +880,14 @@ export function useSSE() {
       backgroundUpdatesPending: false,
       approvalRequest: null,
       error: null,
+      userMessages: shouldAppendUserMessage
+        ? [...prev.userMessages, normalizedResponse]
+        : prev.userMessages,
       pendingVersion: inferPendingVersion(prev),
     }))
     const handlers = createHandlers(requestId)
     try {
-      await sendApproval(threadId, response, handlers, controller.signal)
+      await sendApproval(threadId, normalizedResponse, handlers, controller.signal)
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
@@ -795,6 +901,7 @@ export function useSSE() {
     activeRequestIdRef.current += 1
     setState(initialState)
     conversationIdRef.current = null
+    delete localEvaluationCacheRef.current[DRAFT_EVALUATION_CACHE_KEY]
   }, [])
 
   const restoreVersion = useCallback((version: number) => {
@@ -821,25 +928,9 @@ export function useSSE() {
   }, [])
 
   const saveEvaluation = useCallback((record: EvaluationRecord) => {
-    setState(prev => {
-      const seeded = ensureDraftSnapshot(prev)
-      const targetIndex = record.version - 1
-      const targetSnapshot = seeded.versions[targetIndex]
-      if (!targetSnapshot) return prev
-
-      return {
-        ...seeded,
-        currentVersion: Math.max(seeded.currentVersion, record.version),
-        versions: seeded.versions.map((snapshot, index) => {
-          if (index !== targetIndex) return snapshot
-          return {
-            ...snapshot,
-            evaluations: [...snapshot.evaluations, cloneEvaluationRecord(record)],
-          }
-        }),
-      }
-    })
-  }, [])
+    cacheEvaluationRecord(conversationIdRef.current ?? stateRef.current.conversationId, record)
+    setState(prev => applyEvaluationRecord(prev, record))
+  }, [cacheEvaluationRecord])
 
   /** 保存済み会話を復元する（新規推論を実行しない） */
   const restoreConversation = useCallback(async (conversationId: string) => {
@@ -861,13 +952,18 @@ export function useSSE() {
       const doc = await resp.json() as ConversationDocument
       if (requestId !== activeRequestIdRef.current) return
 
-      setState(buildRestoredPipelineState(doc, conversationId, stateRef.current.settings))
+      const restoredState = mergeCachedEvaluationsIntoState(
+        buildRestoredPipelineState(doc, conversationId, stateRef.current.settings),
+        getCachedEvaluationRecords(conversationId),
+      )
+
+      setState(restoredState)
 
       conversationIdRef.current = conversationId
     } catch (err) {
       console.warn('会話の復元に失敗:', err)
     }
-  }, [])
+  }, [getCachedEvaluationRecords])
 
   return { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation }
 }

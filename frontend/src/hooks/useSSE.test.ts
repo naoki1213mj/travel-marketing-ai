@@ -181,6 +181,34 @@ describe('buildRestoredPipelineState', () => {
     })
   })
 
+  it('restores all saved user messages from metadata for later rounds', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '京都の秋プランを企画して',
+        metadata: {
+          user_messages: [
+            '京都の秋プランを企画して',
+            '評価結果をもとに、価格訴求を弱めて上質感を強めて',
+          ],
+        },
+        messages: [
+          { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-user-history', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'text', data: { content: 'plan v2', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-user-history', metrics: { latency_seconds: 12, tool_calls: 2, total_tokens: 150 } } },
+        ],
+      },
+      'conv-user-history',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.userMessages).toEqual([
+      '京都の秋プランを企画して',
+      '評価結果をもとに、価格訴求を弱めて上質感を強めて',
+    ])
+  })
+
   it('rebuilds version snapshots from completed multi-round conversations', () => {
     const state = buildRestoredPipelineState(
       {
@@ -530,6 +558,48 @@ describe('buildRestoredPipelineState', () => {
     expect(sendApproval).toHaveBeenCalledTimes(1)
   })
 
+  it('appends approval revisions to local user message history immediately', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '京都の秋プランを企画して',
+      metadata: {
+        user_messages: ['京都の秋プランを企画して'],
+      },
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-approval-revision',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-approval-revision')
+    })
+
+    act(() => {
+      void result.current.approve('価格訴求を少し控えめにしてください')
+    })
+
+    expect(result.current.state.userMessages).toEqual([
+      '京都の秋プランを企画して',
+      '価格訴求を少し控えめにしてください',
+    ])
+    expect(sendApproval).toHaveBeenCalledWith(
+      'conv-approval-revision',
+      '価格訴求を少し控えめにしてください',
+      expect.any(Object),
+      expect.any(AbortSignal),
+    )
+  })
+
   it('restores conversations with cache-busting fetch options', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'running',
@@ -553,6 +623,36 @@ describe('buildRestoredPipelineState', () => {
         'Cache-Control': 'no-cache',
       },
     })
+  })
+
+  it('keeps refinement prompts after restore polling completes', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'completed',
+      input: '京都の秋プランを企画して',
+      metadata: {
+        user_messages: [
+          '京都の秋プランを企画して',
+          '評価結果をもとに、価格訴求を弱めて上質感を強めて',
+        ],
+      },
+      messages: [
+        { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+        { event: 'done', data: { conversation_id: 'conv-restore-history', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+        { event: 'text', data: { content: 'plan v2', agent: 'marketing-plan-agent' } },
+        { event: 'done', data: { conversation_id: 'conv-restore-history', metrics: { latency_seconds: 12, tool_calls: 2, total_tokens: 150 } } },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-restore-history')
+    })
+
+    expect(result.current.state.userMessages).toEqual([
+      '京都の秋プランを企画して',
+      '評価結果をもとに、価格訴求を弱めて上質感を強めて',
+    ])
   })
 
   it('assigns version 1 to live tool events during the first run', async () => {
@@ -620,5 +720,78 @@ describe('buildRestoredPipelineState', () => {
       agent: 'marketing-plan-agent',
       version: 2,
     })
+  })
+
+  it('keeps a locally evaluated draft after approval request and restore polling', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '沖縄の家族旅行を企画して',
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-draft-eval',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    let releaseApprovalRequest: (() => void) | null = null
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.text?.({
+        content: '# Plan v1',
+        agent: 'marketing-plan-agent',
+      })
+      await new Promise<void>((resolve) => {
+        releaseApprovalRequest = resolve
+      })
+      handlers.approval_request?.({
+        prompt: '確認してください',
+        conversation_id: 'conv-draft-eval',
+        plan_markdown: '# Plan v1',
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    act(() => {
+      void result.current.sendMessage('沖縄の家族旅行を企画して')
+    })
+
+    await waitFor(() => {
+      expect(result.current.state.textContents).toHaveLength(1)
+    })
+
+    act(() => {
+      result.current.saveEvaluation({
+        version: 1,
+        round: 1,
+        createdAt: '2026-04-04T00:00:00+00:00',
+        result: { builtin: { relevance: { score: 4, reason: 'good' } } },
+      })
+    })
+
+    expect(result.current.state.versions).toHaveLength(1)
+    expect(result.current.state.versions[0].evaluations).toHaveLength(1)
+
+    await act(async () => {
+      releaseApprovalRequest?.()
+    })
+
+    await waitFor(() => {
+      expect(result.current.state.conversationId).toBe('conv-draft-eval')
+      expect(result.current.state.status).toBe('approval')
+    })
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-draft-eval')
+    })
+
+    expect(result.current.state.versions).toHaveLength(1)
+    expect(result.current.state.versions[0].evaluations).toHaveLength(1)
+    expect(result.current.state.versions[0].evaluations[0].round).toBe(1)
   })
 })

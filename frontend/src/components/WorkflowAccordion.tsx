@@ -239,6 +239,9 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
         {!sectionCollapsed && (
           <div className="px-4 pb-4">
             {stepTools.length > 0 && <ToolEventBadges events={stepTools} t={t} />}
+            {stepTools.length === 0 && content && (
+              <p className="py-2 text-xs text-[var(--text-muted)]">{t('workflow.tool_none')}</p>
+            )}
             {content ? (
               step.key === 'data-search-agent' ? (
                 <AnalysisView contents={roundContents} t={t} />

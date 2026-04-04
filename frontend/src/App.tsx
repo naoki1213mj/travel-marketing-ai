@@ -147,6 +147,10 @@ function App() {
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
+  const evaluationQuery = state.userMessages
+    .map(message => message.trim())
+    .filter(Boolean)
+    .join('\n\n')
   const evaluationVersion = displayedPlan
     ? (isViewingCommittedPreview
         ? selectedPendingPreviewVersion ?? undefined
@@ -541,7 +545,7 @@ function App() {
                   <>
                     {pendingVersionNotice}
                     <EvaluationPanel
-                      query={state.userMessages[0] || ''}
+                      query={evaluationQuery}
                       response={displayedPlan}
                       html={previewHtml}
                       conversationId={state.conversationId}

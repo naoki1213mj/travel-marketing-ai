@@ -77,6 +77,7 @@ _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.D
 _EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
 _BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
+_USER_MESSAGES_METADATA_KEY = "user_messages"
 _PIPELINE_TOTAL_STEPS = 5
 
 
@@ -231,11 +232,45 @@ def _has_background_updates_pending(conversation: dict | None) -> bool:
     return _to_bool(metadata.get(_BACKGROUND_UPDATES_PENDING_METADATA_KEY))
 
 
+def _extract_user_message_history(conversation: dict | None) -> list[str]:
+    """保存済み metadata からユーザー入力履歴を復元する。"""
+    metadata = _get_conversation_metadata(conversation)
+    raw_messages = metadata.get(_USER_MESSAGES_METADATA_KEY)
+    restored_messages: list[str] = []
+
+    if isinstance(raw_messages, list):
+        for value in raw_messages:
+            if not isinstance(value, str):
+                continue
+            sanitized = _sanitize_optional_text(value)
+            if sanitized:
+                restored_messages.append(sanitized)
+
+    if restored_messages:
+        return restored_messages
+
+    if not isinstance(conversation, dict):
+        return []
+
+    fallback_input = _sanitize_optional_text(str(conversation.get("input", "")))
+    return [fallback_input] if fallback_input else []
+
+
+def _append_user_message_history(conversation: dict | None, message: str | None = None) -> list[str]:
+    """既存履歴へ新しいユーザー入力を追加する。"""
+    history = _extract_user_message_history(conversation)
+    sanitized_message = _sanitize_optional_text(message)
+    if not sanitized_message:
+        return history
+    return [*history, sanitized_message]
+
+
 def _build_conversation_metadata_for_save(
     conversation_id: str,
     existing_conversation: dict | None,
     conversation_status: str,
     background_updates_pending: bool | None = None,
+    user_messages: list[str] | None = None,
 ) -> dict | None:
     """会話保存時の metadata を構築する。"""
     metadata = _get_conversation_metadata(existing_conversation)
@@ -255,6 +290,15 @@ def _build_conversation_metadata_for_save(
         metadata[_BACKGROUND_UPDATES_PENDING_METADATA_KEY] = True
     elif background_updates_pending is False:
         metadata.pop(_BACKGROUND_UPDATES_PENDING_METADATA_KEY, None)
+
+    if user_messages is not None:
+        normalized_messages = [
+            sanitized for message in user_messages if (sanitized := _sanitize_optional_text(message))
+        ]
+        if normalized_messages:
+            metadata[_USER_MESSAGES_METADATA_KEY] = normalized_messages
+        else:
+            metadata.pop(_USER_MESSAGES_METADATA_KEY, None)
 
     return metadata or None
 
@@ -2673,6 +2717,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
             merged_messages = [*previous_messages, *collected_events] if body.conversation_id else collected_events
             conversation_status = _conversation_status_from_events(merged_messages)
+            user_messages = _append_user_message_history(existing_conversation, body.message)
             await save_conversation(
                 conversation_id,
                 existing_conversation.get("input", body.message) if existing_conversation else body.message,
@@ -2681,6 +2726,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                     conversation_id,
                     existing_conversation,
                     conversation_status,
+                    user_messages=user_messages,
                 ),
                 status=conversation_status,
             )
@@ -2776,6 +2822,10 @@ async def approve(
             previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
             merged_messages = [*previous_messages, *collected_events]
             conversation_status = _conversation_status_from_events(merged_messages)
+            user_messages = _append_user_message_history(
+                existing_conversation,
+                None if is_approved else body.response,
+            )
             await save_conversation(
                 conversation_id=thread_id,
                 user_input=existing_conversation.get("input", body.response)
@@ -2787,6 +2837,7 @@ async def approve(
                     existing_conversation,
                     conversation_status,
                     background_updates_pending=bool(background_update_jobs),
+                    user_messages=user_messages,
                 ),
                 status=conversation_status,
             )

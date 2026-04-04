@@ -220,6 +220,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'workflow.video.running': 'アバター動画を生成中…',
     'workflow.round': 'ラウンド {n}',
     'workflow.tool_count': 'ツール {n}件',
+    'workflow.tool_none': 'このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。',
   },
   en: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -436,6 +437,7 @@ export const translations: Record<Locale, Record<string, string>> = {
     'workflow.video.running': 'Generating the avatar video…',
     'workflow.round': 'Round {n}',
     'workflow.tool_count': '{n} tools',
+    'workflow.tool_none': 'No tool call log was captured for this step. It may have completed with model reasoning only.',
   },
   zh: {
     'app.kicker': 'TRAVEL MARKETING OPERATIONS',
@@ -652,5 +654,6 @@ export const translations: Record<Locale, Record<string, string>> = {
     'workflow.video.running': '正在生成虚拟人视频…',
     'workflow.round': '轮次 {n}',
     'workflow.tool_count': '工具 {n} 个',
+    'workflow.tool_none': '该步骤未捕获到工具调用日志，可能仅通过模型推理完成。',
   },
 }

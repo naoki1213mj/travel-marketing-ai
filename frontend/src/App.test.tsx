@@ -105,11 +105,12 @@ vi.mock('./components/VersionSelector', () => ({
 }))
 
 vi.mock('./components/EvaluationPanel', () => ({
-  EvaluationPanel: ({ artifactVersion, evaluations }: { artifactVersion?: number; evaluations?: unknown[] }) => (
+  EvaluationPanel: ({ artifactVersion, evaluations, query }: { artifactVersion?: number; evaluations?: unknown[]; query?: string }) => (
     <div
       data-testid="evaluation-panel"
       data-version={artifactVersion ? String(artifactVersion) : ''}
       data-evaluations={String(evaluations?.length ?? 0)}
+      data-query={query ?? ''}
     />
   ),
 }))
@@ -438,5 +439,69 @@ describe('App', () => {
     expect(screen.getByText('Version hint')).toBeInTheDocument()
     expect(screen.getByText('Plan hint')).toBeInTheDocument()
     expect(screen.getByText('Assets hint')).toBeInTheDocument()
+  })
+
+  it('passes the full multi-turn user intent to the evaluation panel', () => {
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'completed',
+        conversationId: 'conv-query-history',
+        agentProgress: null,
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v2',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v2',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 1,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: [
+          '北海道プランを改善して',
+          '価格訴求を控えて高級感を強めて',
+        ],
+      },
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(screen.getByTestId('evaluation-panel')).toHaveAttribute(
+      'data-query',
+      '北海道プランを改善して\n\n価格訴求を控えて高級感を強めて',
+    )
   })
 })

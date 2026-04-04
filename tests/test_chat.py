@@ -278,7 +278,7 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
                 {"event": "text", "data": {"content": "# Plan v1", "agent": "marketing-plan-agent"}},
                 {"event": "done", "data": {"conversation_id": "existing-conv", "metrics": {}}},
             ],
-            "metadata": {},
+            "metadata": {"user_messages": ["春の沖縄ファミリー向けプランを企画して"]},
         }
 
     async def fake_refine_events(_message: str, _conversation_id: str):
@@ -320,6 +320,72 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
     assert [event["event"] for event in saved["events"]] == ["text", "done", "text", "approval_request"]
     assert saved["events"][0]["data"]["content"] == "# Plan v1"
     assert saved["events"][2]["data"]["content"] == "# Plan v2"
+    assert saved["metrics"]["user_messages"] == [
+        "春の沖縄ファミリー向けプランを企画して",
+        "キャッチコピーをもっとポップに",
+    ]
+
+
+def test_approve_revision_preserves_user_message_history(monkeypatch):
+    """承認待ち画面での修正指示も user message 履歴へ追記して保存する"""
+    saved: dict[str, object] = {}
+
+    async def fake_get_conversation(conversation_id: str):
+        assert conversation_id == "test-thread"
+        return {
+            "input": "秋の京都シニア向けプランを企画して",
+            "messages": [
+                {"event": "text", "data": {"content": "# Plan v1", "agent": "marketing-plan-agent"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "prompt": "確認してください",
+                        "conversation_id": "test-thread",
+                        "plan_markdown": "# Plan v1",
+                    },
+                },
+            ],
+            "metadata": {"user_messages": ["秋の京都シニア向けプランを企画して"]},
+        }
+
+    async def fake_refine_events(_message: str, _conversation_id: str):
+        yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
+        yield 'event: approval_request\ndata: {"prompt": "再確認してください", "conversation_id": "test-thread", "plan_markdown": "# Plan v2"}\n\n'
+
+    async def fake_save_conversation(
+        conversation_id: str,
+        user_input: str,
+        events: list[dict],
+        artifacts: dict | None = None,
+        metrics: dict | None = None,
+        status: str = "completed",
+    ) -> None:
+        saved.update(
+            {
+                "conversation_id": conversation_id,
+                "user_input": user_input,
+                "events": events,
+                "artifacts": artifacts,
+                "metrics": metrics,
+                "status": status,
+            }
+        )
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr("src.api.chat._refine_events", fake_refine_events)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+
+    response = client.post(
+        "/api/chat/test-thread/approve",
+        json={"conversation_id": "test-thread", "response": "キャッチコピーをもう少し落ち着かせて"},
+    )
+
+    assert response.status_code == 200
+    assert saved["status"] == "awaiting_approval"
+    assert saved["metrics"]["user_messages"] == [
+        "秋の京都シニア向けプランを企画して",
+        "キャッチコピーをもう少し落ち着かせて",
+    ]
 
 
 def test_load_pending_approval_context_restores_previous_versions(monkeypatch):
