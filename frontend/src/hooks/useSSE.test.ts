@@ -616,13 +616,48 @@ describe('buildRestoredPipelineState', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(1)
     const [url, options] = vi.mocked(globalThis.fetch).mock.calls[0]
     expect(String(url)).toContain('/api/conversations/conv-cache-test')
-    expect(String(url)).toContain('ts=')
     expect(options).toMatchObject({
       cache: 'no-store',
       headers: {
         'Cache-Control': 'no-cache',
       },
     })
+  })
+
+  it('reuses the last ETag and skips rebuilding state on 304 restores', async () => {
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        status: 'completed',
+        input: '京都の秋プランを企画して',
+        messages: [
+          { event: 'text', data: { content: 'plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-etag', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+        ],
+      }), { headers: { ETag: 'W/"etag-1"' } }))
+      .mockResolvedValueOnce(new Response(null, { status: 304, headers: { ETag: 'W/"etag-1"' } }))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-etag')
+    })
+
+    const previousState = result.current.state
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-etag')
+    })
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+    const [, secondOptions] = vi.mocked(globalThis.fetch).mock.calls[1]
+    expect(secondOptions).toMatchObject({
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+        'If-None-Match': 'W/"etag-1"',
+      },
+    })
+    expect(result.current.state).toBe(previousState)
   })
 
   it('keeps refinement prompts after restore polling completes', async () => {

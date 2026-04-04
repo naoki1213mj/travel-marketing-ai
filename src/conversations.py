@@ -1,5 +1,6 @@
 """会話履歴の永続化。Cosmos DB またはインメモリ辞書にフォールバックする。"""
 
+import asyncio
 import logging
 import os
 from datetime import datetime, timezone
@@ -110,7 +111,7 @@ async def save_conversation(
     container = _get_container()
     if container:
         try:
-            container.upsert_item(doc)
+            await asyncio.to_thread(container.upsert_item, doc)
             logger.info("会話 %s を Cosmos DB に保存", conversation_id)
             return
         except (ValueError, OSError) as exc:
@@ -127,7 +128,8 @@ async def get_conversation(conversation_id: str) -> dict | None:
     container = _get_container()
     if container:
         try:
-            return container.read_item(item=conversation_id, partition_key="demo-user")
+            result = await asyncio.to_thread(container.read_item, item=conversation_id, partition_key="demo-user")
+            return result if isinstance(result, dict) else None
         except (ValueError, OSError) as exc:
             logger.debug("Cosmos DB から会話 %s が見つからない: %s", conversation_id, exc)
             return None
@@ -146,10 +148,11 @@ async def list_conversations(limit: int = 20) -> list[dict]:
             query = (
                 "SELECT c.id, c.input, c.status, c.created_at FROM c ORDER BY c.created_at DESC OFFSET 0 LIMIT @limit"
             )
-            items = list(
+            items = await asyncio.to_thread(
+                list,
                 container.query_items(
                     query=query, parameters=[{"name": "@limit", "value": limit}], partition_key="demo-user"
-                )
+                ),
             )
             return items
         except (ValueError, OSError) as exc:
@@ -176,7 +179,7 @@ async def save_replay_data(conversation_id: str, events_with_timing: list[dict])
 
     if container:
         try:
-            container.upsert_item(replay_doc)
+            await asyncio.to_thread(container.upsert_item, replay_doc)
             return
         except (ValueError, OSError) as exc:
             logger.warning("Cosmos DB へのリプレイデータ保存に失敗: %s", exc)
@@ -191,7 +194,11 @@ async def get_replay_data(conversation_id: str) -> list[dict] | None:
     container = _get_container()
     if container:
         try:
-            doc = container.read_item(item=f"replay-{conversation_id}", partition_key="demo-user")
+            doc = await asyncio.to_thread(
+                container.read_item,
+                item=f"replay-{conversation_id}",
+                partition_key="demo-user",
+            )
             return doc.get("events", [])
         except (ValueError, OSError) as exc:
             logger.debug("Cosmos DB からリプレイデータ取得失敗: %s", exc)

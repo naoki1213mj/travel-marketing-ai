@@ -257,6 +257,27 @@ class TestReplayData:
 class TestCosmosDBPaths:
     """Cosmos DB パスのテスト（モック使用）"""
 
+    async def test_get_conversation_cosmos_uses_background_thread(self, monkeypatch):
+        """Cosmos DB 読み取りはイベントループを塞がないよう to_thread 経由で実行する"""
+        mock_container = MagicMock()
+        mock_container.read_item.return_value = {"id": "cosmos-get", "input": "test"}
+        captured: dict[str, object] = {}
+
+        async def fake_to_thread(func, *args, **kwargs):
+            captured["func"] = func
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+            return func(*args, **kwargs)
+
+        monkeypatch.setattr("src.conversations.asyncio.to_thread", fake_to_thread)
+
+        with patch("src.conversations._get_container", return_value=mock_container):
+            result = await get_conversation("cosmos-get")
+
+        assert result == {"id": "cosmos-get", "input": "test"}
+        assert captured["func"] == mock_container.read_item
+        assert captured["kwargs"] == {"item": "cosmos-get", "partition_key": "demo-user"}
+
     async def test_save_conversation_cosmos_upsert(self, monkeypatch):
         """Cosmos DB コンテナがある場合 upsert_item が呼ばれること"""
         mock_container = MagicMock()

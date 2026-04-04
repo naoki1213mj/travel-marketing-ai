@@ -2,7 +2,7 @@
  * 会話履歴パネル。左パネル上部にインラインで表示する折りたたみ式。
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 interface Conversation {
   id: string
@@ -21,11 +21,28 @@ export function ConversationHistory({ onSelect, t, locale }: ConversationHistory
   const [isOpen, setIsOpen] = useState(false)
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [loading, setLoading] = useState(false)
+  const listEtagRef = useRef<string | null>(null)
 
   const fetchHistory = useCallback(async () => {
     setLoading(true)
     try {
-      const resp = await fetch('/api/conversations')
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache',
+      }
+      if (listEtagRef.current) {
+        headers['If-None-Match'] = listEtagRef.current
+      }
+      const resp = await fetch('/api/conversations', {
+        cache: 'no-store',
+        headers,
+      })
+      if (resp.status === 304) {
+        return
+      }
+      const nextEtag = resp.headers.get('etag')
+      if (nextEtag) {
+        listEtagRef.current = nextEtag
+      }
       const data = await resp.json()
       setConversations(data.conversations || [])
     } catch {

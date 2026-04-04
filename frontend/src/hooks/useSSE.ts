@@ -642,6 +642,7 @@ function inferPendingVersion(state: PipelineState): PendingVersion | null {
 export function useSSE() {
   const [state, setState] = useState<PipelineState>(initialState)
   const conversationIdRef = useRef<string | null>(null)
+  const conversationEtagsRef = useRef<Record<string, string>>({})
   const abortControllerRef = useRef<AbortController | null>(null)
   const stateRef = useRef<PipelineState>(initialState)
   const activeRequestIdRef = useRef(0)
@@ -901,6 +902,7 @@ export function useSSE() {
     activeRequestIdRef.current += 1
     setState(initialState)
     conversationIdRef.current = null
+    conversationEtagsRef.current = {}
     delete localEvaluationCacheRef.current[DRAFT_EVALUATION_CACHE_KEY]
   }, [])
 
@@ -941,14 +943,28 @@ export function useSSE() {
 
     try {
       const restoreUrl = new URL(`/api/conversations/${conversationId}`, window.location.origin)
-      restoreUrl.searchParams.set('ts', String(Date.now()))
+      const headers: Record<string, string> = {
+        'Cache-Control': 'no-cache',
+      }
+      const knownEtag = conversationEtagsRef.current[conversationId]
+      if (knownEtag) {
+        headers['If-None-Match'] = knownEtag
+      }
       const resp = await fetch(restoreUrl.toString(), {
         cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache',
-        },
+        headers,
       })
+      if (resp.status === 304) {
+        conversationIdRef.current = conversationId
+        return
+      }
       if (!resp.ok) return
+      const nextEtag = resp.headers.get('etag')
+      if (nextEtag) {
+        conversationEtagsRef.current[conversationId] = nextEtag
+      } else {
+        delete conversationEtagsRef.current[conversationId]
+      }
       const doc = await resp.json() as ConversationDocument
       if (requestId !== activeRequestIdRef.current) return
 
