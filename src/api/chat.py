@@ -15,7 +15,7 @@ from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import TypedDict
+from typing import NotRequired, TypedDict
 
 from fastapi import APIRouter, BackgroundTasks, Request, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -97,6 +97,7 @@ class PendingApprovalContext(TypedDict):
     workflow_settings: WorkflowSettings | None
     approval_scope: str
     manager_callback_token: str | None
+    previous_versions: NotRequired[list[dict[str, object]]]
 
 
 class AgentExecutionOutcome(TypedDict):
@@ -2106,11 +2107,14 @@ async def _post_approval_events(
                     )
                     manager_prompt = "通知 workflow の送信に失敗しました。承認ページのリンクを上司へ共有してください。"
 
+            previous_versions = _extract_committed_plan_versions(await get_conversation(conversation_id))
+
             _pending_approvals[conversation_id] = {
                 **context,
                 "plan_markdown": revised_plan_markdown,
                 "approval_scope": "manager",
                 "manager_callback_token": manager_callback_token,
+                "previous_versions": previous_versions,
             }
             yield format_sse(
                 SSEEventType.APPROVAL_REQUEST,
@@ -2809,6 +2813,10 @@ async def get_manager_approval_request(thread_id: str, request: Request) -> JSON
 
     existing_conversation = await get_conversation(thread_id)
     previous_versions = _extract_committed_plan_versions(existing_conversation)
+    if not previous_versions:
+        context_previous_versions = context.get("previous_versions")
+        if isinstance(context_previous_versions, list):
+            previous_versions = [version for version in context_previous_versions if isinstance(version, dict)]
 
     callback_token = _extract_manager_approval_token(request)
     expected_token = _sanitize_optional_text(context.get("manager_callback_token"))

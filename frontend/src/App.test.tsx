@@ -280,4 +280,94 @@ describe('App', () => {
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
   })
+
+  it('keeps the previous committed version visible during second manager approval', () => {
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'approval',
+        conversationId: 'conv-manager-2',
+        agentProgress: {
+          agent: 'approval',
+          status: 'running',
+          step: 3,
+          total_steps: 5,
+        },
+        managerApprovalPolling: true,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: true,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v1',
+          },
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v2',
+          },
+        ],
+        images: [],
+        approvalRequest: {
+          prompt: '上司承認を待っています',
+          conversation_id: 'conv-manager-2',
+          plan_markdown: '# Plan v2',
+          approval_scope: 'manager',
+          manager_email: 'manager@example.com',
+        },
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v1',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [
+              {
+                version: 1,
+                round: 1,
+                createdAt: '2026-04-03T00:00:00Z',
+                result: {
+                  builtin: {
+                    relevance: { score: 4, reason: 'good' },
+                  },
+                },
+              },
+            ],
+          },
+        ],
+        currentVersion: 1,
+        pendingVersion: {
+          version: 2,
+          textOffset: 1,
+          imageOffset: 0,
+          toolEventOffset: 0,
+        },
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['北海道プランを改善して'],
+      },
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
+    expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
+  })
 })

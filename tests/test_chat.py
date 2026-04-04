@@ -140,6 +140,51 @@ def test_get_manager_approval_request_returns_context(monkeypatch):
     }
 
 
+def test_get_manager_approval_request_uses_context_versions_when_storage_is_empty(monkeypatch):
+    """上司向け承認ページ API は保存会話が取れなくても context 内比較情報を返す"""
+
+    async def fake_load_pending(_conversation_id: str):
+        return {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "# 修正版企画書\n\n本文",
+            "model_settings": {"temperature": 0.3},
+            "workflow_settings": {
+                "manager_approval_enabled": True,
+                "manager_email": "manager@example.com",
+            },
+            "approval_scope": "manager",
+            "manager_callback_token": "token-123",
+            "previous_versions": [
+                {
+                    "version": 1,
+                    "plan_title": "初版企画書",
+                    "plan_markdown": "# 初版企画書\n\n本文",
+                }
+            ],
+        }
+
+    async def fake_get_conversation(_conversation_id: str):
+        return None
+
+    monkeypatch.setattr("src.api.chat._load_pending_approval_context", fake_load_pending)
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+
+    response = client.get(
+        "/api/chat/conv-manager/manager-approval-request",
+        headers={"x-manager-approval-token": "token-123"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["previous_versions"] == [
+        {
+            "version": 1,
+            "plan_title": "初版企画書",
+            "plan_markdown": "# 初版企画書\n\n本文",
+        }
+    ]
+
+
 def test_get_manager_approval_request_rejects_invalid_token(monkeypatch):
     """上司向け承認ページ API は token 不一致を拒否する"""
 

@@ -107,6 +107,42 @@ describe('buildRestoredPipelineState', () => {
     expect(state.hasManagerApprovalPhase).toBe(true)
   })
 
+  it('restores a second manager approval with the previous committed version still selectable', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_manager_approval',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-second-manager', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 100 } } },
+          { event: 'text', data: { content: '# Plan v2', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: {
+              prompt: '修正版企画書を上司へ承認依頼しました。Teams の応答を待っています。',
+              conversation_id: 'conv-second-manager',
+              plan_markdown: '# Plan v2',
+              approval_scope: 'manager',
+              manager_email: 'manager@example.com',
+            },
+          },
+        ],
+      },
+      'conv-second-manager',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.currentVersion).toBe(1)
+    expect(state.versions).toHaveLength(1)
+    expect(state.pendingVersion).toEqual({
+      version: 2,
+      textOffset: 1,
+      imageOffset: 0,
+      toolEventOffset: 0,
+    })
+    expect(state.approvalRequest?.approval_scope).toBe('manager')
+  })
+
   it('restores running manager approval continuations as running pipeline state', () => {
     const state = buildRestoredPipelineState(
       {

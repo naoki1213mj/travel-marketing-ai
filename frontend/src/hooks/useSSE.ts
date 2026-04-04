@@ -387,6 +387,25 @@ export function buildRestoredPipelineState(
     : latestAgentProgress
   const managerApprovalPolling = approvalRequest?.approval_scope === 'manager'
     && (doc.status === 'awaiting_manager_approval' || doc.status === 'running')
+  const pendingVersion = ((status === 'approval' || status === 'running') && versions.length > 0)
+    ? (() => {
+        const latestSnapshot = versions[versions.length - 1]
+        const hasUncommittedArtifacts = textContents.length > latestSnapshot.textContents.length
+          || images.length > latestSnapshot.images.length
+          || toolEvents.length > latestSnapshot.toolEvents.length
+
+        if (!hasUncommittedArtifacts) {
+          return null
+        }
+
+        return {
+          version: latestSnapshot.isDraft ? versions.length : versions.length + 1,
+          textOffset: latestSnapshot.textContents.length,
+          imageOffset: latestSnapshot.images.length,
+          toolEventOffset: latestSnapshot.toolEvents.length,
+        }
+      })()
+    : null
 
   if (status === 'completed' && versions.length === 0 && (textContents.length > 0 || images.length > 0)) {
     versions.push(createArtifactSnapshot({
@@ -428,7 +447,7 @@ export function buildRestoredPipelineState(
     error,
     versions,
     currentVersion: versions.length,
-    pendingVersion: null,
+    pendingVersion,
     settings: { ...settings },
     userMessages: doc.input ? [doc.input] : [],
   }
