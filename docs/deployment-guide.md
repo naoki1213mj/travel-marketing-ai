@@ -125,6 +125,15 @@ azd deploy
 - workflow 実装時は [manager-approval-workflow.md](manager-approval-workflow.md) の `manager_approval_url` と callback token 契約に従ってください
 - 詳細は [azure-setup.md](azure-setup.md) を参照してください
 
+## 5.1 2026-04-04 時点の実機スナップショット
+
+- Azure 上の Container App は `/api/health=ok`、`/api/ready=ready` を確認済みです。
+- ランタイムのテキスト deployment は `gpt-5-4-mini`、評価用 deployment は `gpt-4-1-mini` を使用しています。
+- 画像生成はメイン Foundry project 上の `gpt-image-1.5` が有効です。`MAI-Image-2` はオプションの別リソースです。
+- Fabric は workspace `TeamD` / capacity `teamdfabric` / Lakehouse `Travel_Lakehouse` が稼働中で、現行アプリは SQL endpoint を設定済みです。
+- APIM AI Gateway の `travel-ai-gateway` 接続と token policy は `scripts/postprovision.py` により構成済みです。
+- post approval actions 用 Logic Apps callback は有効です。manager 通知 workflow は別 endpoint として運用します。
+
 ## 6. 本番相当の環境変数
 
 ### 必須
@@ -176,12 +185,10 @@ curl -X POST https://<your-app>/api/evaluate \
 1. `uv sync --frozen`
 2. `uv run ruff check .`
 3. `uv run python -m pytest tests/ -v`
-4. `cd frontend && npm install --no-package-lock`
+4. `cd frontend && npm ci`
 5. `cd frontend && npm run lint`
 6. `cd frontend && npx tsc --noEmit`
 7. `cd frontend && npm run build`
-
-注: Ubuntu 上の rolldown binding 互換性のため、CI では `npm ci` ではなく `npm install --no-package-lock` を使っています。
 
 ### Deploy
 

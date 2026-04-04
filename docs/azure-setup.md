@@ -4,6 +4,15 @@
 
 推奨リージョンは East US 2 です。構成図は [azure-architecture.md](azure-architecture.md) を参照してください。
 
+## 0. 2026-04-04 時点の実機スナップショット
+
+- Azure デプロイ済み環境では `/api/health=ok`、`/api/ready=ready` を確認済みです。
+- ランタイムの既定 deployment は `gpt-5-4-mini`、評価用 deployment は `gpt-4-1-mini` を使っています。
+- メイン Foundry project には `gpt-image-1.5` を配備済みです。`MAI-Image-2` は任意の別リソース構成です。
+- Fabric は workspace `TeamD`、capacity `teamdfabric`（F64, Japan East）、Lakehouse `Travel_Lakehouse` が稼働し、現行アプリには `FABRIC_SQL_ENDPOINT` が設定されています。
+- APIM AI Gateway の `travel-ai-gateway` 接続と token policy は `scripts/postprovision.py` が構成します。
+- Logic Apps は承認後アクション用 callback を有効化済みです。manager 通知 workflow は別 endpoint として任意追加します。
+
 ## 1. `azd up` で自動作成されるリソース
 
 | リソース | 現行構成 |
@@ -39,6 +48,8 @@
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
 | `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
 | `MANAGER_APPROVAL_TRIGGER_URL` | 任意。上司承認 URL を Teams / メールで送る通知 workflow を呼ぶために使用 |
+
+注: 現行の実機では `EVAL_MODEL_DEPLOYMENT=gpt-4-1-mini` を利用しています。Fabric 実データ接続は `FABRIC_SQL_ENDPOINT` が設定済みで、`FABRIC_DATA_AGENT_URL` は将来または環境別の優先経路として扱っています。
 
 ## 3. 認証と権限
 

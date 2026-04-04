@@ -4,6 +4,8 @@
 
 現在の IaC が自動作成する Logic Apps は post approval actions 専用です。上司承認通知は別 workflow として分離し、`MANAGER_APPROVAL_TRIGGER_URL` で FastAPI から呼び出します。
 
+現在の組み込み上司承認ページは、今回承認対象の企画書と、直前までの確定済み企画書を横並びで比較表示できます。通知 workflow 側は `manager_approval_url` を上司へ届ければ十分で、比較 UI 自体はアプリ側が担当します。
+
 2026-04-03 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。
 
 ## 1. FastAPI から workflow へ送る request
@@ -133,6 +135,7 @@ FastAPI は manager approval の待機中、UI 上では待機表示だけを出
 - token は URL fragment (`#manager_approval_token=...`) に入るため、通常の HTTP リクエストやサーバーアクセスログには乗りません。
 - 承認ページは `GET /api/chat/{thread_id}/manager-approval-request` で企画書を取得し、決定時は `POST /api/chat/{thread_id}/manager-approval-callback` を呼びます。
 - `MANAGER_APPROVAL_TRIGGER_URL` を設定しない場合でも、この承認ページ URL を担当者が共有すれば運用できます。
+- `GET /api/chat/{thread_id}/manager-approval-request` のレスポンスには `current_version` と `previous_versions` が含まれ、2 回目以降の上司承認では前回確定版との比較をそのまま表示できます。
 
 ## 6. セキュリティ注意点
 

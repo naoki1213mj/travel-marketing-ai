@@ -11,7 +11,7 @@
 
 | モード | 条件 | 挙動 |
 | --- | --- | --- |
-| Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | FastAPI オーケストレーションで主フローを最後まで実行 |
+| Azure 本番 / Azure 接続モード | `AZURE_AI_PROJECT_ENDPOINT` が設定済み | FastAPI オーケストレーションで主フローを実行。最終承認後はブローシャ生成完了時点で `done` を返し、動画・品質レビュー・承認後アクションは background update として後続追記されることがある |
 | モック / デモモード | `AZURE_AI_PROJECT_ENDPOINT` 未設定 | ハードコード済みの SSE イベントを返す |
 | 修正 / 改善モード | `POST /api/chat` に `conversation_id` を指定 | 承認待ち中や評価フィードバックでは `marketing-plan-agent` を再実行して新しい `approval_request` を返す。通常の修正指示はキーワードに応じて `marketing-plan-agent` / `regulation-check-agent` / `brochure-gen-agent` を再実行 |
 | 承認継続モード | `POST /api/chat/{thread_id}/approve` | 承認なら Agent3a→Agent3b→Agent4→Agent5、非承認なら企画書を再生成して再度 `approval_request` を返す |
@@ -108,7 +108,7 @@
 
 | 条件 | SSE の主な流れ |
 | --- | --- |
-| 新規 + Azure 接続あり | `pipeline` の `agent_progress` → `text` → `approval_request` → （承認後）`text` → `done`、その後に任意で `video-gen-agent` の `text` と `quality-review-agent` の `text` |
+| 新規 + Azure 接続あり | `agent_progress` → `text` → `approval_request` → （承認後）`text` → `done`。`background_updates_pending=true` の場合は、その後に `video-gen-agent` や `quality-review-agent` の `text` が同じ会話へ追記される |
 | 新規 + Azure 接続なし | モックの各エージェント進捗と `approval_request` |
 | `conversation_id` + 承認待ち中 | `marketing-plan-agent` で企画書を再生成し、新しい `approval_request` を返す |
 | `conversation_id` + 完了済み + 評価フィードバック | `marketing-plan-agent` で企画書を改善し、新しい `approval_request` を返す |
@@ -121,6 +121,7 @@
 - manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
 - フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
+- 2 回目以降の上司承認待ちでは、`GET /api/conversations/{id}` のイベント列から未確定ラウンドを復元し、直前の確定版を `pendingVersion` として保持します。
 
 ### cURL 例
 
@@ -184,11 +185,23 @@ curl -N -X POST http://localhost:8000/api/chat \
 ```json
 {
   "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "current_version": 2,
   "plan_title": "春の沖縄ファミリーキャンペーン",
   "plan_markdown": "# 春の沖縄ファミリーキャンペーン\n...",
-  "manager_email": "manager@example.com"
+  "manager_email": "manager@example.com",
+  "previous_versions": [
+    {
+      "version": 1,
+      "plan_title": "初版企画書",
+      "plan_markdown": "# 初版企画書\n..."
+    }
+  ]
 }
 ```
+
+- `current_version` は今回承認対象の版番号です。
+- `previous_versions` は上司承認ポータルで比較表示するための確定済み企画書一覧です。
+- 永続ストア反映前のタイミングでも、バックエンドは pending approval context に保存した `previous_versions` をフォールバックとして返します。
 
 ## `POST /api/chat/{thread_id}/manager-approval-callback`
 
@@ -263,9 +276,14 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
   "input": "沖縄のファミリー向け春キャンペーン",
   "messages": [],
   "artifacts": {},
-  "metadata": {}
+  "metadata": {
+    "background_updates_pending": false
+  }
 }
 ```
+
+- `metadata.background_updates_pending=true` の場合、ユーザー向けの `done` 後も動画 URL や品質レビューが後続で追記される可能性があります。
+- `manager_approval_callback_token` のような機密 metadata はこの API では自動的に除去されます。
 
 未存在時:
 
@@ -295,7 +313,7 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 企画書とブローシャを評価し、Built-in 指標、カスタム指標、LLM ジャッジ結果をまとめて返します。
 
 - レート制限: 5 リクエスト / 分
-- フロントエンドでは企画書タブの評価パネルから呼ばれます
+- フロントエンドでは専用の Evaluation タブから呼ばれます
 - `AZURE_AI_PROJECT_ENDPOINT` が未設定でも呼び出せますが、Built-in 評価と prompt-based 評価はエラー / 低機能モードになります
 
 ### フロントエンドでの表示ルール
@@ -447,7 +465,7 @@ data: <json>
 | `agent` | `string` | 出力元エージェント |
 | `content_type` | `string?` | HTML の場合は `html`、動画の場合は `video` |
 
-品質レビューは `quality-review-agent` 名の追加 `text` イベントとして返ります。動画は `video-gen-agent` 名の `text` イベントで `content_type: "video"` として返ります。
+品質レビューは `quality-review-agent` 名の追加 `text` イベントとして返ります。動画は `video-gen-agent` 名の `text` イベントで `content_type: "video"` として返ります。background update の場合は payload に `background_update: true` が付与されることがあります。
 
 ### `image`
 
@@ -500,6 +518,7 @@ data: <json>
 ```json
 {
   "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+  "background_updates_pending": true,
   "metrics": {
     "latency_seconds": 4.8,
     "tool_calls": 0,
@@ -508,7 +527,7 @@ data: <json>
 }
 ```
 
-`tool_calls` と `total_tokens` は承認後フローで集計され、モック経路や一部フォールバック経路では 0 のことがあります。
+`tool_calls` と `total_tokens` は承認後フローで集計され、モック経路や一部フォールバック経路では 0 のことがあります。`background_updates_pending=true` の場合、フロントエンドは会話詳細 API をポーリングし、動画・品質レビュー・承認後アクションの後続結果を同じ会話にマージします。
 
 ## 代表的な SSE フロー
 

@@ -6,7 +6,7 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 
 ## What Works Today
 
-- React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), dark mode with WCAG AA contrast, a plan-tab evaluation panel with side-by-side version comparison, and a global artifact version selector that can inspect committed versions while a new round is still generating
+- React 19 frontend with SSE chat, artifact preview, conversation history restore (from Cosmos DB), replay, multilingual UI (ja/en/zh), voice input (Voice Live with MSAL.js + Web Speech API fallback), model selector (4 models), dark mode with WCAG AA contrast, a dedicated Evaluation tab with side-by-side version comparison, a global artifact version selector that can inspect committed versions while a new round or a second manager approval is pending, and a manager approval portal that compares the current revision against previous committed versions
 - FastAPI backend with rate limiting, liveness/readiness probes, static asset serving from the built frontend, and a dedicated `/api/evaluate` endpoint
 - Seven agents in the pipeline (data search, marketing plan, regulation check, plan revision, brochure generation, video generation, and quality review) with 5 user-facing steps: data → plan → approval → regulation + revision → brochure + video, plus an optional manager approval gate between revision and brochure generation via a built-in approval portal
 - Fabric data access via Fabric Data Agent Published URL (`FABRIC_DATA_AGENT_URL`) when available, then Fabric Lakehouse SQL via pyodbc, then CSV fallback
@@ -38,14 +38,25 @@ Generate travel marketing plans, compliance-checked copy, brochures, images, and
 - `POST /api/evaluate` combines `azure-ai-evaluation` built-in evaluators (Relevance / Coherence / Fluency) with code-based and prompt-based custom evaluators, and can return a Foundry portal URL for the logged evaluation run.
 - Evaluation-driven refinement sends generated feedback back into `POST /api/chat`, regenerates the marketing plan, returns a fresh `approval_request`, and on approval reruns regulation, brochure, image, and video generation.
 - The frontend snapshots every completed run and `VersionSelector` restores plan, brochure, images, and video together.
-- While a new version is generating, the right pane becomes the live workspace for that round, but users can still inspect any committed version in read-only mode and jump back to the live pending view from the generating chip.
+- After the final approval step, user-visible completion is emitted as soon as brochure and image generation finish. Video polling, quality review, and post-approval Logic Apps actions may continue as background updates and are merged into the same conversation history.
+- While a new version is generating or waiting for a second manager approval, the right pane keeps the latest committed version visible by default. Users can switch to the live pending version from the generating chip and switch back without losing earlier committed results.
 - The evaluation panel compares the current artifact version against a selected saved version without changing the main artifact preview. It now shows both versions as summary cards at the top of the comparison area.
+- The built-in manager approval portal calls `GET /api/chat/{thread_id}/manager-approval-request`, receives `current_version` plus `previous_versions`, and renders the current revision side-by-side with any previously committed version. The backend also keeps this comparison payload in the pending approval context so it survives timing gaps between persistence and portal load.
 - If the raw evaluation payload contains `task_adherence`, the frontend intentionally excludes it from visible score cards, comparison deltas, overall round summaries, and generated refinement feedback because it is currently too noisy to guide iteration.
 - Voice Live API is authenticated via MSAL.js with Entra App Registration. The `VoiceInput` component supports dual-mode: Voice Live for real-time voice, with automatic fallback to Web Speech API.
 - Conversation history is restored from Cosmos DB via `restoreConversation()` without re-running inference.
 - Runtime knowledge-base queries use Managed Identity. `scripts/setup_knowledge_base.py` still supports direct Azure AI Search API-key bootstrap as an optional setup path.
 
 See [docs/azure-architecture.md](docs/azure-architecture.md) for the current Azure architecture and diagram set.
+
+## Verified Azure Snapshot
+
+- Verified environment as of `2026-04-04`: Azure deployment is healthy with `/api/health=ok` and `/api/ready=ready`.
+- Runtime text deployment is `gpt-5-4-mini`; the evaluation deployment used in the live environment is `gpt-4-1-mini`.
+- `gpt-image-1.5` is deployed on the main Foundry project. `MAI-Image-2` remains an optional secondary image resource.
+- Fabric is live with workspace `TeamD`, capacity `teamdfabric` (F64, Japan East), Lakehouse `Travel_Lakehouse`, and the SQL endpoint configured on the app. The Fabric Data Agent path remains optional and higher priority when explicitly configured.
+- APIM AI Gateway provisioning plus the `travel-ai-gateway` connection and token policies are configured by `scripts/postprovision.py`.
+- The built-in post-approval Logic Apps callback is enabled. Manager notification workflow remains an optional separate endpoint behind `MANAGER_APPROVAL_TRIGGER_URL`.
 
 ## Architecture At A Glance
 
