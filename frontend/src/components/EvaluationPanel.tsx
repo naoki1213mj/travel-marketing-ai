@@ -2,20 +2,20 @@ import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Sparkl
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import {
-  buildEvaluationFeedback,
-  calculateEvaluationOverall,
-  getAssetQuality,
-  getEvaluationDeltaItems,
-  getEvaluationDetailChanges,
-  getLatestEvaluation,
-  getPlanQuality,
-  getRegressionGuard,
-  type EvaluationDeltaItem,
-  type EvaluationQualityTrack,
-  type EvaluationRecord,
-  type EvaluationResult,
-  type RegressionGuard,
-  type RegressionMetricChange
+    buildEvaluationFeedback,
+    calculateEvaluationOverall,
+    getAssetQuality,
+    getEvaluationDeltaItems,
+    getEvaluationDetailChanges,
+    getLatestEvaluation,
+    getPlanQuality,
+    getRegressionGuard,
+    type EvaluationDeltaItem,
+    type EvaluationQualityTrack,
+    type EvaluationRecord,
+    type EvaluationResult,
+    type RegressionGuard,
+    type RegressionMetricChange
 } from '../lib/evaluation'
 
 interface EvaluationPanelProps {
@@ -268,9 +268,14 @@ function renderTrackGroups(
 
   return groups
     .map(group => {
-      const items = group.keys
-        .map(key => ({ key, metric: track.metrics[key], previous: previousTrack?.metrics[key] }))
-        .filter((item): item is { key: string; metric: EvaluationQualityTrack['metrics'][string]; previous?: EvaluationQualityTrack['metrics'][string] } => Boolean(item.metric))
+      const items = group.keys.flatMap(key => {
+        const metric = track.metrics[key]
+        if (!metric) {
+          return []
+        }
+
+        return [{ key, metric, previous: previousTrack?.metrics[key] }]
+      })
 
       if (items.length === 0) return null
 
