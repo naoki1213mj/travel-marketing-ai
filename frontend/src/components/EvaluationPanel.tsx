@@ -1,18 +1,21 @@
-import { CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, XCircle } from 'lucide-react'
+import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
 import {
-    calculateEvaluationOverall,
-    getEvaluationDeltaItems,
-    getEvaluationDetailChanges,
-    getLatestEvaluation,
-    hasBuiltinMetrics,
-    shouldDisplayBuiltinMetric,
-    summarizeEvaluationDiff,
-    type EvaluationDeltaItem,
-    type EvaluationDetailChange,
-    type EvaluationRecord,
-    type EvaluationResult,
+  buildEvaluationFeedback,
+  calculateEvaluationOverall,
+  getAssetQuality,
+  getEvaluationDeltaItems,
+  getEvaluationDetailChanges,
+  getLatestEvaluation,
+  getPlanQuality,
+  getRegressionGuard,
+  type EvaluationDeltaItem,
+  type EvaluationQualityTrack,
+  type EvaluationRecord,
+  type EvaluationResult,
+  type RegressionGuard,
+  type RegressionMetricChange
 } from '../lib/evaluation'
 
 interface EvaluationPanelProps {
@@ -29,22 +32,38 @@ interface EvaluationPanelProps {
   onRefine?: (feedback: string) => void
 }
 
+interface ComparisonSummary {
+  version: number
+  latest: EvaluationRecord
+  composite: number
+  planOverall: number
+  assetOverall: number
+}
+
+const PLAN_GROUPS = [
+  { titleKey: 'eval.ai_review', keys: ['relevance', 'coherence', 'fluency'] },
+  { titleKey: 'eval.marketing_review', keys: ['appeal', 'differentiation', 'kpi_validity', 'brand_tone'] },
+  {
+    titleKey: 'eval.execution_readiness',
+    keys: ['plan_structure_readiness', 'senior_fit_readiness', 'kpi_evidence_readiness', 'offer_specificity', 'travel_law_compliance'],
+  },
+]
+
+const ASSET_GROUPS = [
+  {
+    titleKey: 'eval.asset_readiness',
+    keys: ['cta_visibility', 'value_visibility', 'trust_signal_presence', 'disclosure_completeness', 'accessibility_readiness'],
+  },
+]
+
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
   if (score < 0) return <span className="text-xs text-[var(--text-muted)]">N/A</span>
   const pct = (score / max) * 100
-  const color = pct >= 80 ? 'text-green-500' : pct >= 60 ? 'text-yellow-500' : 'text-red-500'
+  const color = pct >= 80 ? 'text-green-500' : pct >= 60 ? 'text-yellow-500' : 'text-red-400'
   return (
-    <span className={`text-sm font-bold ${color}`}>
-      {score.toFixed(1)}<span className="text-xs font-normal text-[var(--text-muted)]">/{max}</span>
-    </span>
-  )
-}
-
-function CheckItem({ label, passed }: { label: string; passed: boolean }) {
-  return (
-    <span className="inline-flex items-center gap-1 text-xs">
-      <span>{passed ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}</span>
-      <span className={passed ? 'text-[var(--text-secondary)]' : 'text-red-400'}>{label}</span>
+    <span className={`text-lg font-semibold ${color}`}>
+      {score.toFixed(1)}
+      <span className="ml-0.5 text-xs font-normal text-[var(--text-muted)]">/{max}</span>
     </span>
   )
 }
@@ -55,41 +74,51 @@ function ScoreDelta({ current, previous }: { current: number; previous: number }
   if (Math.abs(delta) < 0.05) return null
   const isUp = delta > 0
   return (
-    <span className={`ml-1 text-[10px] font-medium ${isUp ? 'text-green-500' : 'text-red-400'}`}>
-      {isUp ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}
-    </span>
-  )
-}
-
-function ComparisonDeltaBadge({ delta }: { delta: number }) {
-  if (Math.abs(delta) < 0.05) {
-    return (
-      <span className="rounded-full bg-[var(--panel-strong)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
-        {delta.toFixed(1)}
-      </span>
-    )
-  }
-
-  const isUp = delta > 0
-  return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isUp ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+    <span className={`inline-flex items-center gap-1 text-[11px] font-medium ${isUp ? 'text-green-500' : 'text-red-400'}`}>
+      {isUp ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
       {isUp ? '+' : ''}{delta.toFixed(1)}
     </span>
   )
 }
 
-function ComparisonSummaryPill({ label, value, tone }: { label: string; value: number; tone: 'positive' | 'negative' | 'neutral' }) {
-  const toneClass = tone === 'positive'
-    ? 'bg-green-500/10 text-green-600'
-    : tone === 'negative'
-      ? 'bg-red-500/10 text-red-500'
-      : 'bg-[var(--panel-bg)] text-[var(--text-secondary)]'
-
+function CheckItem({ label, passed }: { label: string; passed: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium ${toneClass}`}>
+    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)]">
+      {passed ? <CheckCircle className="h-3.5 w-3.5 text-green-500" /> : <XCircle className="h-3.5 w-3.5 text-red-400" />}
       <span>{label}</span>
-      <span>{value}</span>
     </span>
+  )
+}
+
+function SummaryCard({
+  eyebrow,
+  title,
+  score,
+  previous,
+  summary,
+  accent = false,
+}: {
+  eyebrow: string
+  title: string
+  score: number
+  previous?: number
+  summary?: string
+  accent?: boolean
+}) {
+  return (
+    <div className={`rounded-3xl border p-4 ${accent ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)]/60' : 'border-[var(--panel-border)] bg-[var(--panel-bg)]'}`}>
+      <p className={`text-[10px] font-semibold uppercase tracking-[0.2em] ${accent ? 'text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>
+        {eyebrow}
+      </p>
+      <div className="mt-3 flex items-end justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">{title}</p>
+          <div className="mt-2"><ScoreBadge score={score} /></div>
+        </div>
+        {typeof previous === 'number' && <ScoreDelta current={score} previous={previous} />}
+      </div>
+      {summary && <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">{summary}</p>}
+    </div>
   )
 }
 
@@ -97,19 +126,21 @@ function ComparisonVersionCard({
   label,
   version,
   roundLabel,
-  score,
-  emphasis = 'neutral',
+  composite,
+  planOverall,
+  assetOverall,
+  accent = false,
 }: {
   label: string
   version: number
   roundLabel: string
-  score: number
-  emphasis?: 'accent' | 'neutral'
+  composite: number
+  planOverall: number
+  assetOverall: number
+  accent?: boolean
 }) {
-  const accent = emphasis === 'accent'
-
   return (
-    <div className={`rounded-2xl border px-4 py-3 ${accent ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)]/50' : 'border-[var(--panel-border)] bg-[var(--panel-strong)]'}`}>
+    <div className={`rounded-3xl border p-4 ${accent ? 'border-[var(--accent)]/30 bg-[var(--accent-soft)]/60' : 'border-[var(--panel-border)] bg-[var(--panel-bg)]'}`}>
       <p className={`text-[10px] font-semibold uppercase tracking-[0.18em] ${accent ? 'text-[var(--accent-strong)]' : 'text-[var(--text-muted)]'}`}>
         {label}
       </p>
@@ -118,9 +149,85 @@ function ComparisonVersionCard({
           <p className="text-sm font-semibold text-[var(--text-primary)]">v{version}</p>
           <p className="mt-1 text-[11px] text-[var(--text-muted)]">{roundLabel}</p>
         </div>
-        <ScoreBadge score={score} />
+        <ScoreBadge score={composite} />
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-[var(--text-secondary)]">
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">{accent ? 'PLAN' : 'Plan'}</p>
+          <div className="mt-1"><ScoreBadge score={planOverall} /></div>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-[0.16em] text-[var(--text-muted)]">Asset</p>
+          <div className="mt-1"><ScoreBadge score={assetOverall} /></div>
+        </div>
       </div>
     </div>
+  )
+}
+
+function RegressionCard({ guard, t }: { guard: RegressionGuard | null; t: (key: string) => string }) {
+  const degraded = guard?.degraded_metrics ?? []
+  const improved = guard?.improved_metrics ?? []
+
+  return (
+    <div className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--text-muted)]">{t('eval.regression_guard')}</p>
+      <div className="mt-3 flex items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-[var(--text-primary)]">{t('eval.compare')}</p>
+          <div className="mt-2 flex flex-wrap gap-2 text-xs">
+            <span className="rounded-full bg-red-500/10 px-2.5 py-1 text-red-500">{t('eval.compare.degraded')}: {degraded.length}</span>
+            <span className="rounded-full bg-green-500/10 px-2.5 py-1 text-green-600">{t('eval.compare.improved')}: {improved.length}</span>
+          </div>
+        </div>
+        {guard?.has_regressions ? <AlertTriangle className="h-5 w-5 text-red-400" /> : <CheckCircle className="h-5 w-5 text-green-500" />}
+      </div>
+      <p className="mt-3 text-xs leading-5 text-[var(--text-secondary)]">{guard?.summary || t('eval.regression.none')}</p>
+    </div>
+  )
+}
+
+function MetricCard({
+  label,
+  score,
+  previous,
+  reason,
+  details,
+}: {
+  label: string
+  score: number
+  previous?: number
+  reason?: string
+  details?: Record<string, boolean>
+}) {
+  return (
+    <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-sm font-medium text-[var(--text-primary)]">{label}</p>
+        <div className="text-right">
+          <ScoreBadge score={score} />
+          {typeof previous === 'number' && <div className="mt-1"><ScoreDelta current={score} previous={previous} /></div>}
+        </div>
+      </div>
+      {reason && <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{reason}</p>}
+      {details && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {Object.entries(details).map(([item, passed]) => (
+            <CheckItem key={item} label={item} passed={passed} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function DeltaBadge({ item }: { item: RegressionMetricChange }) {
+  const isUp = item.delta > 0
+  return (
+    <span className={`inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-medium ${isUp ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+      <span>{item.label || item.key}</span>
+      <span>{isUp ? '+' : ''}{item.delta.toFixed(1)}</span>
+    </span>
   )
 }
 
@@ -133,47 +240,59 @@ function getDefaultComparisonVersion(currentVersion: number | undefined, availab
   return candidates.find(version => version > currentVersion) ?? candidates[candidates.length - 1]
 }
 
-function buildFeedback(result: EvaluationResult, t: (key: string) => string): string {
-  const issues: string[] = []
-
-  if (hasBuiltinMetrics(result.builtin)) {
-    for (const [name, val] of Object.entries(result.builtin)) {
-      if (!shouldDisplayBuiltinMetric(name)) continue
-      if (val.score >= 0 && val.score < 3) {
-        issues.push(`${t(`eval.${name}`) || name}が低い（${val.score}/5）${val.reason ? ': ' + val.reason : ''}`)
+function buildComparisonSummaries(versions: ArtifactSnapshot[]): ComparisonSummary[] {
+  return versions
+    .map((snapshot, index) => {
+      const latest = getLatestEvaluation(snapshot.evaluations)
+      if (!latest) return null
+      const plan = getPlanQuality(latest.result)
+      const asset = getAssetQuality(latest.result)
+      return {
+        version: index + 1,
+        latest,
+        composite: calculateEvaluationOverall(latest.result),
+        planOverall: plan?.overall ?? -1,
+        assetOverall: asset?.overall ?? -1,
       }
-    }
-  }
+    })
+    .filter((item): item is ComparisonSummary => item !== null)
+}
 
-  if (result.marketing_quality) {
-    for (const key of ['appeal', 'differentiation', 'kpi_validity', 'brand_tone']) {
-      const val = result.marketing_quality[key]
-      if (typeof val === 'number' && val < 3) {
-        issues.push(`${t(`eval.${key}`) || key}が低い（${val}/5）`)
-      }
-    }
-    if (result.marketing_quality.reason) {
-      issues.push(`審査コメント: ${String(result.marketing_quality.reason)}`)
-    }
-  }
+function renderTrackGroups(
+  track: EvaluationQualityTrack | null,
+  previousTrack: EvaluationQualityTrack | null,
+  groups: Array<{ titleKey: string; keys: string[] }>,
+  t: (key: string) => string,
+) {
+  if (!track) return null
 
-  if (result.custom) {
-    for (const [name, val] of Object.entries(result.custom)) {
-      if (!val.details) continue
-      const missing = Object.entries(val.details)
-        .filter(([, passed]) => !passed)
-        .map(([item]) => item)
-      if (missing.length > 0) {
-        issues.push(`${t(`eval.${name}`) || name}: ${missing.join('・')}が不足`)
-      }
-    }
-  }
+  return groups
+    .map(group => {
+      const items = group.keys
+        .map(key => ({ key, metric: track.metrics[key], previous: previousTrack?.metrics[key] }))
+        .filter((item): item is { key: string; metric: EvaluationQualityTrack['metrics'][string]; previous?: EvaluationQualityTrack['metrics'][string] } => Boolean(item.metric))
 
-  if (issues.length === 0) {
-    return '品質評価の結果、全項目が基準を満たしています。さらにクオリティを高めてください。'
-  }
+      if (items.length === 0) return null
 
-  return `以下の品質評価結果に基づいて企画書を改善してください:\n${issues.map(item => `- ${item}`).join('\n')}`
+      return (
+        <div key={group.titleKey}>
+          <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t(group.titleKey)}</p>
+          <div className="grid gap-3 xl:grid-cols-2">
+            {items.map(item => (
+              <MetricCard
+                key={item.key}
+                label={item.metric.label || t(`eval.${item.key}`) || item.key}
+                score={item.metric.score}
+                previous={item.previous?.score}
+                reason={item.metric.reason}
+                details={item.metric.details}
+              />
+            ))}
+          </div>
+        </div>
+      )
+    })
+    .filter(Boolean)
 }
 
 export function EvaluationPanel({
@@ -193,6 +312,7 @@ export function EvaluationPanel({
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [comparisonVersion, setComparisonVersion] = useState<number | null>(null)
+
   const evaluationKey = useMemo(
     () => JSON.stringify([conversationId ?? 'draft', artifactVersion ?? 0, query, response]),
     [artifactVersion, conversationId, query, response],
@@ -205,18 +325,13 @@ export function EvaluationPanel({
   const previousRecord = history.length > 1 ? history[history.length - 2] : null
   const result = latestRecord?.result ?? null
   const previousResult = previousRecord?.result ?? null
-  const previousBuiltin = previousResult && hasBuiltinMetrics(previousResult.builtin) ? previousResult.builtin : undefined
-  const versionComparisons = versions
-    .map((snapshot, index) => {
-      const latest = getLatestEvaluation(snapshot.evaluations)
-      if (!latest) return null
-      return {
-        version: index + 1,
-        latest,
-        overall: calculateEvaluationOverall(latest.result),
-      }
-    })
-    .filter((item): item is { version: number; latest: EvaluationRecord; overall: number } => item !== null)
+  const planTrack = result ? getPlanQuality(result) : null
+  const previousPlanTrack = previousResult ? getPlanQuality(previousResult) : null
+  const assetTrack = result ? getAssetQuality(result) : null
+  const previousAssetTrack = previousResult ? getAssetQuality(previousResult) : null
+  const regressionGuard = result ? getRegressionGuard(result) : null
+
+  const versionComparisons = buildComparisonSummaries(versions)
   const availableComparisonVersions = versionComparisons.map(item => item.version)
   const defaultComparisonVersion = getDefaultComparisonVersion(artifactVersion, availableComparisonVersions)
 
@@ -230,26 +345,18 @@ export function EvaluationPanel({
   }, [artifactVersion, availableComparisonVersions, defaultComparisonVersion])
 
   const selectedComparison = versionComparisons.find(item => item.version === comparisonVersion) ?? null
-  const currentVersionSummary = artifactVersion && latestRecord
-    ? {
-        version: artifactVersion,
-        overall: calculateEvaluationOverall(latestRecord.result),
-        roundLabel: t('eval.round').replace('{n}', String(latestRecord.round)),
-      }
-    : null
-  const comparisonTargets = versionComparisons.filter(item => item.version !== artifactVersion)
-  const comparisonDeltaItems = result && selectedComparison
-    ? getEvaluationDeltaItems(result, selectedComparison.latest.result)
+  const comparisonPlanItems = result && selectedComparison
+    ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'plan')
     : []
-  const comparisonSummary = summarizeEvaluationDiff(comparisonDeltaItems)
+  const comparisonAssetItems = result && selectedComparison
+    ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'asset')
+    : []
+  const comparisonSummary = useMemo(
+    () => summarizeComparison([...comparisonPlanItems, ...comparisonAssetItems]),
+    [comparisonAssetItems, comparisonPlanItems],
+  )
   const detailChanges = result && selectedComparison
     ? getEvaluationDetailChanges(result, selectedComparison.latest.result)
-    : []
-  const builtinComparisonItems = comparisonDeltaItems.filter(item => item.section === 'builtin')
-  const marketingComparisonItems = comparisonDeltaItems.filter(item => item.section === 'marketing')
-  const customComparisonItems = comparisonDeltaItems.filter(item => item.section === 'custom')
-  const visibleBuiltinMetrics = hasBuiltinMetrics(result?.builtin)
-    ? Object.entries(result.builtin).filter(([name]) => shouldDisplayBuiltinMetric(name))
     : []
 
   const runEvaluation = async () => {
@@ -279,13 +386,7 @@ export function EvaluationPanel({
         version: data.evaluation_meta?.version ?? artifactVersion ?? 1,
         round: data.evaluation_meta?.round ?? (history.length + 1),
         createdAt: data.evaluation_meta?.created_at ?? new Date().toISOString(),
-        result: {
-          builtin: data.builtin,
-          custom: data.custom,
-          marketing_quality: data.marketing_quality,
-          foundry_portal_url: data.foundry_portal_url,
-          error: data.error,
-        },
+        result: data,
       }
 
       if (artifactVersion && artifactVersion > 0) {
@@ -305,58 +406,8 @@ export function EvaluationPanel({
 
   if (!response) return null
 
-  const renderComparisonSection = (title: string, items: EvaluationDeltaItem[]) => {
-    if (!selectedComparison || items.length === 0 || !artifactVersion) return null
-
-    return (
-      <div>
-        <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{title}</p>
-        <div className="space-y-2">
-          {items.map(item => (
-            <div key={`${item.section}:${item.key}`} className="rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">{t(item.labelKey) || item.key}</span>
-                <ComparisonDeltaBadge delta={item.delta} />
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-xs text-[var(--text-muted)]">
-                <div>
-                  <p>v{artifactVersion}</p>
-                  <div className="mt-1"><ScoreBadge score={item.current} max={item.max} /></div>
-                </div>
-                <div>
-                  <p>v{selectedComparison.version}</p>
-                  <div className="mt-1"><ScoreBadge score={item.previous} max={item.max} /></div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  const renderDetailChanges = (changes: EvaluationDetailChange[]) => {
-    if (!selectedComparison || !artifactVersion || changes.length === 0) return null
-
-    return (
-      <div>
-        <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare.detail_changes')}</p>
-        <div className="flex flex-wrap gap-2">
-          {changes.map(change => (
-            <span
-              key={`${change.metricKey}:${change.item}`}
-              className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)]"
-            >
-              {t(change.metricLabelKey) || change.metricKey}: {change.item} · v{artifactVersion} {change.current ? '✓' : '✕'} / v{selectedComparison.version} {change.previous ? '✓' : '✕'}
-            </span>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
   return (
-    <div className="mt-4 space-y-3">
+    <div className="mt-4 space-y-4">
       <div className="flex items-center gap-3">
         <h4 className="text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">
           {t('eval.title')}
@@ -382,15 +433,50 @@ export function EvaluationPanel({
       )}
 
       {result && (
-        <div className="space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+        <div className="space-y-4 rounded-[28px] border border-[var(--panel-border)] bg-[var(--panel-strong)] p-4">
+          <div className="grid gap-3 xl:grid-cols-3">
+            <SummaryCard
+              eyebrow={t('eval.plan_quality')}
+              title={t('eval.plan_quality')}
+              score={planTrack?.overall ?? -1}
+              previous={previousPlanTrack?.overall}
+              summary={planTrack?.summary}
+              accent
+            />
+            <SummaryCard
+              eyebrow={t('eval.asset_quality')}
+              title={t('eval.asset_quality')}
+              score={assetTrack?.overall ?? -1}
+              previous={previousAssetTrack?.overall}
+              summary={assetTrack?.summary}
+            />
+            <RegressionCard guard={regressionGuard} t={t} />
+          </div>
+
+          {(planTrack?.focus_areas?.length || assetTrack?.focus_areas?.length) ? (
+            <div className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.focus_areas')}</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {(planTrack?.focus_areas ?? []).map(area => (
+                  <span key={`plan-${area}`} className="rounded-full bg-[var(--accent-soft)] px-3 py-1 text-[11px] font-medium text-[var(--accent-strong)]">
+                    {t('eval.plan_quality')}: {area}
+                  </span>
+                ))}
+                {(assetTrack?.focus_areas ?? []).map(area => (
+                  <span key={`asset-${area}`} className="rounded-full border border-[var(--panel-border)] bg-[var(--surface)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+                    {t('eval.asset_quality')}: {area}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
           {versionComparisons.length > 1 && artifactVersion && (
-            <div>
+            <div className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                   <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare')}</p>
-                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">
-                    {t('eval.compare.preview_hint')}
-                  </p>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">{t('eval.compare.preview_hint')}</p>
                 </div>
                 {selectedComparison && (
                   <p className="text-[11px] text-[var(--text-muted)]">
@@ -400,129 +486,163 @@ export function EvaluationPanel({
                   </p>
                 )}
               </div>
-              {selectedComparison && currentVersionSummary && (
+
+              {selectedComparison && (
                 <div className="mt-3 grid gap-3 lg:grid-cols-2">
                   <ComparisonVersionCard
                     label={t('eval.compare.current')}
-                    version={currentVersionSummary.version}
-                    roundLabel={currentVersionSummary.roundLabel}
-                    score={currentVersionSummary.overall}
-                    emphasis="accent"
+                    version={artifactVersion}
+                    roundLabel={t('eval.round').replace('{n}', String(latestRecord?.round ?? 1))}
+                    composite={calculateEvaluationOverall(result)}
+                    planOverall={planTrack?.overall ?? -1}
+                    assetOverall={assetTrack?.overall ?? -1}
+                    accent
                   />
                   <ComparisonVersionCard
                     label={t('eval.compare.target')}
                     version={selectedComparison.version}
                     roundLabel={t('eval.round').replace('{n}', String(selectedComparison.latest.round))}
-                    score={selectedComparison.overall}
+                    composite={selectedComparison.composite}
+                    planOverall={selectedComparison.planOverall}
+                    assetOverall={selectedComparison.assetOverall}
                   />
                 </div>
               )}
-              {comparisonTargets.length > 1 && (
+
+              {versionComparisons.length > 2 && (
                 <div className="mt-3">
                   <p className="mb-2 text-[11px] text-[var(--text-muted)]">{t('eval.compare.switch_target')}</p>
                   <div className="flex flex-wrap gap-2">
-                    {comparisonTargets
-                  .map(item => (
-                    <button
-                      key={item.version}
-                      type="button"
-                      aria-label={`Compare with v${item.version}`}
-                      onClick={() => setComparisonVersion(item.version)}
-                      className={`rounded-full border px-3 py-2 text-left transition-colors ${
-                        comparisonVersion === item.version
-                          ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
-                          : 'border-[var(--panel-border)] bg-[var(--panel-bg)] text-[var(--text-secondary)] hover:border-[var(--accent)]/40'
-                      }`}
-                    >
-                      <span className="block text-[10px] uppercase tracking-[0.18em]">v{item.version}</span>
-                      <span className="mt-1 block text-xs font-medium">{t('eval.round').replace('{n}', String(item.latest.round))}</span>
-                      <span className="mt-1 block"><ScoreBadge score={item.overall} /></span>
-                    </button>
-                  ))}
+                    {versionComparisons
+                      .filter(item => item.version !== artifactVersion)
+                      .map(item => (
+                        <button
+                          key={item.version}
+                          type="button"
+                          onClick={() => setComparisonVersion(item.version)}
+                          className={`rounded-full border px-3 py-2 text-left transition-colors ${
+                            comparisonVersion === item.version
+                              ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent-strong)]'
+                              : 'border-[var(--panel-border)] bg-[var(--surface)] text-[var(--text-secondary)] hover:border-[var(--accent)]/40'
+                          }`}
+                        >
+                          <span className="block text-[10px] uppercase tracking-[0.18em]">v{item.version}</span>
+                          <span className="mt-1 block text-xs font-medium">{t('eval.round').replace('{n}', String(item.latest.round))}</span>
+                        </button>
+                      ))}
                   </div>
                 </div>
               )}
+
               {selectedComparison && (
-                <div className="mt-3 space-y-3 rounded-2xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-3">
+                <div className="mt-4 space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--surface)] p-4">
                   <div className="flex flex-wrap gap-2">
-                    <ComparisonSummaryPill label={t('eval.compare.improved')} value={comparisonSummary.improved} tone="positive" />
-                    <ComparisonSummaryPill label={t('eval.compare.degraded')} value={comparisonSummary.degraded} tone="negative" />
-                    <ComparisonSummaryPill label={t('eval.compare.unchanged')} value={comparisonSummary.unchanged} tone="neutral" />
+                    <span className="rounded-full bg-green-500/10 px-3 py-1 text-[11px] font-medium text-green-600">{t('eval.compare.improved')}: {comparisonSummary.improved}</span>
+                    <span className="rounded-full bg-red-500/10 px-3 py-1 text-[11px] font-medium text-red-500">{t('eval.compare.degraded')}: {comparisonSummary.degraded}</span>
+                    <span className="rounded-full bg-[var(--panel-bg)] px-3 py-1 text-[11px] font-medium text-[var(--text-secondary)]">{t('eval.compare.unchanged')}: {comparisonSummary.unchanged}</span>
                   </div>
-                  {renderComparisonSection(t('eval.builtin'), builtinComparisonItems)}
-                  {renderComparisonSection(t('eval.marketing'), marketingComparisonItems)}
-                  {renderComparisonSection(t('eval.compliance'), customComparisonItems)}
-                  {renderDetailChanges(detailChanges)}
-                </div>
-              )}
-            </div>
-          )}
 
-          {latestRecord && (
-            <p className="text-[10px] font-medium text-[var(--text-muted)]">
-              {t('eval.round').replace('{n}', String(latestRecord.round))}
-            </p>
-          )}
-
-          {visibleBuiltinMetrics.length > 0 && (
-            <div>
-              <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.builtin')}</p>
-              <div className="flex flex-wrap gap-4">
-                {visibleBuiltinMetrics.map(([name, val]) => (
-                  <div key={name} className="text-center">
-                    <ScoreBadge score={val.score} />
-                    {previousBuiltin?.[name] != null && (
-                      <ScoreDelta current={val.score} previous={previousBuiltin[name].score} />
-                    )}
-                    <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{t(`eval.${name}`) || name}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {result.marketing_quality && !('score' in result.marketing_quality && result.marketing_quality.score === -1) && (
-            <div>
-              <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.marketing')}</p>
-              <div className="flex flex-wrap gap-4">
-                {['appeal', 'differentiation', 'kpi_validity', 'brand_tone', 'overall'].map(key => {
-                  const val = result.marketing_quality?.[key]
-                  const prevVal = previousResult?.marketing_quality?.[key]
-                  return typeof val === 'number' ? (
-                    <div key={key} className="text-center">
-                      <ScoreBadge score={val} />
-                      {typeof prevVal === 'number' && <ScoreDelta current={val} previous={prevVal} />}
-                      <p className="mt-0.5 text-[10px] text-[var(--text-muted)]">{t(`eval.${key}`) || key}</p>
-                    </div>
-                  ) : null
-                })}
-              </div>
-              {result.marketing_quality.reason && (
-                <p className="mt-1 inline-flex items-center gap-1 text-xs text-[var(--text-secondary)]"><MessageSquare className="h-3 w-3" /> {String(result.marketing_quality.reason)}</p>
-              )}
-            </div>
-          )}
-
-          {result.custom && (
-            <div>
-              <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compliance')}</p>
-              <div className="space-y-2">
-                {Object.entries(result.custom).map(([name, val]) => (
-                  <div key={name}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-[var(--text-secondary)]">{t(`eval.${name}`) || name}</span>
-                      <ScoreBadge score={val.score} max={1} />
-                    </div>
-                    {val.details && (
-                      <div className="mt-1 flex flex-wrap gap-2">
-                        {Object.entries(val.details).map(([item, passed]) => (
-                          <CheckItem key={item} label={item} passed={passed as boolean} />
+                  {comparisonPlanItems.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.plan_quality')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {comparisonPlanItems.map(item => (
+                          <span key={`plan-${item.key}`} className={`rounded-full px-3 py-1 text-[11px] font-medium ${item.delta >= 0 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+                            {item.label} {item.delta >= 0 ? '+' : ''}{item.delta.toFixed(1)}
+                          </span>
                         ))}
                       </div>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  )}
+
+                  {comparisonAssetItems.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.asset_quality')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {comparisonAssetItems.map(item => (
+                          <span key={`asset-${item.key}`} className={`rounded-full px-3 py-1 text-[11px] font-medium ${item.delta >= 0 ? 'bg-green-500/10 text-green-600' : 'bg-red-500/10 text-red-500'}`}>
+                            {item.label} {item.delta >= 0 ? '+' : ''}{item.delta.toFixed(1)}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {detailChanges.length > 0 && (
+                    <div>
+                      <p className="mb-2 text-xs font-medium text-[var(--text-secondary)]">{t('eval.compare.detail_changes')}</p>
+                      <div className="flex flex-wrap gap-2">
+                        {detailChanges.map(change => (
+                          <span
+                            key={`${change.metricKey}:${change.item}`}
+                            className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-1.5 text-[11px] text-[var(--text-secondary)]"
+                          >
+                            {change.metricLabel}: {change.item} · v{artifactVersion} {change.current ? '✓' : '✕'} / v{selectedComparison.version} {change.previous ? '✓' : '✕'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {regressionGuard && ((regressionGuard.degraded_metrics?.length ?? 0) > 0 || (regressionGuard.improved_metrics?.length ?? 0) > 0) && (
+            <div className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500" />
+                <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.regression_guard')}</p>
               </div>
+              <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">{regressionGuard.summary}</p>
+              {(regressionGuard.degraded_metrics?.length ?? 0) > 0 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[11px] text-[var(--text-muted)]">{t('eval.compare.degraded')}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {regressionGuard.degraded_metrics?.map(item => <DeltaBadge key={`degraded-${item.key}`} item={item} />)}
+                  </div>
+                </div>
+              )}
+              {(regressionGuard.improved_metrics?.length ?? 0) > 0 && (
+                <div className="mt-3">
+                  <p className="mb-2 text-[11px] text-[var(--text-muted)]">{t('eval.compare.improved')}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {regressionGuard.improved_metrics?.map(item => <DeltaBadge key={`improved-${item.key}`} item={item} />)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {planTrack && (
+            <div className="space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.plan_quality')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{planTrack.summary}</p>
+                </div>
+                <div className="text-right">
+                  <ScoreBadge score={planTrack.overall} />
+                  {typeof previousPlanTrack?.overall === 'number' && <div className="mt-1"><ScoreDelta current={planTrack.overall} previous={previousPlanTrack.overall} /></div>}
+                </div>
+              </div>
+              {renderTrackGroups(planTrack, previousPlanTrack, PLAN_GROUPS, t)}
+            </div>
+          )}
+
+          {assetTrack && (
+            <div className="space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.asset_quality')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{assetTrack.summary}</p>
+                </div>
+                <div className="text-right">
+                  <ScoreBadge score={assetTrack.overall} />
+                  {typeof previousAssetTrack?.overall === 'number' && <div className="mt-1"><ScoreDelta current={assetTrack.overall} previous={previousAssetTrack.overall} /></div>}
+                </div>
+              </div>
+              {renderTrackGroups(assetTrack, previousAssetTrack, ASSET_GROUPS, t)}
             </div>
           )}
 
@@ -540,7 +660,7 @@ export function EvaluationPanel({
           {onRefine && result && isLatestVersion && (
             <button
               onClick={() => {
-                const feedback = buildFeedback(result, t)
+                const feedback = buildEvaluationFeedback(result, previousResult, t)
                 if (feedback) {
                   onRefine(feedback)
                 }
@@ -554,6 +674,10 @@ export function EvaluationPanel({
           {onRefine && result && !isLatestVersion && (
             <p className="text-xs text-[var(--text-muted)]">{t('eval.refine.latest_only')}</p>
           )}
+
+          {result.error && (
+            <p className="inline-flex items-center gap-1 text-xs text-red-500"><MessageSquare className="h-3.5 w-3.5" /> {result.error}</p>
+          )}
         </div>
       )}
 
@@ -563,5 +687,21 @@ export function EvaluationPanel({
         </div>
       )}
     </div>
+  )
+}
+
+function summarizeComparison(items: EvaluationDeltaItem[]): { improved: number; degraded: number; unchanged: number } {
+  return items.reduce(
+    (summary, item) => {
+      if (item.delta > 0.05) {
+        summary.improved += 1
+      } else if (item.delta < -0.05) {
+        summary.degraded += 1
+      } else {
+        summary.unchanged += 1
+      }
+      return summary
+    },
+    { improved: 0, degraded: 0, unchanged: 0 },
   )
 }

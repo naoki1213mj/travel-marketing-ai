@@ -3,14 +3,30 @@
 import json
 from typing import Any, TypedDict
 
-_LOW_SCORE_THRESHOLD = 3.0
+_LOW_SCORE_THRESHOLD = 4.0
 _COMPLIANCE_WARNING_TOKENS = ("⚠", "❌", "違反", "不足", "NG", "注意", "要修正")
-_HIDDEN_BUILTIN_METRICS = {"task_adherence"}
+_HIDDEN_BUILTIN_METRICS = {"task_adherence", "groundedness"}
 _MARKETING_LABELS = {
     "appeal": "訴求力",
     "differentiation": "差別化",
     "kpi_validity": "KPI 妥当性",
     "brand_tone": "ブランドトーン",
+}
+_METRIC_LABELS = {
+    **_MARKETING_LABELS,
+    "relevance": "依頼適合性",
+    "coherence": "構成の一貫性",
+    "fluency": "表現の明瞭さ",
+    "plan_structure_readiness": "企画書構成の完成度",
+    "senior_fit_readiness": "シニア適合性",
+    "kpi_evidence_readiness": "KPI 根拠の明確さ",
+    "offer_specificity": "募集条件の具体性",
+    "travel_law_compliance": "旅行業法準備度",
+    "cta_visibility": "予約導線の明確さ",
+    "value_visibility": "オファー訴求の明確さ",
+    "trust_signal_presence": "安心材料の見えやすさ",
+    "disclosure_completeness": "表示事項の網羅性",
+    "accessibility_readiness": "アクセシビリティ準備度",
 }
 _SECTION_HINTS = ("キャッチコピー", "ターゲット", "差別化", "KPI")
 
@@ -98,6 +114,8 @@ def _build_priority_issues(
 ) -> list[PriorityIssue]:
     """評価結果と履歴から改善課題を組み立てる。"""
     issues: list[PriorityIssue] = []
+
+    issues.extend(_build_grouped_priority_issues(evaluation_result))
 
     builtin = evaluation_result.get("builtin")
     if isinstance(builtin, dict) and "error" not in builtin:
@@ -214,6 +232,75 @@ def _dedupe_issues(issues: list[PriorityIssue]) -> list[PriorityIssue]:
     return deduped
 
 
+def _build_grouped_priority_issues(evaluation_result: dict[str, Any]) -> list[PriorityIssue]:
+    """新しい grouped evaluation schema から優先課題を抽出する。"""
+    issues: list[PriorityIssue] = []
+
+    regression_guard = evaluation_result.get("regression_guard")
+    if isinstance(regression_guard, dict):
+        degraded_metrics = regression_guard.get("degraded_metrics")
+        if isinstance(degraded_metrics, list):
+            for metric in degraded_metrics[:2]:
+                if not isinstance(metric, dict):
+                    continue
+                label = str(metric.get("label") or _humanize_metric(str(metric.get("key") or "悪化項目")))
+                current = metric.get("current")
+                previous = metric.get("previous")
+                if isinstance(current, (int, float)) and isinstance(previous, (int, float)):
+                    reason = f"前ラウンド比で {previous:.1f}→{current:.1f} に低下"
+                else:
+                    reason = "前ラウンドより品質が低下しています"
+                issues.append(
+                    {
+                        "label": f"悪化検知: {label}",
+                        "reason": reason,
+                        "suggested_action": "前ラウンドで満たせていた水準を下回らないように、まずこの項目を回復する",
+                    }
+                )
+
+    issues.extend(_collect_group_track_issues(evaluation_result.get("plan_quality"), area="plan", limit=3))
+    issues.extend(_collect_group_track_issues(evaluation_result.get("asset_quality"), area="asset", limit=2))
+    return issues
+
+
+def _collect_group_track_issues(track: Any, area: str, limit: int) -> list[PriorityIssue]:
+    """grouped quality track から低スコア課題を抽出する。"""
+    if not isinstance(track, dict):
+        return []
+
+    metrics = track.get("metrics")
+    if not isinstance(metrics, dict):
+        return []
+
+    ranked: list[tuple[str, dict[str, Any]]] = []
+    for key, metric in metrics.items():
+        if not isinstance(metric, dict):
+            continue
+        score = metric.get("score")
+        if not isinstance(score, (int, float)) or score < 0 or score >= _LOW_SCORE_THRESHOLD:
+            continue
+        ranked.append((str(key), metric))
+
+    ranked.sort(key=lambda item: float(item[1].get("score", 999)))
+
+    issues: list[PriorityIssue] = []
+    for key, metric in ranked[:limit]:
+        label = str(metric.get("label") or _humanize_metric(key))
+        reason = str(metric.get("reason") or f"スコア {float(metric['score']):.1f}/5")
+        if area == "plan":
+            action = "企画書本文で根拠・条件・訴求を具体化し、改善後も構成の一貫性を維持する"
+        else:
+            action = "企画書の訴求と成果物の見せ方を揃え、ブローシャ上でも伝わる文言と表示要素へ落とし込む"
+        issues.append(
+            {
+                "label": label,
+                "reason": reason,
+                "suggested_action": action,
+            }
+        )
+    return issues
+
+
 def _build_evaluation_summary(
     priority_issues: list[PriorityIssue],
     rejection_notes: list[str],
@@ -291,7 +378,7 @@ def _extract_section_excerpt(plan_markdown: str, heading_hint: str) -> str:
 
 def _humanize_metric(metric_name: str) -> str:
     """評価指標名を読みやすい表現へ寄せる。"""
-    label = _MARKETING_LABELS.get(metric_name)
+    label = _METRIC_LABELS.get(metric_name)
     if label:
         return label
     return metric_name.replace("_", " ")

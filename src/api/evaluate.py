@@ -20,6 +20,42 @@ router = APIRouter(prefix="/api", tags=["evaluation"])
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 
+_PLAN_BUILTIN_METRICS = ("relevance", "coherence", "fluency")
+_MARKETING_METRICS = ("appeal", "differentiation", "kpi_validity", "brand_tone")
+_PLAN_CUSTOM_METRICS = (
+    "plan_structure_readiness",
+    "senior_fit_readiness",
+    "kpi_evidence_readiness",
+    "offer_specificity",
+    "travel_law_compliance",
+)
+_ASSET_CUSTOM_METRICS = (
+    "cta_visibility",
+    "value_visibility",
+    "trust_signal_presence",
+    "disclosure_completeness",
+    "accessibility_readiness",
+)
+_METRIC_LABELS = {
+    "relevance": "依頼適合性",
+    "coherence": "構成の一貫性",
+    "fluency": "表現の明瞭さ",
+    "appeal": "顧客訴求力",
+    "differentiation": "差別化",
+    "kpi_validity": "KPI 妥当性",
+    "brand_tone": "ブランド一貫性",
+    "plan_structure_readiness": "企画書構成の完成度",
+    "senior_fit_readiness": "シニア適合性",
+    "kpi_evidence_readiness": "KPI 根拠の明確さ",
+    "offer_specificity": "募集条件の具体性",
+    "travel_law_compliance": "旅行業法準備度",
+    "cta_visibility": "予約導線の明確さ",
+    "value_visibility": "オファー訴求の明確さ",
+    "trust_signal_presence": "安心材料の見えやすさ",
+    "disclosure_completeness": "表示事項の網羅性",
+    "accessibility_readiness": "アクセシビリティ準備度",
+}
+
 
 class EvaluateRequest(BaseModel):
     """評価リクエスト"""
@@ -29,6 +65,289 @@ class EvaluateRequest(BaseModel):
     html: str = Field("", description="ブローシャの HTML テキスト（オプション）")
     conversation_id: str | None = Field(default=None, description="保存先の会話ID")
     artifact_version: int | None = Field(default=None, ge=1, description="評価対象の成果物バージョン")
+
+
+def _average(values: list[float]) -> float:
+    """有効な数値の平均を返す。"""
+    valid = [value for value in values if value >= 0]
+    if not valid:
+        return -1.0
+    return round(sum(valid) / len(valid), 2)
+
+
+def _count_matches(details: dict[str, bool]) -> tuple[int, int]:
+    """checklist の一致件数を返す。"""
+    total = len(details)
+    passed = sum(1 for value in details.values() if value)
+    return passed, total
+
+
+def _build_check_metric(details: dict[str, bool], unavailable_reason: str | None = None) -> dict:
+    """bool checklist を評価結果 dict へ変換する。"""
+    if unavailable_reason is not None:
+        return {
+            "score": -1.0,
+            "reason": unavailable_reason,
+        }
+
+    passed, total = _count_matches(details)
+    score = round(passed / total, 2) if total else -1.0
+    return {
+        "score": score,
+        "details": details,
+        "reason": f"{total} 項目中 {passed} 項目を満たしています",
+    }
+
+
+def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
+    """キーワード群のいずれかが含まれているかを返す。"""
+    lowered = text.lower()
+    return any(keyword.lower() in lowered for keyword in keywords)
+
+
+def _normalize_metric_score(score: float) -> float:
+    """0-1/1-5 のスコアを 1-5 表示へ正規化する。"""
+    if score < 0:
+        return -1.0
+    if score <= 1:
+        return round(score * 5, 2)
+    return round(score, 2)
+
+
+def _clone_metric(metric: dict, key: str) -> dict:
+    """UI 用ラベル付き metric を返す。"""
+    cloned = dict(metric)
+    score = cloned.get("score")
+    if isinstance(score, (int, float)):
+        cloned["score"] = _normalize_metric_score(float(score))
+    cloned["label"] = _METRIC_LABELS.get(key, key)
+    return cloned
+
+
+def _build_quality_summary(metrics: dict[str, dict], stable_message: str) -> tuple[str, list[str]]:
+    """quality category の summary と focus areas を返す。"""
+    valid_items = [
+        (key, metric)
+        for key, metric in metrics.items()
+        if isinstance(metric.get("score"), (int, float)) and float(metric["score"]) >= 0
+    ]
+    if not valid_items:
+        return "評価対象がまだ揃っていません。", []
+
+    ranked = sorted(valid_items, key=lambda item: float(item[1]["score"]))
+    focus_areas = [metric.get("label", key) for key, metric in ranked if float(metric["score"]) < 4.0][:3]
+    if not focus_areas:
+        return stable_message, []
+
+    labels = "、".join(str(label) for label in focus_areas)
+    return f"優先補強ポイント: {labels}", [str(label) for label in focus_areas]
+
+
+def _build_quality_category(metrics: dict[str, dict], stable_message: str) -> dict:
+    """評価カテゴリを構築する。"""
+    overall = _average(
+        [
+            float(metric["score"])
+            for metric in metrics.values()
+            if isinstance(metric.get("score"), (int, float)) and float(metric["score"]) >= 0
+        ]
+    )
+    summary, focus_areas = _build_quality_summary(metrics, stable_message)
+    return {
+        "overall": overall,
+        "summary": summary,
+        "focus_areas": focus_areas,
+        "metrics": metrics,
+    }
+
+
+def _build_legacy_conversion_metric(asset_metrics: dict[str, dict]) -> dict:
+    """旧 conversion_potential 互換の集約 metric を返す。"""
+    details: dict[str, bool] = {}
+    for metric in asset_metrics.values():
+        metric_details = metric.get("details")
+        if isinstance(metric_details, dict):
+            details.update({key: bool(value) for key, value in metric_details.items()})
+
+    if not details:
+        return {
+            "score": -1.0,
+            "reason": "ブローシャ HTML が未生成のため未評価です",
+        }
+
+    return _build_check_metric(details)
+
+
+def _extract_latest_evaluation_result_for_version(conversation: dict | None, artifact_version: int) -> dict | None:
+    """指定 version の最新評価結果を返す。"""
+    if not isinstance(conversation, dict):
+        return None
+
+    latest_result: dict | None = None
+    latest_round = -1
+    for event in conversation.get("messages", []):
+        if not isinstance(event, dict) or event.get("event") != "evaluation_result":
+            continue
+        data = event.get("data")
+        if not isinstance(data, dict):
+            continue
+        version = int(data.get("version", 0) or 0)
+        round_number = int(data.get("round", 0) or 0)
+        if version != artifact_version or round_number < latest_round:
+            continue
+        result = data.get("result")
+        if not isinstance(result, dict):
+            continue
+        latest_round = round_number
+        latest_result = result
+    return latest_result
+
+
+def _derive_plan_metrics_from_legacy_result(result: dict) -> dict[str, dict]:
+    """旧評価結果から plan track を復元する。"""
+    metrics: dict[str, dict] = {}
+
+    builtin = result.get("builtin")
+    if isinstance(builtin, dict) and "error" not in builtin:
+        for key in _PLAN_BUILTIN_METRICS:
+            metric = builtin.get(key)
+            if isinstance(metric, dict):
+                metrics[key] = _clone_metric(metric, key)
+
+    marketing = result.get("marketing_quality")
+    if isinstance(marketing, dict):
+        for key in _MARKETING_METRICS:
+            value = marketing.get(key)
+            if isinstance(value, (int, float)):
+                metrics[key] = _clone_metric({"score": float(value)}, key)
+
+    custom = result.get("custom")
+    if isinstance(custom, dict):
+        for key in _PLAN_CUSTOM_METRICS:
+            metric = custom.get(key)
+            if isinstance(metric, dict):
+                metrics[key] = _clone_metric(metric, key)
+
+    return metrics
+
+
+def _derive_asset_metrics_from_legacy_result(result: dict) -> dict[str, dict]:
+    """旧評価結果から asset track を復元する。"""
+    metrics: dict[str, dict] = {}
+    custom = result.get("custom")
+    if not isinstance(custom, dict):
+        return metrics
+
+    for key in _ASSET_CUSTOM_METRICS:
+        metric = custom.get(key)
+        if isinstance(metric, dict):
+            metrics[key] = _clone_metric(metric, key)
+
+    if not metrics:
+        conversion_metric = custom.get("conversion_potential")
+        if isinstance(conversion_metric, dict):
+            metrics["value_visibility"] = _clone_metric(conversion_metric, "value_visibility")
+
+    return metrics
+
+
+def _get_category_metrics_for_comparison(result: dict, category_key: str) -> dict[str, dict]:
+    """現行/旧 schema の両方から category metrics を抽出する。"""
+    category = result.get(category_key)
+    if isinstance(category, dict) and isinstance(category.get("metrics"), dict):
+        return {
+            key: dict(metric)
+            for key, metric in category["metrics"].items()
+            if isinstance(metric, dict)
+        }
+
+    if category_key == "plan_quality":
+        return _derive_plan_metrics_from_legacy_result(result)
+    if category_key == "asset_quality":
+        return _derive_asset_metrics_from_legacy_result(result)
+    return {}
+
+
+def _build_regression_guard(current_result: dict, previous_result: dict | None) -> dict:
+    """前 version 比の悪化・改善を検出する。"""
+    if not isinstance(previous_result, dict):
+        return {
+            "summary": "比較対象の評価結果がないため、悪化検知は未実行です。",
+            "has_regressions": False,
+            "degraded_metrics": [],
+            "improved_metrics": [],
+            "plan_overall_delta": 0.0,
+            "asset_overall_delta": 0.0,
+        }
+
+    degraded_metrics: list[dict] = []
+    improved_metrics: list[dict] = []
+    for area, category_key in (("plan", "plan_quality"), ("asset", "asset_quality")):
+        current_metrics = _get_category_metrics_for_comparison(current_result, category_key)
+        previous_metrics = _get_category_metrics_for_comparison(previous_result, category_key)
+        for key, current_metric in current_metrics.items():
+            previous_metric = previous_metrics.get(key)
+            if not previous_metric:
+                continue
+            current_score = float(current_metric.get("score", -1) or -1)
+            previous_score = float(previous_metric.get("score", -1) or -1)
+            if current_score < 0 or previous_score < 0:
+                continue
+            delta = round(current_score - previous_score, 2)
+            if delta <= -0.35:
+                degraded_metrics.append(
+                    {
+                        "key": key,
+                        "label": current_metric.get("label", _METRIC_LABELS.get(key, key)),
+                        "area": area,
+                        "current": current_score,
+                        "previous": previous_score,
+                        "delta": delta,
+                        "severity": "high" if delta <= -1.0 else "medium",
+                    }
+                )
+            elif delta >= 0.35:
+                improved_metrics.append(
+                    {
+                        "key": key,
+                        "label": current_metric.get("label", _METRIC_LABELS.get(key, key)),
+                        "area": area,
+                        "current": current_score,
+                        "previous": previous_score,
+                        "delta": delta,
+                        "severity": "high" if delta >= 1.0 else "medium",
+                    }
+                )
+
+    degraded_metrics.sort(key=lambda item: item["delta"])
+    improved_metrics.sort(key=lambda item: item["delta"], reverse=True)
+
+    current_plan = current_result.get("plan_quality", {}) if isinstance(current_result.get("plan_quality"), dict) else {}
+    previous_plan = previous_result.get("plan_quality", {}) if isinstance(previous_result.get("plan_quality"), dict) else {}
+    current_asset = current_result.get("asset_quality", {}) if isinstance(current_result.get("asset_quality"), dict) else {}
+    previous_asset = previous_result.get("asset_quality", {}) if isinstance(previous_result.get("asset_quality"), dict) else {}
+    plan_overall_delta = round(
+        float(current_plan.get("overall", -1) or -1) - float(previous_plan.get("overall", -1) or -1),
+        2,
+    ) if current_plan and previous_plan else 0.0
+    asset_overall_delta = round(
+        float(current_asset.get("overall", -1) or -1) - float(previous_asset.get("overall", -1) or -1),
+        2,
+    ) if current_asset and previous_asset else 0.0
+
+    if not degraded_metrics and not improved_metrics:
+        summary = "前 version と比較して大きな悪化はありません。"
+    else:
+        summary = f"悪化 {len(degraded_metrics)} 件 / 改善 {len(improved_metrics)} 件を検出しました。"
+
+    return {
+        "summary": summary,
+        "has_regressions": bool(degraded_metrics),
+        "degraded_metrics": degraded_metrics[:6],
+        "improved_metrics": improved_metrics[:6],
+        "plan_overall_delta": plan_overall_delta,
+        "asset_overall_delta": asset_overall_delta,
+    }
 
 
 async def _persist_evaluation_result(
@@ -117,24 +436,8 @@ def _evaluate_travel_law_compliance(response: str, html: str) -> dict:
 
 
 def _evaluate_brochure_accessibility(html: str) -> dict:
-    """コンバージョン期待度（code-based カスタム評価器）。
-
-    予約につながる要素（CTA・価格明確さ・限定感・特典）の有無をスコア化する。
-    """
-    text = html or ""
-    checks = {
-        "CTA（予約導線）": any(kw in text for kw in ["予約", "申込", "お問い合わせ", "電話", "URL", "QR"]),
-        "価格表示の明確さ": any(kw in text for kw in ["円", "税込", "～", "から"]),
-        "限定感の訴求": any(kw in text for kw in ["期間限定", "先着", "早割", "残りわずか", "特別"]),
-        "特典・付加価値": any(kw in text for kw in ["特典", "無料", "プレゼント", "ポイント", "割引"]),
-        "安心感の提供": any(kw in text for kw in ["キャンセル", "全額返金", "保証", "サポート", "添乗員"]),
-    }
-    score = sum(1 for v in checks.values() if v) / len(checks)
-    return {
-        "score": round(score, 2),
-        "details": checks,
-        "reason": f"{len(checks)} 項目中 {sum(1 for v in checks.values() if v)} 項目が含まれています",
-    }
+    """旧関数名互換。新しいアクセシビリティ指標を返す。"""
+    return _evaluate_accessibility_readiness(html)
 
 
 def _evaluate_plan_structure(response: str) -> dict:
@@ -162,6 +465,122 @@ def _evaluate_plan_structure(response: str) -> dict:
         "details": details,
         "reason": f"{len(required_sections)} 必須セクション中 {found} セクションが含まれています",
     }
+
+
+def _evaluate_senior_fit_readiness(response: str) -> dict:
+    """シニア向け企画としての適合性を確認する。"""
+    checks = {
+        "シニア対象の明示": _contains_any(response, ("シニア", "60代", "70代", "高齢")),
+        "移動負担の軽減": _contains_any(response, ("移動負担", "長距離徒歩", "階段を避け", "移動少なめ", "少人数バス", "貸切バス")),
+        "休憩設計": _contains_any(response, ("休憩", "トイレ休憩", "ゆったり", "無理のない")),
+        "案内・同行サポート": _contains_any(response, ("添乗", "案内スタッフ", "サポート", "ガイド")),
+        "バリアフリー配慮": _contains_any(response, ("バリアフリー", "ユニバーサル", "段差", "車いす")),
+        "雨天・安全代替": _contains_any(response, ("雨天時", "代替行程", "催行中止", "気象警報")),
+        "予約変更のしやすさ": _contains_any(response, ("予約変更", "変更期限", "電話", "Web", "問い合わせ")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_kpi_evidence_readiness(response: str) -> dict:
+    """KPI の数値根拠が十分かを確認する。"""
+    checks = {
+        "KPI セクション": _contains_any(response, ("KPI", "目標数値")),
+        "算定式または前提": _contains_any(response, ("算出", "前提", "想定", "平均単価", "×")),
+        "基準値・比較軸": _contains_any(response, ("前年比", "現状", "比較", "レビュー平均", "基準")),
+        "対象期間の明示": _contains_any(response, ("期間", "秋季", "出発日", "月次", "週次")),
+        "達成条件の具体化": _contains_any(response, ("充足率", "予約完了率", "変更率", "満足度")),
+        "根拠説明": _contains_any(response, ("根拠", "理由", "前段分析", "レビュー", "見込める")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_offer_specificity(response: str) -> dict:
+    """販売条件とオファー条件の具体性を確認する。"""
+    checks = {
+        "価格帯": _contains_any(response, ("円", "価格", "料金", "税込")),
+        "日程・ルート": _contains_any(response, ("日程", "ルート", "1日目", "2泊3日")),
+        "定員・限定条件": _contains_any(response, ("先着", "定員", "各出発日", "限定")),
+        "含まれるもの": _contains_any(response, ("含まれるもの", "宿泊", "朝食", "夕食")),
+        "含まれないもの": _contains_any(response, ("含まれないもの", "個人的費用", "交通費")),
+        "宿泊先・交通": _contains_any(response, ("宿泊先", "ホテル", "交通手段", "貸切バス")),
+        "取消条件": _contains_any(response, ("取消料", "キャンセル", "無連絡不参加")),
+        "主催者情報": _contains_any(response, ("主催旅行会社", "登録番号", "株式会社")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_cta_visibility(html: str) -> dict:
+    """予約導線の見えやすさを評価する。"""
+    if not html.strip():
+        return _build_check_metric({}, unavailable_reason="ブローシャ HTML が未生成のため未評価です")
+
+    checks = {
+        "予約導線": _contains_any(html, ("予約", "申込", "お申し込み", "お問い合わせ")),
+        "行動喚起文": _contains_any(html, ("今すぐ", "詳しくはこちら", "空席確認", "ご予約はこちら")),
+        "リンクまたはボタン": bool(re.search(r"<(a|button)\b", html, re.IGNORECASE)),
+        "連絡先または URL": _contains_any(html, ("http://", "https://", "電話", "メール", "QR")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_value_visibility(html: str) -> dict:
+    """価格・限定条件・特典の見えやすさを評価する。"""
+    if not html.strip():
+        return _build_check_metric({}, unavailable_reason="ブローシャ HTML が未生成のため未評価です")
+
+    checks = {
+        "価格表示": _contains_any(html, ("円", "税込", "価格", "料金")),
+        "日程表示": _contains_any(html, ("日程", "2泊3日", "3日間", "行程")),
+        "限定条件": _contains_any(html, ("期間限定", "先着", "限定", "残りわずか", "各出発日")),
+        "特典表示": _contains_any(html, ("特典", "無料", "プレゼント", "割引", "早割")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_trust_signal_presence(html: str) -> dict:
+    """安心材料の見えやすさを評価する。"""
+    if not html.strip():
+        return _build_check_metric({}, unavailable_reason="ブローシャ HTML が未生成のため未評価です")
+
+    checks = {
+        "安心訴求": _contains_any(html, ("安心", "サポート", "添乗", "案内付き")),
+        "取消・返金": _contains_any(html, ("取消", "キャンセル", "返金")),
+        "旅行条件導線": _contains_any(html, ("旅行条件", "取引条件", "契約")),
+        "問い合わせ先": _contains_any(html, ("電話", "お問い合わせ", "メール", "窓口")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_accessibility_readiness(html: str) -> dict:
+    """ブローシャ HTML のアクセシビリティ準備度を評価する。"""
+    if not html.strip():
+        return _build_check_metric({}, unavailable_reason="ブローシャ HTML が未生成のため未評価です")
+
+    image_tags = re.findall(r"<img\b[^>]*>", html, re.IGNORECASE)
+    images_with_alt = [tag for tag in image_tags if re.search(r"\balt\s*=\s*['\"][^'\"]*['\"]", tag, re.IGNORECASE)]
+    checks = {
+        "lang 属性": bool(re.search(r"<html[^>]+\blang\s*=", html, re.IGNORECASE)),
+        "画像 alt": not image_tags or len(images_with_alt) == len(image_tags),
+        "見出し構造": bool(re.search(r"<(h1|h2)\b", html, re.IGNORECASE)),
+        "リンク/ボタン導線": bool(re.search(r"<(a|button)\b", html, re.IGNORECASE)),
+        "フッターまたは注意書き": bool(re.search(r"<(footer|small)\b", html, re.IGNORECASE)) or _contains_any(html, ("旅行条件", "登録番号", "お問い合わせ")),
+    }
+    return _build_check_metric(checks)
+
+
+def _evaluate_disclosure_completeness(html: str) -> dict:
+    """成果物に必要な表示事項の網羅性を評価する。"""
+    if not html.strip():
+        return _build_check_metric({}, unavailable_reason="ブローシャ HTML が未生成のため未評価です")
+
+    checks = {
+        "旅行業登録番号": _contains_any(html, ("登録番号", "旅行業", "観光庁長官")),
+        "主催会社情報": _contains_any(html, ("主催", "会社", "株式会社")),
+        "取消料・条件": _contains_any(html, ("取消料", "キャンセル", "取引条件")),
+        "価格表示": _contains_any(html, ("円", "税込", "料金")),
+        "含まれるもの": _contains_any(html, ("含まれるもの", "宿泊", "食事", "交通")),
+    }
+    return _build_check_metric(checks)
 
 
 # --- Built-in 評価器（AI-assisted） ---
@@ -194,7 +613,6 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         from azure.ai.evaluation import (
             CoherenceEvaluator,
             FluencyEvaluator,
-            GroundednessEvaluator,
             RelevanceEvaluator,
             TaskAdherenceEvaluator,
         )
@@ -203,18 +621,13 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
             "relevance": RelevanceEvaluator(model_config=model_config, is_reasoning_model=True),
             "coherence": CoherenceEvaluator(model_config=model_config, is_reasoning_model=True),
             "fluency": FluencyEvaluator(model_config=model_config, is_reasoning_model=True),
-            "groundedness": GroundednessEvaluator(model_config=model_config, is_reasoning_model=True),
             "task_adherence": TaskAdherenceEvaluator(model_config=model_config, is_reasoning_model=True),
         }
 
         results: dict[str, dict] = {}
         for name, evaluator in evaluators.items():
             try:
-                # Groundedness は context パラメータが必要
-                if name == "groundedness":
-                    result = evaluator(query=query, response=response, context=response)
-                else:
-                    result = evaluator(query=query, response=response)
+                result = evaluator(query=query, response=response)
                 score = result.get(name, result.get(f"gpt_{name}"))
                 reason = result.get(f"{name}_reason", result.get(f"{name}_label", ""))
                 results[name] = {
@@ -309,6 +722,40 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
         return {"score": -1, "reason": str(exc)}
 
 
+def _build_plan_quality_result(builtin: dict, marketing_quality: dict, plan_custom_metrics: dict[str, dict]) -> dict:
+    """企画書品質レーンを構築する。"""
+    metrics: dict[str, dict] = {}
+
+    if isinstance(builtin, dict) and "error" not in builtin:
+        for key in _PLAN_BUILTIN_METRICS:
+            metric = builtin.get(key)
+            if isinstance(metric, dict):
+                metrics[key] = _clone_metric(metric, key)
+
+    if isinstance(marketing_quality, dict):
+        for key in _MARKETING_METRICS:
+            value = marketing_quality.get(key)
+            if isinstance(value, (int, float)):
+                metrics[key] = _clone_metric(
+                    {
+                        "score": float(value),
+                        "reason": str(marketing_quality.get("reason", "")),
+                    },
+                    key,
+                )
+
+    for key, metric in plan_custom_metrics.items():
+        metrics[key] = _clone_metric(metric, key)
+
+    return _build_quality_category(metrics, "主要な企画書観点は安定しています。")
+
+
+def _build_asset_quality_result(asset_custom_metrics: dict[str, dict]) -> dict:
+    """成果物品質レーンを構築する。"""
+    metrics = {key: _clone_metric(metric, key) for key, metric in asset_custom_metrics.items()}
+    return _build_quality_category(metrics, "主要な成果物観点は安定しています。")
+
+
 # --- Foundry ポータル連携（クラウド評価） ---
 
 
@@ -391,9 +838,25 @@ async def evaluate_artifacts(
     results: dict = {}
 
     # Code-based カスタム評価器（即座に実行）
+    plan_custom_metrics = {
+        "plan_structure_readiness": _evaluate_plan_structure(body.response),
+        "senior_fit_readiness": _evaluate_senior_fit_readiness(body.response),
+        "kpi_evidence_readiness": _evaluate_kpi_evidence_readiness(body.response),
+        "offer_specificity": _evaluate_offer_specificity(body.response),
+        "travel_law_compliance": _evaluate_travel_law_compliance(body.response, ""),
+    }
+    asset_custom_metrics = {
+        "cta_visibility": _evaluate_cta_visibility(body.html),
+        "value_visibility": _evaluate_value_visibility(body.html),
+        "trust_signal_presence": _evaluate_trust_signal_presence(body.html),
+        "disclosure_completeness": _evaluate_disclosure_completeness(body.html),
+        "accessibility_readiness": _evaluate_accessibility_readiness(body.html),
+    }
+
     results["custom"] = {
-        "travel_law_compliance": _evaluate_travel_law_compliance(body.response, body.html),
-        "conversion_potential": _evaluate_brochure_accessibility(body.html or body.response),
+        **plan_custom_metrics,
+        **asset_custom_metrics,
+        "conversion_potential": _build_legacy_conversion_metric(asset_custom_metrics),
     }
 
     # Built-in AI-assisted 評価器
@@ -401,6 +864,31 @@ async def evaluate_artifacts(
 
     # Prompt-based カスタム評価器（LLM ジャッジ）
     results["marketing_quality"] = await _run_marketing_quality_evaluator(body.query, body.response)
+
+    results["plan_quality"] = _build_plan_quality_result(
+        builtin=results["builtin"],
+        marketing_quality=results["marketing_quality"],
+        plan_custom_metrics=plan_custom_metrics,
+    )
+    results["asset_quality"] = _build_asset_quality_result(asset_custom_metrics)
+
+    previous_result = None
+    if body.conversation_id and body.artifact_version and body.artifact_version > 1:
+        try:
+            previous_conversation = await get_conversation(body.conversation_id)
+            previous_result = _extract_latest_evaluation_result_for_version(previous_conversation, body.artifact_version - 1)
+        except (ValueError, OSError) as exc:
+            logger.warning("前 version の評価結果取得に失敗: %s", exc)
+        except Exception as exc:
+            logger.exception("前 version の評価結果取得で予期しないエラー: %s", exc)
+
+    results["regression_guard"] = _build_regression_guard(results, previous_result)
+    results["legacy_overall"] = _average(
+        [
+            float(results["plan_quality"].get("overall", -1) or -1),
+            float(results["asset_quality"].get("overall", -1) or -1),
+        ]
+    )
 
     # Foundry ポータル連携はレスポンスを待たずに非同期実行する
     background_tasks.add_task(_log_to_foundry, body.query, body.response, results.copy())

@@ -5,8 +5,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from src import config as config_module
 from src.agents.data_search import search_customer_reviews, search_sales_history
 from src.agents.regulation_check import check_ng_expressions, check_travel_law_compliance, search_knowledge_base
+
+
+def _disable_azd_env(monkeypatch) -> None:
+    """テスト中は実マシンの azd env を参照しない。"""
+    monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
 
 
 class TestDataSearchTools:
@@ -151,6 +157,7 @@ class TestBrochureGenTools:
         """OpenAI クライアント未初期化時にフォールバック画像を返す"""
         import src.agents.brochure_gen as bg
 
+        _disable_azd_env(monkeypatch)
         # シングルトンをリセットして未初期化にする
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
@@ -175,6 +182,7 @@ class TestBrochureGenTools:
         """OpenAI クライアント未初期化時にフォールバック画像を返す"""
         import src.agents.brochure_gen as bg
 
+        _disable_azd_env(monkeypatch)
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
@@ -193,6 +201,7 @@ class TestBrochureGenTools:
         """twitter 指定は X 用バナーへ正規化される"""
         import src.agents.brochure_gen as bg
 
+        _disable_azd_env(monkeypatch)
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
@@ -246,6 +255,7 @@ class TestBrochureGenTools:
         """project_endpoint 未設定時は None を返す"""
         import src.agents.brochure_gen as bg
 
+        _disable_azd_env(monkeypatch)
         monkeypatch.setattr(bg, "_image_client_initialized", False)
         monkeypatch.setattr(bg, "_image_openai_client", None)
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
@@ -297,6 +307,7 @@ class TestBrochureGenTools:
 
         import src.agents.brochure_gen as bg
 
+        _disable_azd_env(monkeypatch)
         allowed_path = str(Path(bg.__file__).resolve().parent.parent.parent / "data" / "dummy.pdf")
         monkeypatch.delenv("CONTENT_UNDERSTANDING_ENDPOINT", raising=False)
         result = await bg.analyze_existing_brochure(allowed_path)

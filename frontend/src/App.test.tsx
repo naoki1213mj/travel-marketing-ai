@@ -441,7 +441,7 @@ describe('App', () => {
     expect(screen.getByText('Assets hint')).toBeInTheDocument()
   })
 
-  it('passes the full multi-turn user intent to the evaluation panel', () => {
+  it('passes only the original and latest user intent to the evaluation panel', () => {
     mockUseSSE.mockReturnValue({
       state: {
         status: 'completed',
@@ -485,6 +485,7 @@ describe('App', () => {
         },
         userMessages: [
           '北海道プランを改善して',
+          '価格を強く出しすぎないで',
           '価格訴求を控えて高級感を強めて',
         ],
       },

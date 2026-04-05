@@ -26,6 +26,7 @@ import { useI18n } from './hooks/useI18n'
 import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
 import { isApprovalResponseText, shouldHidePlanDuringPostApprovalRevision } from './lib/approval-flow'
+import { buildEvaluationQuery } from './lib/evaluation'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 import { buildPlanVersions } from './lib/plan-versions'
 
@@ -147,10 +148,7 @@ function App() {
     || state.approvalRequest?.plan_markdown
     || planContent?.content
     || ''
-  const evaluationQuery = state.userMessages
-    .map(message => message.trim())
-    .filter(Boolean)
-    .join('\n\n')
+  const evaluationQuery = buildEvaluationQuery(state.userMessages)
   const evaluationVersion = displayedPlan
     ? (isViewingCommittedPreview
         ? selectedPendingPreviewVersion ?? undefined

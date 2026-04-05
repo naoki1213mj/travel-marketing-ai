@@ -5,6 +5,7 @@ import asyncio
 import pytest
 from fastapi.testclient import TestClient
 
+from src import config as config_module
 from src.main import app
 
 client = TestClient(app)
@@ -13,6 +14,7 @@ client = TestClient(app)
 @pytest.fixture(autouse=True)
 def _force_mock_pipeline(monkeypatch):
     """テスト中は Azure 接続を無効化してモック経路を通す。"""
+    monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
 

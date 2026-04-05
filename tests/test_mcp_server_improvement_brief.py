@@ -31,7 +31,7 @@ def test_generate_improvement_brief_result_extracts_priority_and_must_keep() -> 
     )
 
     assert result["priority_issues"]
-    assert any(issue["label"] == "relevance" for issue in result["priority_issues"])
-    assert any(issue["label"] == "travel law compliance" for issue in result["priority_issues"])
+    assert any(issue["label"] == "依頼適合性" for issue in result["priority_issues"])
+    assert any(issue["label"] == "旅行業法準備度" for issue in result["priority_issues"])
     assert any("タイトル" in item for item in result["must_keep"])
     assert "維持すべき要素" in result["improvement_brief"]
