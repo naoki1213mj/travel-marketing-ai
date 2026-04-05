@@ -824,7 +824,7 @@ export function useSSE() {
         }
       })
     },
-  }), [])
+  }), [migrateCachedEvaluations])
 
   const sendMessage = useCallback(async (message: string) => {
     abortControllerRef.current?.abort()

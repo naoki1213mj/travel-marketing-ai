@@ -107,7 +107,10 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
   const rounds = useMemo(() => splitIntoRounds(textContents), [textContents])
   const totalRounds = rounds.length || 1
   const isMultiRound = totalRounds > 1
-  const latestRoundContents = rounds[rounds.length - 1]?.contents ?? []
+  const latestRoundContents = useMemo(
+    () => rounds[rounds.length - 1]?.contents ?? [],
+    [rounds],
+  )
 
   // 折りたたみ状態をステップから導出（最新ラウンドのみ適用）
   const autoCollapsed = useMemo(() => {

@@ -10,14 +10,14 @@ import {
     getLatestEvaluation,
     getPlanQuality,
     getRegressionGuard,
-  hasBuiltinMetrics,
-  shouldDisplayBuiltinMetric,
+    hasBuiltinMetrics,
+    shouldDisplayBuiltinMetric,
     type EvaluationDeltaItem,
     type EvaluationQualityTrack,
     type EvaluationRecord,
     type EvaluationResult,
     type RegressionGuard,
-    type RegressionMetricChange
+    type RegressionMetricChange,
 } from '../lib/evaluation'
 
 interface EvaluationPanelProps {
@@ -366,12 +366,18 @@ export function EvaluationPanel({
   }, [artifactVersion, availableComparisonVersions, defaultComparisonVersion])
 
   const selectedComparison = versionComparisons.find(item => item.version === comparisonVersion) ?? null
-  const comparisonPlanItems = result && selectedComparison
-    ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'plan')
-    : []
-  const comparisonAssetItems = result && selectedComparison
-    ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'asset')
-    : []
+  const comparisonPlanItems = useMemo(
+    () => (result && selectedComparison
+      ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'plan')
+      : []),
+    [result, selectedComparison],
+  )
+  const comparisonAssetItems = useMemo(
+    () => (result && selectedComparison
+      ? getEvaluationDeltaItems(result, selectedComparison.latest.result, 'asset')
+      : []),
+    [result, selectedComparison],
+  )
   const comparisonSummary = useMemo(
     () => summarizeComparison([...comparisonPlanItems, ...comparisonAssetItems]),
     [comparisonAssetItems, comparisonPlanItems],
