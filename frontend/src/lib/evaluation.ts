@@ -81,6 +81,7 @@ const PLAN_BUILTIN_KEYS = ['relevance', 'coherence', 'fluency'] as const
 const MARKETING_KEYS = ['appeal', 'differentiation', 'kpi_validity', 'brand_tone'] as const
 const LEGACY_PLAN_CUSTOM_KEYS = [
   'plan_structure_readiness',
+  'target_fit_readiness',
   'senior_fit_readiness',
   'kpi_evidence_readiness',
   'offer_specificity',
@@ -103,7 +104,8 @@ const LABELS: Record<string, string> = {
   kpi_validity: 'KPI 妥当性',
   brand_tone: 'ブランド一貫性',
   plan_structure_readiness: '企画書構成の完成度',
-  senior_fit_readiness: 'シニア適合性',
+  target_fit_readiness: 'ターゲット適合性',
+  senior_fit_readiness: 'ターゲット適合性',
   kpi_evidence_readiness: 'KPI 根拠の明確さ',
   offer_specificity: '募集条件の具体性',
   travel_law_compliance: '旅行業法準備度',
@@ -224,9 +226,14 @@ function deriveLegacyPlanTrack(result: EvaluationResult): EvaluationQualityTrack
     for (const key of LEGACY_PLAN_CUSTOM_KEYS) {
       const metric = result.custom[key]
       if (!metric || metric.score < 0) continue
-      metrics[key] = {
+      const normalizedKey = key === 'senior_fit_readiness' ? 'target_fit_readiness' : key
+      if (metrics[normalizedKey]) continue
+      metrics[normalizedKey] = {
         ...metric,
-        label: metricLabel(key, metric),
+        label: metricLabel(normalizedKey, {
+          ...metric,
+          label: normalizedKey === 'target_fit_readiness' ? LABELS.target_fit_readiness : metric.label,
+        }),
         score: normalizeScore(metric.score),
       }
     }

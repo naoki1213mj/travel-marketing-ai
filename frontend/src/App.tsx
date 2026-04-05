@@ -76,11 +76,8 @@ function App() {
   const isCompleted = state.status === 'completed'
   const elapsed = useElapsedTime(isRunning, state.agentProgress?.step ?? 0)
   const selectedPendingPreviewVersion = state.pendingVersion
-    ? pendingPreviewSelection?.pendingVersion === state.pendingVersion.version
-      ? pendingPreviewSelection.committedVersion
-      : state.versions.length > 0
-        ? state.versions.length
-        : null
+    && pendingPreviewSelection?.pendingVersion === state.pendingVersion.version
+    ? pendingPreviewSelection.committedVersion
     : null
   const previewSnapshot = selectedPendingPreviewVersion && state.pendingVersion
     ? state.versions[selectedPendingPreviewVersion - 1] ?? null

@@ -57,6 +57,23 @@ def test_evaluate_plan_structure_detects_core_sections():
     assert all(result["details"].values())
 
 
+def test_evaluate_target_fit_readiness_handles_general_audience_briefs():
+    result = evaluate_module._evaluate_target_fit_readiness(
+        "春の沖縄で家族旅行プランを企画したい",
+        """
+        # 春の沖縄ファミリープラン
+        ターゲット: 小学生の子どもがいるファミリー層
+        プラン概要: 2泊3日で移動負担を抑えつつ体験を楽しめる行程
+        価格帯: 89,000円（税込）
+        含まれるもの: 宿泊、朝食、現地サポート
+        問い合わせ: 専用窓口で予約変更も案内
+        """,
+    )
+
+    assert result["score"] == 1.0
+    assert result["details"]["依頼ターゲットとの整合"] is True
+
+
 def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
     calls: list[tuple[str, str, dict]] = []
 
@@ -101,6 +118,8 @@ def test_evaluate_endpoint_logs_to_foundry_in_background(monkeypatch):
     assert payload["marketing_quality"]["overall"] == 4.0
     assert payload["plan_quality"]["metrics"]["relevance"]["score"] == 4.0
     assert payload["asset_quality"]["metrics"]["cta_visibility"]["score"] > 0
+    assert payload["custom"]["target_fit_readiness"]["score"] >= 0
+    assert "senior_fit_readiness" not in payload["custom"]
     assert payload["custom"]["conversion_potential"]["score"] > 0
     assert payload["legacy_overall"] > 0
     assert payload["regression_guard"]["has_regressions"] is False
@@ -166,6 +185,7 @@ def test_evaluate_endpoint_persists_grouped_result_for_version(monkeypatch):
     assert "plan_quality" in persisted
     assert "asset_quality" in persisted
     assert "regression_guard" in persisted
+    assert "target_fit_readiness" in persisted["custom"]
     assert persisted["custom"]["conversion_potential"]["score"] >= 0
 
 

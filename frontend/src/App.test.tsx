@@ -133,7 +133,7 @@ vi.mock('./components/VoiceInput', () => ({ VoiceInput: () => null }))
 vi.mock('./components/WorkflowAccordion', () => ({ WorkflowAccordion: () => null }))
 
 describe('App', () => {
-  it('shows the selected committed version evaluation while a newer version is generating', () => {
+  it('keeps the live pending version selected while a newer version is generating', () => {
     mockUseSSE.mockReturnValue({
       state: {
         status: 'running',
@@ -206,6 +206,10 @@ describe('App', () => {
     })
 
     render(<App />)
+
+    expect(screen.queryByTestId('evaluation-panel')).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'v1' }))
 
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
@@ -288,7 +292,7 @@ describe('App', () => {
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')
   })
 
-  it('keeps the previous committed version visible during second manager approval', () => {
+  it('shows the in-flight plan during second manager approval by default', () => {
     mockUseSSE.mockReturnValue({
       state: {
         status: 'approval',
@@ -373,6 +377,11 @@ describe('App', () => {
     })
 
     render(<App />)
+
+    expect(screen.queryByTestId('evaluation-panel')).toBeNull()
+    expect(screen.getAllByText('# Plan v2').length).toBeGreaterThan(0)
+
+    fireEvent.click(screen.getByRole('button', { name: 'v1' }))
 
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-version', '1')
     expect(screen.getByTestId('evaluation-panel')).toHaveAttribute('data-evaluations', '1')

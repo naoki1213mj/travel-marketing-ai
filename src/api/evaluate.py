@@ -24,11 +24,14 @@ _PLAN_BUILTIN_METRICS = ("relevance", "coherence", "fluency")
 _MARKETING_METRICS = ("appeal", "differentiation", "kpi_validity", "brand_tone")
 _PLAN_CUSTOM_METRICS = (
     "plan_structure_readiness",
-    "senior_fit_readiness",
+    "target_fit_readiness",
     "kpi_evidence_readiness",
     "offer_specificity",
     "travel_law_compliance",
 )
+_LEGACY_PLAN_CUSTOM_METRIC_ALIASES = {
+    "senior_fit_readiness": "target_fit_readiness",
+}
 _ASSET_CUSTOM_METRICS = (
     "cta_visibility",
     "value_visibility",
@@ -45,7 +48,8 @@ _METRIC_LABELS = {
     "kpi_validity": "KPI 妥当性",
     "brand_tone": "ブランド一貫性",
     "plan_structure_readiness": "企画書構成の完成度",
-    "senior_fit_readiness": "シニア適合性",
+    "target_fit_readiness": "ターゲット適合性",
+    "senior_fit_readiness": "ターゲット適合性",
     "kpi_evidence_readiness": "KPI 根拠の明確さ",
     "offer_specificity": "募集条件の具体性",
     "travel_law_compliance": "旅行業法準備度",
@@ -103,6 +107,70 @@ def _contains_any(text: str, keywords: tuple[str, ...]) -> bool:
     """キーワード群のいずれかが含まれているかを返す。"""
     lowered = text.lower()
     return any(keyword.lower() in lowered for keyword in keywords)
+
+
+_TARGET_SEGMENT_HINTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "family": (
+        ("家族", "ファミリー", "親子", "子連れ", "三世代"),
+        ("家族", "ファミリー", "親子", "子ども", "お子さま", "三世代", "夏休み", "安心"),
+    ),
+    "senior": (
+        ("シニア", "60代", "70代", "高齢", "熟年"),
+        ("シニア", "ゆったり", "無理のない", "添乗", "サポート", "バリアフリー", "休憩"),
+    ),
+    "couple": (
+        ("カップル", "夫婦", "記念日", "ハネムーン", "新婚"),
+        ("カップル", "夫婦", "記念日", "二人", "ロマンチック", "夜景", "特別な時間"),
+    ),
+    "youth": (
+        ("学生", "若者", "20代", "30代", "女子旅", "Z世代"),
+        ("学生", "若者", "女子旅", "SNS", "映え", "アクティブ", "気軽"),
+    ),
+    "solo": (
+        ("一人旅", "ひとり旅", "ソロ"),
+        ("一人旅", "ひとり", "自由行動", "気まま", "自分時間", "気軽"),
+    ),
+    "luxury": (
+        ("高級", "ラグジュアリー", "富裕層", "プレミアム", "ハイエンド"),
+        ("高級", "ラグジュアリー", "上質", "プレミアム", "特別", "限定", "専用"),
+    ),
+    "inbound": (
+        ("訪日", "インバウンド", "海外", "外国人"),
+        ("訪日", "インバウンド", "多言語", "英語", "外国人", "Wi-Fi", "送迎"),
+    ),
+}
+
+
+def _detect_target_segment(text: str) -> str | None:
+    """依頼テキストから主要ターゲットセグメントを推定する。"""
+    for segment, (query_keywords, _) in _TARGET_SEGMENT_HINTS.items():
+        if _contains_any(text, query_keywords):
+            return segment
+    return None
+
+
+def _matches_target_segment(segment: str | None, response: str) -> bool:
+    """企画書が依頼ターゲットに沿った訴求を含むかを判定する。"""
+    if segment is None:
+        return _contains_any(
+            response,
+            (
+                "ターゲット",
+                "ペルソナ",
+                "向け",
+                "家族",
+                "カップル",
+                "夫婦",
+                "学生",
+                "一人旅",
+                "女子旅",
+                "訪日",
+                "シニア",
+            ),
+        )
+
+    _, response_keywords = _TARGET_SEGMENT_HINTS[segment]
+    return _contains_any(response, response_keywords)
 
 
 def _normalize_metric_score(score: float) -> float:
@@ -228,6 +296,13 @@ def _derive_plan_metrics_from_legacy_result(result: dict) -> dict[str, dict]:
             if isinstance(metric, dict):
                 metrics[key] = _clone_metric(metric, key)
 
+        for legacy_key, normalized_key in _LEGACY_PLAN_CUSTOM_METRIC_ALIASES.items():
+            if normalized_key in metrics:
+                continue
+            metric = custom.get(legacy_key)
+            if isinstance(metric, dict):
+                metrics[normalized_key] = _clone_metric(metric, normalized_key)
+
     return metrics
 
 
@@ -255,11 +330,7 @@ def _get_category_metrics_for_comparison(result: dict, category_key: str) -> dic
     """現行/旧 schema の両方から category metrics を抽出する。"""
     category = result.get(category_key)
     if isinstance(category, dict) and isinstance(category.get("metrics"), dict):
-        return {
-            key: dict(metric)
-            for key, metric in category["metrics"].items()
-            if isinstance(metric, dict)
-        }
+        return {key: dict(metric) for key, metric in category["metrics"].items() if isinstance(metric, dict)}
 
     if category_key == "plan_quality":
         return _derive_plan_metrics_from_legacy_result(result)
@@ -322,18 +393,34 @@ def _build_regression_guard(current_result: dict, previous_result: dict | None) 
     degraded_metrics.sort(key=lambda item: item["delta"])
     improved_metrics.sort(key=lambda item: item["delta"], reverse=True)
 
-    current_plan = current_result.get("plan_quality", {}) if isinstance(current_result.get("plan_quality"), dict) else {}
-    previous_plan = previous_result.get("plan_quality", {}) if isinstance(previous_result.get("plan_quality"), dict) else {}
-    current_asset = current_result.get("asset_quality", {}) if isinstance(current_result.get("asset_quality"), dict) else {}
-    previous_asset = previous_result.get("asset_quality", {}) if isinstance(previous_result.get("asset_quality"), dict) else {}
-    plan_overall_delta = round(
-        float(current_plan.get("overall", -1) or -1) - float(previous_plan.get("overall", -1) or -1),
-        2,
-    ) if current_plan and previous_plan else 0.0
-    asset_overall_delta = round(
-        float(current_asset.get("overall", -1) or -1) - float(previous_asset.get("overall", -1) or -1),
-        2,
-    ) if current_asset and previous_asset else 0.0
+    current_plan = (
+        current_result.get("plan_quality", {}) if isinstance(current_result.get("plan_quality"), dict) else {}
+    )
+    previous_plan = (
+        previous_result.get("plan_quality", {}) if isinstance(previous_result.get("plan_quality"), dict) else {}
+    )
+    current_asset = (
+        current_result.get("asset_quality", {}) if isinstance(current_result.get("asset_quality"), dict) else {}
+    )
+    previous_asset = (
+        previous_result.get("asset_quality", {}) if isinstance(previous_result.get("asset_quality"), dict) else {}
+    )
+    plan_overall_delta = (
+        round(
+            float(current_plan.get("overall", -1) or -1) - float(previous_plan.get("overall", -1) or -1),
+            2,
+        )
+        if current_plan and previous_plan
+        else 0.0
+    )
+    asset_overall_delta = (
+        round(
+            float(current_asset.get("overall", -1) or -1) - float(previous_asset.get("overall", -1) or -1),
+            2,
+        )
+        if current_asset and previous_asset
+        else 0.0
+    )
 
     if not degraded_metrics and not improved_metrics:
         summary = "前 version と比較して大きな悪化はありません。"
@@ -467,16 +554,17 @@ def _evaluate_plan_structure(response: str) -> dict:
     }
 
 
-def _evaluate_senior_fit_readiness(response: str) -> dict:
-    """シニア向け企画としての適合性を確認する。"""
+def _evaluate_target_fit_readiness(query: str, response: str) -> dict:
+    """依頼ターゲットに対する企画の適合性を確認する。"""
+    segment = _detect_target_segment(query)
     checks = {
-        "シニア対象の明示": _contains_any(response, ("シニア", "60代", "70代", "高齢")),
-        "移動負担の軽減": _contains_any(response, ("移動負担", "長距離徒歩", "階段を避け", "移動少なめ", "少人数バス", "貸切バス")),
-        "休憩設計": _contains_any(response, ("休憩", "トイレ休憩", "ゆったり", "無理のない")),
-        "案内・同行サポート": _contains_any(response, ("添乗", "案内スタッフ", "サポート", "ガイド")),
-        "バリアフリー配慮": _contains_any(response, ("バリアフリー", "ユニバーサル", "段差", "車いす")),
-        "雨天・安全代替": _contains_any(response, ("雨天時", "代替行程", "催行中止", "気象警報")),
-        "予約変更のしやすさ": _contains_any(response, ("予約変更", "変更期限", "電話", "Web", "問い合わせ")),
+        "ターゲットの明示": _contains_any(response, ("ターゲット", "ペルソナ", "向け")),
+        "依頼ターゲットとの整合": _matches_target_segment(segment, response),
+        "提供価値の明示": _contains_any(response, ("魅力", "価値", "メリット", "特典", "体験", "安心", "快適", "上質")),
+        "条件の具体性": _contains_any(response, ("日程", "価格", "料金", "予約", "定員", "対象", "含まれるもの")),
+        "サポート/注意事項": _contains_any(
+            response, ("サポート", "案内", "問い合わせ", "注意", "キャンセル", "取消", "安心")
+        ),
     }
     return _build_check_metric(checks)
 
@@ -563,7 +651,8 @@ def _evaluate_accessibility_readiness(html: str) -> dict:
         "画像 alt": not image_tags or len(images_with_alt) == len(image_tags),
         "見出し構造": bool(re.search(r"<(h1|h2)\b", html, re.IGNORECASE)),
         "リンク/ボタン導線": bool(re.search(r"<(a|button)\b", html, re.IGNORECASE)),
-        "フッターまたは注意書き": bool(re.search(r"<(footer|small)\b", html, re.IGNORECASE)) or _contains_any(html, ("旅行条件", "登録番号", "お問い合わせ")),
+        "フッターまたは注意書き": bool(re.search(r"<(footer|small)\b", html, re.IGNORECASE))
+        or _contains_any(html, ("旅行条件", "登録番号", "お問い合わせ")),
     }
     return _build_check_metric(checks)
 
@@ -840,7 +929,7 @@ async def evaluate_artifacts(
     # Code-based カスタム評価器（即座に実行）
     plan_custom_metrics = {
         "plan_structure_readiness": _evaluate_plan_structure(body.response),
-        "senior_fit_readiness": _evaluate_senior_fit_readiness(body.response),
+        "target_fit_readiness": _evaluate_target_fit_readiness(body.query, body.response),
         "kpi_evidence_readiness": _evaluate_kpi_evidence_readiness(body.response),
         "offer_specificity": _evaluate_offer_specificity(body.response),
         "travel_law_compliance": _evaluate_travel_law_compliance(body.response, ""),
@@ -876,7 +965,9 @@ async def evaluate_artifacts(
     if body.conversation_id and body.artifact_version and body.artifact_version > 1:
         try:
             previous_conversation = await get_conversation(body.conversation_id)
-            previous_result = _extract_latest_evaluation_result_for_version(previous_conversation, body.artifact_version - 1)
+            previous_result = _extract_latest_evaluation_result_for_version(
+                previous_conversation, body.artifact_version - 1
+            )
         except (ValueError, OSError) as exc:
             logger.warning("前 version の評価結果取得に失敗: %s", exc)
         except Exception as exc:

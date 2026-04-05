@@ -9,6 +9,12 @@ const evaluationV1 = {
   round: 1,
   createdAt: '2026-04-02T00:00:00+00:00',
   result: {
+    builtin: {
+      relevance: { score: 4.5, label: 'Relevance', reason: 'good' },
+      coherence: { score: 4.2, label: 'Coherence', reason: 'clear' },
+      fluency: { score: 4.1, label: 'Fluency', reason: 'smooth' },
+      task_adherence: { score: 4.0, label: 'Task Adherence', reason: 'hidden' },
+    },
     plan_quality: {
       overall: 4.1,
       summary: 'Plan summary v1',
@@ -22,7 +28,7 @@ const evaluationV1 = {
         kpi_validity: { score: 4.0, label: 'KPI Validity', reason: 'reasonable' },
         brand_tone: { score: 4.3, label: 'Brand Consistency', reason: 'steady tone' },
         plan_structure_readiness: { score: 4.4, label: 'Plan Structure Readiness', details: { title: true, kpi: true } },
-        senior_fit_readiness: { score: 4.0, label: 'Senior Fit Readiness' },
+        target_fit_readiness: { score: 4.0, label: 'Target Fit Readiness' },
         kpi_evidence_readiness: { score: 3.4, label: 'KPI Evidence Readiness', details: { assumptions: true, baseline: false } },
         offer_specificity: { score: 4.1, label: 'Offer Specificity' },
         travel_law_compliance: { score: 4.8, label: 'Travel Law', details: { disclaimer: true, fee_display: true } },
@@ -57,6 +63,12 @@ const evaluationV2 = {
   round: 2,
   createdAt: '2026-04-02T02:00:00+00:00',
   result: {
+    builtin: {
+      relevance: { score: 4.8, label: 'Relevance', reason: 'great' },
+      coherence: { score: 4.6, label: 'Coherence', reason: 'strong flow' },
+      fluency: { score: 4.5, label: 'Fluency', reason: 'sharp copy' },
+      task_adherence: { score: 4.4, label: 'Task Adherence', reason: 'hidden' },
+    },
     plan_quality: {
       overall: 4.6,
       summary: 'Plan summary v2',
@@ -70,7 +82,7 @@ const evaluationV2 = {
         kpi_validity: { score: 4.4, label: 'KPI Validity', reason: 'better grounded' },
         brand_tone: { score: 4.5, label: 'Brand Consistency', reason: 'consistent' },
         plan_structure_readiness: { score: 4.7, label: 'Plan Structure Readiness', details: { title: true, kpi: true } },
-        senior_fit_readiness: { score: 4.5, label: 'Senior Fit Readiness' },
+        target_fit_readiness: { score: 4.5, label: 'Target Fit Readiness' },
         kpi_evidence_readiness: { score: 4.1, label: 'KPI Evidence Readiness', details: { assumptions: true, baseline: true } },
         offer_specificity: { score: 4.4, label: 'Offer Specificity' },
         travel_law_compliance: { score: 5.0, label: 'Travel Law', details: { disclaimer: true, fee_display: true } },
@@ -205,6 +217,7 @@ describe('EvaluationPanel', () => {
     'eval.compare.degraded': 'Regressed',
     'eval.compare.unchanged': 'Unchanged',
     'eval.compare.detail_changes': 'Checks that changed state',
+    'eval.builtin': 'AI Quality Metrics',
     'eval.plan_quality': 'Plan Quality',
     'eval.asset_quality': 'Asset Quality',
     'eval.regression_guard': 'Regression Guard',
@@ -227,7 +240,8 @@ describe('EvaluationPanel', () => {
     'eval.kpi_validity': 'KPI Validity',
     'eval.brand_tone': 'Brand Consistency',
     'eval.plan_structure_readiness': 'Plan Structure Readiness',
-    'eval.senior_fit_readiness': 'Senior Fit Readiness',
+    'eval.target_fit_readiness': 'Target Fit Readiness',
+    'eval.senior_fit_readiness': 'Target Fit Readiness',
     'eval.kpi_evidence_readiness': 'KPI Evidence Readiness',
     'eval.offer_specificity': 'Offer Specificity',
     'eval.travel_law_compliance': 'Travel Law',
@@ -305,6 +319,7 @@ describe('EvaluationPanel', () => {
       />,
     )
 
+    expect(screen.getByText('AI Quality Metrics')).toBeInTheDocument()
     expect(screen.getAllByText('Asset summary v1').length).toBeGreaterThan(0)
     expect(screen.getByText('Plan Quality: KPI Evidence Readiness')).toBeInTheDocument()
 
@@ -363,7 +378,7 @@ describe('EvaluationPanel', () => {
     })
   })
 
-  it('derives grouped comparison from legacy evaluations and hides task adherence', () => {
+  it('derives grouped comparison from legacy evaluations and restores builtin metrics', () => {
     render(
       <EvaluationPanel
         query="q"
@@ -375,13 +390,15 @@ describe('EvaluationPanel', () => {
         t={t}
       />,
     )
+          expect(screen.getByText('AI Quality Metrics')).toBeInTheDocument()
 
     expect(screen.getByText('Comparing v2 against v1')).toBeInTheDocument()
     expect(screen.getByText('Current version')).toBeInTheDocument()
     expect(screen.getByText('Compared version')).toBeInTheDocument()
     expect(screen.getAllByText(/Improved/).length).toBeGreaterThan(0)
+          expect(screen.getAllByText('ターゲット適合性').length).toBeGreaterThan(0)
     expect(screen.getByText('Checks that changed state')).toBeInTheDocument()
-    expect(screen.getAllByText('依頼適合性').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Relevance').length).toBeGreaterThan(0)
     expect(screen.getAllByText(/fee_display/).length).toBeGreaterThan(0)
     expect(screen.queryByText('Task Adherence')).toBeNull()
   })

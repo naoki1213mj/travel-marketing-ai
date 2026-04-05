@@ -10,6 +10,8 @@ import {
     getLatestEvaluation,
     getPlanQuality,
     getRegressionGuard,
+  hasBuiltinMetrics,
+  shouldDisplayBuiltinMetric,
     type EvaluationDeltaItem,
     type EvaluationQualityTrack,
     type EvaluationRecord,
@@ -40,12 +42,13 @@ interface ComparisonSummary {
   assetOverall: number
 }
 
+const BUILTIN_METRIC_ORDER = ['relevance', 'coherence', 'fluency'] as const
+
 const PLAN_GROUPS = [
-  { titleKey: 'eval.ai_review', keys: ['relevance', 'coherence', 'fluency'] },
   { titleKey: 'eval.marketing_review', keys: ['appeal', 'differentiation', 'kpi_validity', 'brand_tone'] },
   {
     titleKey: 'eval.execution_readiness',
-    keys: ['plan_structure_readiness', 'senior_fit_readiness', 'kpi_evidence_readiness', 'offer_specificity', 'travel_law_compliance'],
+    keys: ['plan_structure_readiness', 'target_fit_readiness', 'kpi_evidence_readiness', 'offer_specificity', 'travel_law_compliance'],
   },
 ]
 
@@ -258,6 +261,11 @@ function buildComparisonSummaries(versions: ArtifactSnapshot[]): ComparisonSumma
     .filter((item): item is ComparisonSummary => item !== null)
 }
 
+function getBuiltinMetricRank(metricKey: string): number {
+  const index = BUILTIN_METRIC_ORDER.indexOf(metricKey as (typeof BUILTIN_METRIC_ORDER)[number])
+  return index === -1 ? BUILTIN_METRIC_ORDER.length : index
+}
+
 function renderTrackGroups(
   track: EvaluationQualityTrack | null,
   previousTrack: EvaluationQualityTrack | null,
@@ -335,6 +343,14 @@ export function EvaluationPanel({
   const assetTrack = result ? getAssetQuality(result) : null
   const previousAssetTrack = previousResult ? getAssetQuality(previousResult) : null
   const regressionGuard = result ? getRegressionGuard(result) : null
+  const builtinMetrics = result && hasBuiltinMetrics(result.builtin)
+    ? Object.entries(result.builtin)
+        .filter(([key]) => shouldDisplayBuiltinMetric(key))
+        .sort((left, right) => getBuiltinMetricRank(left[0]) - getBuiltinMetricRank(right[0]))
+    : []
+  const previousBuiltinMetrics = previousResult && hasBuiltinMetrics(previousResult.builtin)
+    ? previousResult.builtin
+    : undefined
 
   const versionComparisons = buildComparisonSummaries(versions)
   const availableComparisonVersions = versionComparisons.map(item => item.version)
@@ -475,6 +491,28 @@ export function EvaluationPanel({
               </div>
             </div>
           ) : null}
+
+          {builtinMetrics.length > 0 && (
+            <div className="space-y-4 rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-medium text-[var(--text-secondary)]">{t('eval.builtin')}</p>
+                  <p className="mt-1 text-xs leading-5 text-[var(--text-secondary)]">{t('eval.ai_review')}</p>
+                </div>
+              </div>
+              <div className="grid gap-3 xl:grid-cols-3">
+                {builtinMetrics.map(([key, metric]) => (
+                  <MetricCard
+                    key={`builtin-${key}`}
+                    label={metric.label || t(`eval.${key}`) || key}
+                    score={metric.score}
+                    previous={previousBuiltinMetrics?.[key]?.score}
+                    reason={metric.reason}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           {versionComparisons.length > 1 && artifactVersion && (
             <div className="rounded-3xl border border-[var(--panel-border)] bg-[var(--panel-bg)] p-4">
