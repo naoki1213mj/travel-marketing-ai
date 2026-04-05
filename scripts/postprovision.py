@@ -22,6 +22,7 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
@@ -157,7 +158,14 @@ def _rest_call(
 ) -> dict | None:
     """Azure REST API を呼び出すヘルパー"""
     if token is None:
-        token = _get_token(scope)
+        try:
+            token = _get_token(scope)
+        except ClientAuthenticationError as exc:
+            logger.warning("REST %s %s → token acquisition failed: %s", method, url, exc)
+            return None
+        except (OSError, ValueError, RuntimeError) as exc:
+            logger.warning("REST %s %s → token acquisition failed: %s", method, url, exc)
+            return None
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -458,7 +466,9 @@ def setup_improvement_mcp(subscription_id: str, rg: str, apim_name: str, env: di
     location = _resolve_resource_group_location(function_app_rg, env.get("AZURE_LOCATION", ""))
 
     deployed = False
+    management_token: str | None = None
     if storage_account_name and location:
+        management_token = _get_token()
         deployed = deploy_improvement_mcp_function(
             resource_group=function_app_rg,
             location=location,
@@ -482,6 +492,7 @@ def setup_improvement_mcp(subscription_id: str, rg: str, apim_name: str, env: di
         function_app_name=function_app_name,
         function_app_rg=function_app_rg,
         readiness_attempts=readiness_attempts,
+        token=management_token,
     )
     return configured
 
@@ -510,9 +521,10 @@ def _get_function_app_mcp_details(
     subscription_id: str,
     rg: str,
     function_app_name: str,
+    token: str | None = None,
 ) -> tuple[str, str] | None:
     """Function App の公開 URL と mcp_extension system key を返す。"""
-    site = _rest_call(_function_app_resource_url(subscription_id, rg, function_app_name))
+    site = _rest_call(_function_app_resource_url(subscription_id, rg, function_app_name), token=token)
     properties = site.get("properties") if isinstance(site, dict) else None
     if not isinstance(properties, dict):
         logger.warning("Function App の取得に失敗しました: %s", function_app_name)
@@ -526,6 +538,7 @@ def _get_function_app_mcp_details(
     keys = _rest_call(
         _function_app_resource_url(subscription_id, rg, function_app_name, "/host/default/listKeys"),
         method="POST",
+        token=token,
     )
     system_keys = keys.get("systemKeys") if isinstance(keys, dict) else None
     if not isinstance(system_keys, dict):
@@ -546,11 +559,12 @@ def _wait_for_function_app_mcp_details(
     function_app_name: str,
     attempts: int,
     delay_seconds: int,
+    token: str | None = None,
 ) -> tuple[str, str] | None:
     """Function App の MCP 詳細が利用可能になるまで待機する。"""
     total_attempts = max(1, attempts)
     for attempt in range(1, total_attempts + 1):
-        function_details = _get_function_app_mcp_details(subscription_id, rg, function_app_name)
+        function_details = _get_function_app_mcp_details(subscription_id, rg, function_app_name, token=token)
         if function_details is not None:
             return function_details
         if attempt >= total_attempts:
@@ -574,6 +588,7 @@ def configure_improvement_mcp(
     *,
     readiness_attempts: int = 1,
     readiness_delay_seconds: int = _IMPROVEMENT_MCP_READY_DELAY_SECONDS,
+    token: str | None = None,
 ) -> bool:
     """Function App を backend にした improvement-mcp API を APIM へ構成する。"""
     function_details = _wait_for_function_app_mcp_details(
@@ -582,6 +597,7 @@ def configure_improvement_mcp(
         function_app_name,
         attempts=readiness_attempts,
         delay_seconds=readiness_delay_seconds,
+        token=token,
     )
     if function_details is None:
         return False
@@ -598,6 +614,7 @@ def configure_improvement_mcp(
                 "secret": True,
             }
         },
+        token=token,
     )
     if named_value_result is None:
         logger.warning("improvement-mcp 用 named value の構成に失敗しました")
@@ -613,6 +630,7 @@ def configure_improvement_mcp(
                 "credentials": {"header": {"x-functions-key": [f"{{{{{_IMPROVEMENT_MCP_NAMED_VALUE}}}}}"]}},
             }
         },
+        token=token,
     )
     if backend_result is None:
         logger.warning("improvement-mcp backend の構成に失敗しました")
@@ -637,6 +655,7 @@ def configure_improvement_mcp(
                 "mcpProperties": {"endpoints": {"mcp": {"uriTemplate": "/runtime/webhooks/mcp"}}},
             }
         },
+        token=token,
     )
     if api_result is None:
         logger.warning("improvement-mcp API の構成に失敗しました")
@@ -656,6 +675,7 @@ def configure_improvement_mcp(
                 "value": _IMPROVEMENT_MCP_POLICY_XML,
             }
         },
+        token=token,
     )
     if policy_result is None:
         logger.warning("improvement-mcp policy の構成に失敗しました")

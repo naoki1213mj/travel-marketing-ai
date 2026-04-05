@@ -1,6 +1,9 @@
 """アプリケーション設定。TypedDict + load_settings パターンで環境変数をロードする。"""
 
 import os
+import shutil
+import subprocess
+from functools import lru_cache
 from typing import TypedDict
 
 from dotenv import load_dotenv
@@ -63,18 +66,64 @@ _DEFAULTS: dict[str, str] = {
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}
 
 
+@lru_cache(maxsize=1)
+def _get_azd_env_values() -> dict[str, str]:
+    """azd env get-values の結果を 1 回だけ読み込む。"""
+    azd_path = next(
+        (resolved for candidate in ("azd", "azd.exe", "azd.cmd", "azd.bat") if (resolved := shutil.which(candidate))),
+        None,
+    )
+    if not azd_path:
+        return {}
+
+    try:
+        result = subprocess.run(
+            [azd_path, "env", "get-values"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except OSError, subprocess.TimeoutExpired:
+        return {}
+
+    if result.returncode != 0:
+        return {}
+
+    env: dict[str, str] = {}
+    for line in result.stdout.strip().splitlines():
+        if "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip().strip('"')
+    return env
+
+
+def _resolve_setting(setting_key: str, env_keys: tuple[str, ...], azd_env: dict[str, str]) -> str:
+    """process env → azd env → default の順で設定値を解決する。"""
+    for name in env_keys:
+        value = os.environ.get(name, "")
+        if value:
+            return value
+    for name in env_keys:
+        value = azd_env.get(name, "")
+        if value:
+            return value
+    return _DEFAULTS.get(setting_key, "")
+
+
 def get_settings() -> AppSettings:
     """環境変数から AppSettings をロードする。未設定の必須項目は空文字列になる。"""
+    azd_env = _get_azd_env_values()
     settings: dict[str, str] = {}
     for setting_key, env_keys in _ENV_CANDIDATES.items():
-        value = next((os.environ[name] for name in env_keys if os.environ.get(name)), _DEFAULTS.get(setting_key, ""))
-        settings[setting_key] = value
+        settings[setting_key] = _resolve_setting(setting_key, env_keys, azd_env)
     return AppSettings(**settings)  # type: ignore[typeddict-item]
 
 
 def is_production_environment() -> bool:
     """本番相当環境かどうかを返す。"""
-    environment = os.environ.get("ENVIRONMENT", _DEFAULTS["environment"]).lower()
+    environment = _resolve_setting("environment", _ENV_CANDIDATES["environment"], _get_azd_env_values()).lower()
     return environment in _PRODUCTION_ENVIRONMENTS
 
 
@@ -83,4 +132,5 @@ def get_missing_required_settings() -> list[str]:
     required: list[str] = []
     if is_production_environment():
         required.append("AZURE_AI_PROJECT_ENDPOINT")
-    return [name for name in required if not os.environ.get(name)]
+    azd_env = _get_azd_env_values()
+    return [name for name in required if not os.environ.get(name) and not azd_env.get(name)]

@@ -111,7 +111,7 @@ cd frontend && npm ci && cd ..
 cp .env.example .env
 ```
 
-`.env` に Azure の接続情報を入れると実 Azure モードで動作します。`AZURE_AI_PROJECT_ENDPOINT` を設定しない場合はモック / デモ動作になります。
+`.env` に Azure の接続情報を入れると実 Azure モードで動作します。`.env` や process env に空欄が残っていても、ローカル起動時のバックエンドは `azd env get-values` の値を補完に使います。そのため `azd up` 済みなら `IMPROVEMENT_MCP_ENDPOINT` や `AZURE_AI_PROJECT_ENDPOINT` を毎回手でコピーしなくても動かせます。複数の azd 環境を使う場合は、FastAPI 起動前に `azd env select <name>` を実行してください。`AZURE_AI_PROJECT_ENDPOINT` が解決できない場合はモック / デモ動作になります。
 
 ### ローカル起動
 

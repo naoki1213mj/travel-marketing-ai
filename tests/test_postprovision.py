@@ -26,8 +26,8 @@ def test_configure_improvement_mcp_registers_named_value_backend_api_and_policy(
         scope: str = "https://management.azure.com/.default",
         timeout: int = 30,
     ) -> dict | None:
-        del token, scope, timeout
-        calls.append({"url": url, "method": method, "body": body})
+        del scope, timeout
+        calls.append({"url": url, "method": method, "body": body, "token": token})
 
         if url.endswith("/providers/Microsoft.Web/sites/func-mcp?api-version=2024-04-01") and method == "GET":
             return {"properties": {"defaultHostName": "func-mcp.azurewebsites.net"}}
@@ -43,9 +43,11 @@ def test_configure_improvement_mcp_registers_named_value_backend_api_and_policy(
         apim_name="apim-test",
         function_app_name="func-mcp",
         function_app_rg="rg-dev",
+        token="prefetched-token",
     )
 
     assert result is True
+    assert all(call["token"] == "prefetched-token" for call in calls)
     assert any("/namedValues/func-mcp-extension-key" in str(call["url"]) for call in calls)
     assert any("/backends/improvement-mcp-backend" in str(call["url"]) for call in calls)
     assert any("/apis/improvement-mcp?" in str(call["url"]) for call in calls)
@@ -181,6 +183,7 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
         *,
         readiness_attempts: int = 1,
         readiness_delay_seconds: int = postprovision_module._IMPROVEMENT_MCP_READY_DELAY_SECONDS,
+        token: str | None = None,
     ) -> bool:
         captured["configure"] = {
             "subscription_id": subscription_id,
@@ -190,11 +193,15 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
             "function_app_rg": function_app_rg,
             "readiness_attempts": readiness_attempts,
             "readiness_delay_seconds": readiness_delay_seconds,
+            "token": token,
         }
         return True
 
     monkeypatch.setattr(postprovision_module, "deploy_improvement_mcp_function", fake_deploy_improvement_mcp_function)
     monkeypatch.setattr(postprovision_module, "configure_improvement_mcp", fake_configure_improvement_mcp)
+    monkeypatch.setattr(
+        postprovision_module, "_get_token", lambda scope="https://management.azure.com/.default": "prefetched-token"
+    )
     monkeypatch.setattr(
         postprovision_module, "_resolve_resource_group_location", lambda rg, configured_location="": "eastus2"
     )
@@ -222,4 +229,5 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
         "function_app_rg": "rg-dev",
         "readiness_attempts": postprovision_module._IMPROVEMENT_MCP_READY_ATTEMPTS,
         "readiness_delay_seconds": postprovision_module._IMPROVEMENT_MCP_READY_DELAY_SECONDS,
+        "token": "prefetched-token",
     }

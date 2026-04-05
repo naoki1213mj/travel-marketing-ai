@@ -113,7 +113,7 @@ cd frontend && npm ci && cd ..
 cp .env.example .env
 ```
 
-Update `.env` with the Azure endpoints you want to use. If `AZURE_AI_PROJECT_ENDPOINT` is not set, the app falls back to mock/demo behavior.
+Update `.env` with the Azure endpoints you want to use. If `.env` or process env leaves Azure values empty, the backend also falls back to `azd env get-values`, so after `azd up` you can usually run locally without manually copying `IMPROVEMENT_MCP_ENDPOINT` or `AZURE_AI_PROJECT_ENDPOINT`. If you use multiple azd environments, run `azd env select <name>` before starting FastAPI. If `AZURE_AI_PROJECT_ENDPOINT` is still not resolved, the app falls back to mock/demo behavior.
 
 ### Local Run
 
