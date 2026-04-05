@@ -41,6 +41,14 @@ def _resolve_cli(name: str) -> str:
     return name
 
 
+def _cli_available(name: str) -> bool:
+    """CLI が利用可能かを判定する。"""
+    for candidate in (name, f"{name}.exe", f"{name}.cmd", f"{name}.bat"):
+        if shutil.which(candidate):
+            return True
+    return False
+
+
 def _run_cli(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
     """az / azd などの CLI を OS 非依存に実行する。"""
     resolved_command = [_resolve_cli(command[0]), *command[1:]]
@@ -63,6 +71,10 @@ def _run_cli(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[s
 
 def _get_azd_env() -> dict[str, str]:
     """azd env get-values から環境変数を読み込む"""
+    if not _cli_available("azd"):
+        logger.info("azd が見つからないため azd env の読み込みをスキップします")
+        return {}
+
     result = _run_cli(
         ["azd", "env", "get-values"],
         capture_output=True,
@@ -86,6 +98,22 @@ def _merge_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
         if value:
             merged[key] = value
     return merged
+
+
+def _set_azd_env_value(key: str, value: str) -> bool:
+    """利用可能な場合のみ azd env へ値を保存する。"""
+    if not value:
+        return False
+    if not _cli_available("azd"):
+        logger.info("azd が見つからないため azd env への保存をスキップします: %s", key)
+        return False
+
+    result = _run_cli(["azd", "env", "set", key, value], capture_output=True)
+    if result.returncode == 0:
+        return True
+
+    logger.info("azd env への保存をスキップします: %s", key)
+    return False
 
 
 def _normalize_resource_token(container_app_name: str) -> str:
@@ -131,14 +159,16 @@ def _resolve_resource_group_location(resource_group: str, configured_location: s
 
 def _sync_improvement_mcp_env(function_app_name: str, function_app_rg: str, storage_account_name: str) -> None:
     """次回以降の azd 実行でも同じ値を再利用できるよう env へ保存する。"""
+    if not _cli_available("azd"):
+        logger.info("azd が見つからないため improvement-mcp の env 保存をスキップします")
+        return
+
     for key, value in {
         "IMPROVEMENT_MCP_FUNCTION_APP_NAME": function_app_name,
         "IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP": function_app_rg,
         "IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME": storage_account_name,
     }.items():
-        result = _run_cli(["azd", "env", "set", key, value], capture_output=True)
-        if result.returncode != 0:
-            logger.info("azd env への保存をスキップします: %s", key)
+        _set_azd_env_value(key, value)
 
 
 def _get_token(scope: str = "https://management.azure.com/.default") -> str:
@@ -426,6 +456,11 @@ def deploy_improvement_mcp_function(
         return False
 
     try:
+        logger.info(
+            "improvement-mcp Function App へコードを配備します。Flex Consumption の remote build に数分かかる場合があります: %s",
+            function_app_name,
+        )
+        deploy_started = time.perf_counter()
         deploy_result = _run_cli(
             [
                 "az",
@@ -444,14 +479,23 @@ def deploy_improvement_mcp_function(
             ],
             capture_output=True,
         )
+        deploy_elapsed_seconds = time.perf_counter() - deploy_started
     finally:
         package_path.unlink(missing_ok=True)
 
     if deploy_result.returncode == 0:
-        logger.info("improvement-mcp Function App にコードを配備しました: %s", function_app_name)
+        logger.info(
+            "improvement-mcp Function App にコードを配備しました: %s (%.1f秒)",
+            function_app_name,
+            deploy_elapsed_seconds,
+        )
         return True
 
-    logger.warning("improvement-mcp の配備に失敗しました: %s", deploy_result.stderr.strip())
+    logger.warning(
+        "improvement-mcp の配備に失敗しました: %s (%.1f秒)",
+        deploy_result.stderr.strip(),
+        deploy_elapsed_seconds,
+    )
     return False
 
 
@@ -970,11 +1014,11 @@ def main() -> None:
     tenant_id = tenant_result.stdout.strip()
     app_id = create_entra_app()
     if app_id:
-        _run_cli(["azd", "env", "set", "VOICE_SPA_CLIENT_ID", app_id])
-        logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
+        if _set_azd_env_value("VOICE_SPA_CLIENT_ID", app_id):
+            logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
     if tenant_id:
-        _run_cli(["azd", "env", "set", "AZURE_TENANT_ID", tenant_id])
-        logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
+        if _set_azd_env_value("AZURE_TENANT_ID", tenant_id):
+            logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
 
     logger.info("postprovision 完了")
 

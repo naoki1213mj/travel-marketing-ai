@@ -8,15 +8,29 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.postprovision import _get_azd_env, _merge_env, _normalize_resource_token, setup_improvement_mcp
+from scripts.postprovision import (
+    _cli_available,
+    _get_azd_env,
+    _merge_env,
+    _normalize_resource_token,
+    setup_improvement_mcp,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _load_env() -> dict[str, str]:
+    """CI ではプロセス環境を優先し、azd がある場合のみ azd env を取り込む。"""
+    env = _merge_env()
+    if not _cli_available("azd"):
+        return env
+    return _merge_env(_get_azd_env())
 
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 
-    env = _merge_env(_get_azd_env())
+    env = _load_env()
     subscription_id = env.get("AZURE_SUBSCRIPTION_ID", "").strip()
     resource_group = env.get("AZURE_RESOURCE_GROUP", "").strip()
     container_app_name = env.get("AZURE_CONTAINER_APP_NAME", "").strip()
