@@ -268,6 +268,8 @@ _FUNCTION_APP_API_VERSION = "2024-04-01"
 _IMPROVEMENT_MCP_API_ID = "improvement-mcp"
 _IMPROVEMENT_MCP_BACKEND_ID = "improvement-mcp-backend"
 _IMPROVEMENT_MCP_NAMED_VALUE = "func-mcp-extension-key"
+_IMPROVEMENT_MCP_READY_ATTEMPTS = 6
+_IMPROVEMENT_MCP_READY_DELAY_SECONDS = 10
 _IMPROVEMENT_MCP_POLICY_XML = """\
 <policies>
   <inbound>
@@ -472,12 +474,14 @@ def setup_improvement_mcp(subscription_id: str, rg: str, apim_name: str, env: di
             bool(storage_account_name),
         )
 
+    readiness_attempts = _IMPROVEMENT_MCP_READY_ATTEMPTS if deployed else 1
     configured = configure_improvement_mcp(
         subscription_id=subscription_id,
         rg=rg,
         apim_name=apim_name,
         function_app_name=function_app_name,
         function_app_rg=function_app_rg,
+        readiness_attempts=readiness_attempts,
     )
     return configured
 
@@ -536,15 +540,49 @@ def _get_function_app_mcp_details(
     return f"https://{default_host_name}", mcp_extension_key
 
 
+def _wait_for_function_app_mcp_details(
+    subscription_id: str,
+    rg: str,
+    function_app_name: str,
+    attempts: int,
+    delay_seconds: int,
+) -> tuple[str, str] | None:
+    """Function App の MCP 詳細が利用可能になるまで待機する。"""
+    total_attempts = max(1, attempts)
+    for attempt in range(1, total_attempts + 1):
+        function_details = _get_function_app_mcp_details(subscription_id, rg, function_app_name)
+        if function_details is not None:
+            return function_details
+        if attempt >= total_attempts:
+            break
+        logger.info(
+            "improvement-mcp Function App の準備待機中 (%s/%s): %s",
+            attempt,
+            total_attempts,
+            function_app_name,
+        )
+        time.sleep(delay_seconds)
+    return None
+
+
 def configure_improvement_mcp(
     subscription_id: str,
     rg: str,
     apim_name: str,
     function_app_name: str,
     function_app_rg: str,
+    *,
+    readiness_attempts: int = 1,
+    readiness_delay_seconds: int = _IMPROVEMENT_MCP_READY_DELAY_SECONDS,
 ) -> bool:
     """Function App を backend にした improvement-mcp API を APIM へ構成する。"""
-    function_details = _get_function_app_mcp_details(subscription_id, function_app_rg, function_app_name)
+    function_details = _wait_for_function_app_mcp_details(
+        subscription_id,
+        function_app_rg,
+        function_app_name,
+        attempts=readiness_attempts,
+        delay_seconds=readiness_delay_seconds,
+    )
     if function_details is None:
         return False
 

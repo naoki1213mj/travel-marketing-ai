@@ -78,6 +78,10 @@ function isStepToolEvent(event: ToolEvent, agentKey: string, roundNumber: number
   return roundNumber > 1 && agentKey === 'marketing-plan-agent' && event.agent === 'improvement-mcp'
 }
 
+function isMcpToolEvent(event: ToolEvent): boolean {
+  return (event.source || (event.agent === 'improvement-mcp' ? 'mcp' : undefined)) === 'mcp'
+}
+
 interface Props {
   agentProgress: AgentProgress | null
   textContents: TextContent[]
@@ -192,6 +196,7 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
     const sectionCollapsed = isSectionCollapsed(sectionKey, fallbackCollapsed)
     const isActive = status === 'active'
     const stepTools = getToolEvents(step.key, roundNumber)
+    const hasMcpTool = stepTools.some(isMcpToolEvent)
     const collapsedSummary = getCollapsedSummary(step.key, content, t)
 
     return (
@@ -228,6 +233,14 @@ export function WorkflowAccordion({ agentProgress, textContents, toolEvents, met
             {stepTools.length > 0 && (
               <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
                 {t('workflow.tool_count').replace('{n}', String(stepTools.length))}
+              </span>
+            )}
+            {hasMcpTool && (
+              <span
+                data-step-source="mcp"
+                className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)]"
+              >
+                {t('tool.source.mcp')}
               </span>
             )}
           </div>

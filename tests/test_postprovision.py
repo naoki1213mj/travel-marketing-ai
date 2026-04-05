@@ -71,6 +71,51 @@ def test_configure_improvement_mcp_registers_named_value_backend_api_and_policy(
     assert api_properties["mcpProperties"]["endpoints"]["mcp"]["uriTemplate"] == "/runtime/webhooks/mcp"
 
 
+def test_configure_improvement_mcp_retries_until_mcp_extension_key_is_available(monkeypatch) -> None:
+    """配備直後の遅延で system key が未作成でもリトライで回復する"""
+    calls: list[dict[str, object]] = []
+    key_attempts = 0
+
+    def fake_rest_call(
+        url: str,
+        *,
+        method: str = "GET",
+        body: dict | None = None,
+        token: str | None = None,
+        scope: str = "https://management.azure.com/.default",
+        timeout: int = 30,
+    ) -> dict | None:
+        nonlocal key_attempts
+        del token, scope, timeout
+        calls.append({"url": url, "method": method, "body": body})
+
+        if url.endswith("/providers/Microsoft.Web/sites/func-mcp?api-version=2024-04-01") and method == "GET":
+            return {"properties": {"defaultHostName": "func-mcp.azurewebsites.net"}}
+        if "/host/default/listKeys" in url and method == "POST":
+            key_attempts += 1
+            if key_attempts < 3:
+                return {"systemKeys": {}}
+            return {"systemKeys": {"mcp_extension": "secret-key"}}
+        return {"ok": True}
+
+    monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module.time, "sleep", lambda _seconds: None)
+
+    result = postprovision_module.configure_improvement_mcp(
+        subscription_id="sub-id",
+        rg="rg-dev",
+        apim_name="apim-test",
+        function_app_name="func-mcp",
+        function_app_rg="rg-dev",
+        readiness_attempts=3,
+        readiness_delay_seconds=0,
+    )
+
+    assert result is True
+    assert key_attempts == 3
+    assert any("/apis/improvement-mcp?" in str(call["url"]) for call in calls)
+
+
 def test_configure_improvement_mcp_returns_false_when_mcp_extension_key_is_missing(monkeypatch) -> None:
     """mcp_extension key が取得できない場合は APIM 登録を中断する"""
     calls: list[dict[str, object]] = []
@@ -93,6 +138,7 @@ def test_configure_improvement_mcp_returns_false_when_mcp_extension_key_is_missi
         return {"ok": True}
 
     monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module.time, "sleep", lambda _seconds: None)
 
     result = postprovision_module.configure_improvement_mcp(
         subscription_id="sub-id",
@@ -100,10 +146,12 @@ def test_configure_improvement_mcp_returns_false_when_mcp_extension_key_is_missi
         apim_name="apim-test",
         function_app_name="func-mcp",
         function_app_rg="rg-dev",
+        readiness_attempts=2,
+        readiness_delay_seconds=0,
     )
 
     assert result is False
-    assert len(calls) == 2
+    assert len(calls) == 4
 
 
 def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
@@ -130,6 +178,9 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
         apim_name: str,
         function_app_name: str,
         function_app_rg: str,
+        *,
+        readiness_attempts: int = 1,
+        readiness_delay_seconds: int = postprovision_module._IMPROVEMENT_MCP_READY_DELAY_SECONDS,
     ) -> bool:
         captured["configure"] = {
             "subscription_id": subscription_id,
@@ -137,6 +188,8 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
             "apim_name": apim_name,
             "function_app_name": function_app_name,
             "function_app_rg": function_app_rg,
+            "readiness_attempts": readiness_attempts,
+            "readiness_delay_seconds": readiness_delay_seconds,
         }
         return True
 
@@ -167,4 +220,6 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
         "apim_name": "apim-test",
         "function_app_name": "func-mcp-abc123",
         "function_app_rg": "rg-dev",
+        "readiness_attempts": postprovision_module._IMPROVEMENT_MCP_READY_ATTEMPTS,
+        "readiness_delay_seconds": postprovision_module._IMPROVEMENT_MCP_READY_DELAY_SECONDS,
     }

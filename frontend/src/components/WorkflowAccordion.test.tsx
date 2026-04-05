@@ -27,7 +27,7 @@ const t = (key: string) => ({
   'tool.generate_improvement_brief': '改善ブリーフ生成',
   'tool.generate_hero_image': 'ヒーロー画像生成',
   'tool.generate_banner_image': 'バナー画像生成',
-  'tool.source.mcp': 'MCP',
+  'tool.source.mcp': 'Azure Functions MCP',
   'tool.fallback.legacy_prompt': '従来経路へフォールバック',
   'error.retry': '再試行',
 }[key] ?? key)
@@ -119,7 +119,10 @@ describe('WorkflowAccordion', () => {
     fireEvent.click(screen.getAllByRole('button', { name: /施策生成/ }).at(-1) as HTMLButtonElement)
 
     expect(screen.getByText('改善ブリーフ生成')).toBeInTheDocument()
+      expect(screen.getAllByText('Azure Functions MCP')).toHaveLength(2)
+    expect(container.querySelector('[data-step-source="mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-tool-name="generate_improvement_brief"][data-tool-source="mcp"]')).not.toBeNull()
+    expect(container.querySelector('[data-tool-name="generate_improvement_brief"][data-tool-provider="azure-functions-mcp"]')).not.toBeNull()
   })
 
   it('shows a friendly collapsed summary for brochure steps instead of raw html', () => {

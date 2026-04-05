@@ -26,12 +26,14 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
         const source = event.source || (event.agent === 'improvement-mcp' ? 'mcp' : undefined)
         const isCompleted = event.status === 'completed'
         const isFailed = event.status === 'failed'
+        const provider = source === 'mcp' ? 'azure-functions-mcp' : 'local'
 
         return (
           <span
             key={`${event.tool}-${i}`}
             data-tool-name={event.tool}
             data-tool-source={source || 'local'}
+            data-tool-provider={provider}
             data-tool-status={event.status}
             className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
           >
