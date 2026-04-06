@@ -1,180 +1,157 @@
 # Azure アーキテクチャ
 
-このドキュメントは、要件書の理想構成ではなく、現在の実装と Azure 側の実配備前提をベースに整理したものです。詳細な構成図は [architecture.drawio](architecture.drawio) も参照してください。
+現在の実装と Azure 実環境に基づくアーキテクチャ資料です。
 
 ## 1. ランタイム実行フロー
 
 ```mermaid
-flowchart LR
-    user[マーケ担当者] --> ui[React 19 frontend]
+flowchart TD
+    user([マーケ担当者]) --> ui[React 19 Frontend]
     ui --> api[FastAPI SSE API]
-    ui -. evaluate / refine .-> eval[/POST /api/evaluate/]
+    ui -.-> eval[POST /api/evaluate]
     eval --> foundryEval[Foundry Evaluations]
-    api --> flow[FastAPI orchestration pipeline]
-    api -. improvement brief .-> apimMcp[APIM improvement-mcp route]
+
+    api --> flow[FastAPI Orchestration]
+    api -.-> apimMcp[APIM improvement-mcp]
     apimMcp --> mcpFunc[Azure Functions MCP]
-
-    flow --> a1[data-search-agent]
-    a1 --> dataAgent[Fabric Data Agent Published URL]
-    dataAgent --> fabricDelta[Lakehouse tables]
-    a1 -. fallback .-> fabric[Fabric Lakehouse SQL]
-    fabric -. fallback .-> csv[CSV fallback]
-
-    flow --> a2[marketing-plan-agent]
-    a2 --> web[Foundry Web Search]
-
-    flow --> approval{担当者 approval_request}
-    approval --> a3a[regulation-check-agent]
-    a3a --> search[Azure AI Search / Foundry IQ]
-    a3a --> safetyweb[Web Search for safety info]
-
-    a3a --> a3b[plan-revision-agent]
-    a3b --> managerApproval{上司承認オプション}
-    managerApproval -->|off| a4[brochure-gen-agent]
-    managerApproval -->|on| portal[Built-in manager approval page]
-    managerApproval -. optional notify .-> managerWorkflow[Optional Teams or email notification workflow]
-    managerWorkflow --> manager[Manager receives approval URL]
-    manager --> portal
-    portal --> apiCallback[/POST manager-approval-callback/]
-    apiCallback --> a4[brochure-gen-agent]
-
-    a4 --> image[gpt-image-1.5 / MAI-Image-2]
-    a4 --> cu[Content Understanding]
-
-    a4 --> a5[video-gen-agent]
-    a5 --> speech[Speech / Photo Avatar video]
-
     mcpFunc --> mcpTool[generate_improvement_brief]
 
-    subgraph fabricLayer[Fabric Data]
-        fabricSQL[Fabric SQL Endpoint]
-        fabricAgent[Published Data Agent]
-        fabricDelta[Delta Parquet tables]
+    subgraph agents[Agent Pipeline]
+        direction TB
+        a1[data-search-agent] --> a2[marketing-plan-agent]
+        a2 --> approve{担当者承認}
+        approve --> a3a[regulation-check-agent]
+        a3a --> a3b[plan-revision-agent]
+        a3b --> mgr{上司承認?}
+        mgr -->|off| a4[brochure-gen-agent]
+        mgr -->|on| portal[上司承認ページ]
+        portal --> a4
+        a4 --> a5[video-gen-agent]
     end
-    fabric --> fabricSQL
-    dataAgent --> fabricAgent
-    fabricSQL --> fabricDelta
-    flow --> ui
 
-    api -. optional .-> review[quality-review-agent]
-    api -. post approval actions .-> logicPost[Logic Apps post actions]
-    logicPost --> sharepoint[SharePoint]
+    flow --> agents
+
+    subgraph data[Data Sources]
+        direction LR
+        dataAgent[Fabric Data Agent]
+        fabricSQL[Fabric SQL Endpoint]
+        csv[CSV Fallback]
+    end
+
+    subgraph knowledge[Knowledge & Search]
+        direction LR
+        aiSearch[Azure AI Search]
+        webSearch[Foundry Web Search]
+    end
+
+    subgraph media[Media Services]
+        direction LR
+        gptImg[GPT Image 1.5]
+        maiImg[MAI-Image-2]
+        avatar[Speech / Photo Avatar]
+        cu[Content Understanding]
+    end
+
+    a1 -.-> data
+    a2 -.-> webSearch
+    a3a -.-> knowledge
+    a4 -.-> gptImg
+    a4 -.-> maiImg
+    a4 -.-> cu
+    a5 -.-> avatar
+
+    api -.-> review[quality-review-agent]
+    api -.-> logic[Logic Apps]
+    api -.-> cosmos[Cosmos DB]
 ```
 
 ## 2. Azure リソース構成
 
 ```mermaid
-flowchart TB
-    gha[GitHub Actions] --> acr[Azure Container Registry]
-    acr --> ca[Azure Container Apps]
+flowchart TD
+    gha[GitHub Actions] --> acr[Container Registry]
+    acr --> ca[Container Apps]
 
-    ca --> foundryProject[Microsoft Foundry project]
-    foundryProject --> aiServices[AI Services account]
-    ca --> cosmos[Cosmos DB Serverless]
-    ca --> kv[Key Vault]
-    ca --> appi[Application Insights]
-    ca --> logic[Logic Apps]
+    subgraph compute[Compute & Gateway]
+        ca
+        apim[APIM AI Gateway]
+        func[Functions MCP]
+    end
 
-    foundryProject -. travel-ai-gateway connection .-> apim
-    apim -. backend auth .-> aiServices
-    ca -. improvement brief via APIM .-> apim
-    apim -. MCP backend auth .-> func[Azure Functions MCP app]
+    subgraph ai[AI Services]
+        foundry[Microsoft Foundry Project]
+        aiSvc[AI Services Account]
+        aiSearch[Azure AI Search]
+    end
 
-    aiSearch[Azure AI Search] --> foundryProject
+    subgraph storage[Data & Storage]
+        cosmos[Cosmos DB]
+        kv[Key Vault]
+    end
 
-    subgraph network[Network boundary]
-        cae[Container Apps Environment]
+    subgraph observe[Observability]
+        logs[Log Analytics]
+        appi[Application Insights]
+    end
+
+    subgraph network[Network]
         vnet[VNet]
         pep[Private Endpoints]
     end
 
-    vnet --> cae
+    ca --> foundry
+    foundry --> aiSvc
+    ca --> cosmos
+    ca --> kv
+    ca -.-> apim
+    apim -.-> func
+    apim -.-> aiSvc
+    aiSearch --> foundry
+    ca --> appi
+    appi --> logs
+    vnet --> ca
     pep --> cosmos
     pep --> kv
-    ca --> cae
 ```
 
-## 3. IaC で作られるもの
+## 3. IaC で作られるリソース
 
 | リソース | 構成 |
 | --- | --- |
-| AI Services | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、`gpt-5-4-mini` を既定で配備 |
-| Foundry project | `accounts/projects@2025-06-01` |
-| Container Apps | System-assigned MI、`/api/health` と `/api/ready` の probe、0-3 レプリカ |
-| APIM | BasicV2、Managed Identity。`scripts/postprovision.py` で Foundry AI Gateway 接続とトークン制限・メトリクスのポリシーに加え、評価改善用 `improvement-mcp` route の backend / API / policy も自動同期 |
-| Azure Functions MCP | `scripts/postprovision.py` が Flex Consumption Function App を作成し、`mcp_server/` を zip 配備して APIM 配下へ公開 |
-| Logic Apps | Consumption、HTTP trigger ベース。`post_approval_actions` の payload を受け付ける |
-| Manager approval notification workflow | 現行 IaC では未作成。組み込み上司承認ページはアプリに含まれ、Teams やメールで自動通知したい場合だけ別 workflow を用意して `MANAGER_APPROVAL_TRIGGER_URL` を FastAPI に渡す |
-| Cosmos DB | Serverless、`disableLocalAuth=true`、Private Endpoint、RBAC |
-| Key Vault | Private Endpoint、RBAC |
+| AI Services | `kind=AIServices`, `allowProjectManagement=true`, `disableLocalAuth=true`, `gpt-5-4-mini` 自動配備 |
+| Foundry Project | `accounts/projects@2025-06-01` |
+| Container Apps | System MI, health/readiness probe, 0–3 replicas |
+| APIM | BasicV2, Managed Identity, AI Gateway policy |
+| Azure Functions MCP | Flex Consumption, `mcp_server/` zip 配備 (postprovision) |
+| Logic Apps | Consumption, HTTP trigger (post-approval actions) |
+| Cosmos DB | Serverless, `disableLocalAuth=true`, Private Endpoint, RBAC |
+| Key Vault | Private Endpoint, RBAC |
 | Observability | Log Analytics + Application Insights |
 
-## 4. IaC の後に手動で補う項目
+## 4. postprovision 後の手動設定
 
 | 項目 | 理由 |
 | --- | --- |
-| Azure AI Search の作成と `regulations-index` の投入 | Foundry IQ の実データ検索に必要 |
-| Foundry project と Azure AI Search の接続 | `search_knowledge_base()` の既定接続に必要 |
-| `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent Published URL を優先利用するため |
-| `FABRIC_SQL_ENDPOINT` | Agent1 の Fabric Lakehouse SQL フォールバック接続に必要（未設定時は CSV フォールバック） |
-| `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` に評価専用 deployment を使う場合 |
-| Azure Functions MCP のデプロイ | 評価起点の改善で `generate_improvement_brief` をリモート実行するため |
-| APIM の MCP route 登録 | `improvement-mcp/runtime/webhooks/mcp` を公開するため |
-| `IMPROVEMENT_MCP_API_KEY` の投入 | APIM が subscription key を要求する場合 |
-| `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールが参照 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成ツールが参照（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
-| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
-| `LOGIC_APP_CALLBACK_URL` | 承認継続後アクションに必要 |
-| `MANAGER_APPROVAL_TRIGGER_URL` | 任意。上司承認 URL を送る通知 workflow の HTTP trigger URL |
-| Microsoft Teams connector の認可 | Teams で通知する場合に外部 notification workflow 側で必要 |
+| Azure AI Search + `regulations-index` 投入 | ナレッジベース検索に必要 |
+| Foundry → AI Search 接続追加 | `get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
+| `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent を優先するため |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成 |
+| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live MSAL.js 認証 |
+
+上記以外の環境変数（`IMPROVEMENT_MCP_ENDPOINT`, `COSMOS_DB_ENDPOINT` 等）は `azd up` で自動注入されます。
 
 ## 5. 認証モデル
 
-| 実行主体 | 認証方式 | 主な用途 |
+| 実行主体 | 認証方式 | 用途 |
 | --- | --- | --- |
-| FastAPI / Container App | `DefaultAzureCredential` | Foundry、Fabric Data Agent / Fabric SQL、Cosmos DB、Azure AI Search |
-| APIM | Managed Identity | Foundry バックエンドへの認証 |
-| AI Search bootstrap script | Foundry 接続または API key | 初期インデックス投入 |
+| Container App | `DefaultAzureCredential` | Foundry, Fabric, Cosmos DB, AI Search |
+| APIM | Managed Identity | Foundry バックエンド接続 |
+| AI Search bootstrap | Foundry connection or API key | 初期インデックス投入 |
 
-Container App の Managed Identity には、Bicep で Foundry 関連ロール、Cosmos DB Data Contributor、Key Vault Secrets User、AcrPull が割り当てられます。
+Container App の MI には Bicep で Foundry 関連ロール, Cosmos DB Data Contributor, Key Vault Secrets User, AcrPull が付与されます。
 
-## 6. 現在の実装メモ
+## 6. Remote MCP
 
-- `POST /api/chat` の Azure モードは、FastAPI 内で Agent1 → Agent2 を実行後に担当者向け `approval_request` を返します。
-- 評価フィードバックによる改善では、`IMPROVEMENT_MCP_ENDPOINT` が有効な場合に APIM 配下の Azure Functions MCP `generate_improvement_brief` を先に呼びます。失敗時は従来の改善ロジックへフォールバックします。
-- 担当者承認後は Agent3a → Agent3b を実行し、`manager_approval_enabled=true` の場合は組み込み上司承認ページ URL を生成して待機します。上司承認オフならそのまま Agent4 → Agent5 に進みます。
-- `MANAGER_APPROVAL_TRIGGER_URL` が設定されている場合だけ、その approval URL を上司へ届ける外部 notification workflow も併せて呼び出します。未設定または送信失敗時は共有リンク運用へフォールバックします。
-- 上司承認待ちは会話 status と `approval_request.approval_scope=manager` で復元され、差し戻し時は担当者承認 UI へ戻ります。2 回目以降の上司承認でも、直前の確定版は `pendingVersion` として保持され、UI から見失わないようにしています。
-- 組み込み上司承認ページは URL fragment に token を載せ、`GET /api/chat/{thread_id}/manager-approval-request` と `POST /api/chat/{thread_id}/manager-approval-callback` を使って承認状態を更新します。承認ページは `current_version` と `previous_versions` を受け取り、今回版と過去の確定版を横並びで比較します。
-- Microsoft Learn の Teams connector 情報では Teams 操作は Logic Apps Standard 側の可用性が前提なので、現行の Consumption workflow は post approval actions 専用に維持し、通知 workflow は別リソース扱いにしています。
-- Agent1 は `FABRIC_DATA_AGENT_URL` がある場合、Fabric Data Agent Published URL を最優先で使用します。利用不可時のみ Fabric Lakehouse SQL endpoint の pyodbc 接続、その後 CSV → ハードコードデータへフォールバックします。
-- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
-- Agent5（動画生成）は Photo Avatar で SSML ナレーションを生成し、`ja-JP-Nanami:DragonHDLatestNeural` 音声、冒頭ジェスチャー、`casual-sitting` スタイルの販促動画を MP4/H.264 で生成します。
-- Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作し、利用不可時は `FoundryChatClient` にフォールバックします。
-- Code Interpreter はランタイムで自動検出され、利用不可時はグレースフルにフォールバックします。
-- APIM は Azure 側に作られ、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）の作成とトークン制限ポリシー（80,000 tokens/min）の適用が自動実行されます。加えて Voice Live 用 Prompt Agent と Entra SPA アプリ登録も作成します。
-- `/api/evaluate` は Built-in 評価器（Relevance / Coherence / Fluency）に加え、旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーンを返し、成功時は Foundry にログします。
-- フロントエンドは各 `done` イベントごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
-- 新しい版の生成中は、右ペインはそのラウンドのライブワークスペースとして更新されます。同時に `VersionSelector` から確定済みバージョンを読み取り専用で確認でき、生成中チップでライブ表示に戻せます。
-- 評価比較 UI はフロントエンド内で完結し、現在の版と比較対象版を上部カードで併記します。比較対象を変えてもメインの成果物プレビューは切り替わりません。
-- 評価レスポンスに `task_adherence` が含まれる場合でも、現行 UI ではノイズ低減のため比較差分、総合サマリ、改善フィードバックから除外しています。
-- 品質レビューは主フロー後の追加 `text` イベントとして返ります。最終承認後はブローシャ生成完了時点でユーザー向け `done` を返し、動画 URL、品質レビュー、承認後アクションは background update として同じ会話へ追記されることがあります。
-- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
-- モデル配備側のガードレールを主軸にしつつ、FastAPI 側では明らかな入力 / ツール応答の指示上書きだけを軽量ガードでブロックします。Prompt Shields や tool-response 介入などの追加 guardrail は Azure / Foundry 側で明示設定した場合のみ有効です。
-- Azure AI Search の実行時検索は Managed Identity ベースです。API キーはセットアップ用スクリプトの任意経路にだけ残っています。
-- Voice Live API は MSAL.js + Entra アプリ登録認証で動作し、`/api/voice-token` と `/api/voice-config` エンドポイントを提供します。
-- 会話履歴は Cosmos DB に保存され、フロントエンドの `restoreConversation()` で再推論なしに復元されます。
-
-## 6.1 実機メモ
-
-- `2026-04-05` 時点で、Azure dev 環境は `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- テキスト実行 deployment、評価用 deployment、`gpt-image-1.5` は Azure 上で稼働確認済みです。
-- 評価改善フローは APIM 公開 `improvement-mcp` route と Azure Functions MCP backend を通した実経路で確認済みです。
-- APIM AI Gateway 接続と token policy は post-provision で構成済みです。
-
-## 7. Remote MCP と今後の拡張
-
-- 現在 Azure Functions MCP を使っているのは、評価改善用の `generate_improvement_brief` だけです。
-- それ以外のツール呼び出しは引き続きエージェント内 `@tool` 実装が前提です。
-- 新規リモートツールを追加する場合も、Azure Functions MCP extension、Flex Consumption、stateless、streamable HTTP、APIM 公開、FastAPI 側 graceful fallback の組み合わせを推奨します。
-- Teams / メール通知 workflow は MCP 対象ではなく、必要になった場合だけ `MANAGER_APPROVAL_TRIGGER_URL` で呼ぶ外部 workflow として追加します。
+- 現在 Azure Functions MCP で提供するのは `generate_improvement_brief`（評価改善用）のみ
+- 他のツールはエージェント内 `@tool` 実装
+- 新規リモートツール追加時も、Functions MCP + APIM 公開 + FastAPI graceful fallback の同パターンを推奨

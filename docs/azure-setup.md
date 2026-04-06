@@ -1,402 +1,121 @@
 # Azure セットアップガイド
 
-このガイドは、現在の Bicep とアプリ実装に合わせて、Azure 側で何が自動作成され、何を後から追加設定する必要があるかを整理したものです。
+推奨リージョン: **East US 2**。構成図は [azure-architecture.md](azure-architecture.md) を参照してください。
 
-推奨リージョンは East US 2 です。構成図は [azure-architecture.md](azure-architecture.md) を参照してください。
+## 1. azd up で自動作成されるリソース
 
-## 0. 2026-04-05 時点の実機スナップショット
-
-- Azure の dev 環境では `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- ランタイム用 deployment、評価用 deployment、`gpt-image-1.5` は Azure 上で稼働確認済みです。
-- APIM AI Gateway 接続と token policy は `scripts/postprovision.py` が構成します。
-- 評価改善では APIM 公開の `improvement-mcp` route と Azure Functions MCP バックエンドを通る構成を検証済みです。
-- Logic Apps は承認後アクション用 callback を有効化済みです。manager 通知 workflow は別 endpoint として任意追加します。
-
-## 1. `azd up` で自動作成されるリソース
-
-| リソース | 現行構成 |
+| リソース | 構成 |
 | --- | --- |
-| Resource Group | サブスクリプション配下に環境別で作成 |
-| AI Services account | `kind=AIServices`、`allowProjectManagement=true`、`disableLocalAuth=true`、SKU `S0` |
-| Microsoft Foundry project | `accounts/projects@2025-06-01` |
-| 既定テキストモデル | `gpt-5-4-mini` を `gpt-5.4-mini` から配備 |
-| 画像生成モデル | `gpt-image-1-5` を `gpt-image-1.5` から配備（メインプロジェクト） |
-| 画像生成モデル (MAI) | `MAI-Image-2` を別リソース（East US）に配備。`IMAGE_PROJECT_ENDPOINT_MAI` で接続 |
-| Container Apps Environment | Log Analytics 接続済み |
-| Container App | System-assigned MI、`/api/health` と `/api/ready` probe、0-3 replicas |
-| Azure Container Registry | Basic SKU |
-| API Management | BasicV2、Managed Identity、AI Gateway policy |
-| Logic Apps | Consumption、HTTP trigger ベース。post approval actions 用 |
-| Cosmos DB | Serverless、`disableLocalAuth=true`、RBAC、Private Endpoint |
-| Key Vault | Private Endpoint、RBAC |
-| Log Analytics / Application Insights | 観測基盤 |
+| AI Services | `kind=AIServices`, `allowProjectManagement=true`, `gpt-5-4-mini` 自動配備 |
+| Foundry Project | `accounts/projects@2025-06-01` |
+| Container Apps | System MI, health/readiness probe, 0–3 replicas |
+| APIM | BasicV2, Managed Identity, AI Gateway policy |
+| Logic Apps | Consumption, HTTP trigger (post-approval actions) |
+| Cosmos DB | Serverless, Private Endpoint, RBAC |
+| Key Vault | Private Endpoint, RBAC |
+| Log Analytics / App Insights | 観測基盤 |
 | VNet | Container Apps / Private Endpoints 用 |
 
-## 2. `azd up` 後に必要な追加作業
+## 2. postprovision で自動構成される項目
 
-| 項目 | 必要理由 |
-| --- | --- |
-| Azure AI Search の作成 | Foundry IQ / `search_knowledge_base()` の実データ検索 |
-| `regulations-index` の投入 | 規制ドキュメント検索 |
-| Foundry project への Azure AI Search 接続追加 | `connections.get_default(ConnectionType.AZURE_AI_SEARCH)` が前提 |
-| `FABRIC_DATA_AGENT_URL` の設定 | Agent1 が Fabric Data Agent Published URL を優先利用するため |
-| `FABRIC_SQL_ENDPOINT` の設定 | Agent1 の Fabric Lakehouse SQL フォールバック検索（未設定時は CSV フォールバック） |
-| `EVAL_MODEL_DEPLOYMENT` | `/api/evaluate` 用に別 deployment を使いたい場合 |
-| Azure Functions MCP サーバーのデプロイ | 評価起点の改善で `generate_improvement_brief` をリモート実行するため |
-| APIM への MCP サーバー登録 | 公開 route `improvement-mcp/runtime/webhooks/mcp` を用意するため |
-| `IMPROVEMENT_MCP_FUNCTION_APP_NAME` | `postprovision.py` で APIM の improvement-mcp 登録を自動化するため |
-| `IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP` | MCP Function App がアプリ本体と別 RG にある場合に必要 |
-| `IMPROVEMENT_MCP_API_KEY` の設定 | APIM で subscription key を必須にした場合 |
-| `CONTENT_UNDERSTANDING_ENDPOINT` | PDF 解析ツールで使用 |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成で使用（HD voice + SSML ナレーション、`casual-sitting` スタイル） |
-| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live の MSAL.js 認証（Entra アプリ登録が必要） |
-| `LOGIC_APP_CALLBACK_URL` | 承認継続後の Logic Apps callback で使用 |
-| `MANAGER_APPROVAL_TRIGGER_URL` | 任意。上司承認 URL を Teams / メールで送る通知 workflow を呼ぶために使用 |
+`azd up` 完了後に `scripts/postprovision.py` が自動実行します:
 
-注: 現行の実機では `EVAL_MODEL_DEPLOYMENT=gpt-4-1-mini` を利用しています。Fabric 実データ接続は `FABRIC_SQL_ENDPOINT` が設定済みで、`FABRIC_DATA_AGENT_URL` は将来または環境別の優先経路として扱っています。
+1. **AI Gateway**: Foundry に `travel-ai-gateway` APIM 接続を作成、token policy 適用
+2. **Improvement MCP**: Flex Consumption Function App の作成、`mcp_server/` zip 配備、APIM `improvement-mcp` route 同期
+3. **Voice Agent**: Foundry に Voice Live 対応 Prompt Agent を作成
+4. **Entra SPA**: Voice Live 認証用の Entra アプリ登録を作成
 
-## 3. 認証と権限
+## 3. 手動設定が必要な項目
 
-### アプリ本体
-
-Container App の Managed Identity には Bicep で以下が付与されます。
-
-- Cognitive Services Contributor
-- Cognitive Services OpenAI User
-- Azure AI Developer
-- Azure AI User
-- Cognitive Services User
-- Cosmos DB Built-in Data Contributor
-- Key Vault Secrets User
-- AcrPull
-
-アプリ実行時は `DefaultAzureCredential` を使い、以下を呼び出します。
-
-- Microsoft Foundry project endpoint
-- Cosmos DB
-- Azure AI Search
-
-### APIM
-
-APIM の Managed Identity には Foundry バックエンド接続用の Cognitive Services User ロールが必要です。
-
-注: アプリコードは project endpoint を直接使用します。Foundry ポータル側で AI Gateway が有効化された環境では APIM を経由し得るため、実経路は Foundry ポータル設定と APIM メトリクスで確認してください。
-
-### Azure AI Search
-
-- 実行時検索: Managed Identity
-- 初期インデックス投入: `scripts/setup_knowledge_base.py` で Foundry connection または API key のどちらでも可
-
-## 4. 手順
-
-### 4.1 コアインフラの作成
-
-```bash
-azd auth login
-azd up
-```
-
-Teams やメールで上司承認の自動通知を行う場合は、次を設定してから `azd provision` もしくは `azd up` を再実行します。未設定でも、アプリ組み込みの上司承認ページ URL を共有すれば運用できます。
-
-```bash
-azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval-workflow-url>
-```
-
-### 4.2 配備結果の確認
-
-`azd up` 後に次を確認します。
-
-- `AZURE_AI_PROJECT_ENDPOINT`
-- `COSMOS_DB_ENDPOINT`
-- `AZURE_APIM_GATEWAY_URL`
-- `SERVICE_WEB_ENDPOINTS`
-
-### 4.3 postprovision フック
-
-`azd up` 完了後に `scripts/postprovision.py` が自動実行されます。このスクリプトは以下を行います:
-
-1. **AI Gateway 接続の作成**: Foundry project に `travel-ai-gateway` という名前の APIM 接続を作成し、`ProjectManagedIdentity` 認証を設定
-2. **トークン制限ポリシーの適用**: APIM の foundry-* API に `llm-token-limit`（80,000 tokens/min）と `llm-emit-token-metric` ポリシーを適用
-3. **Voice Agent の作成**: Foundry に Voice Live 対応の Prompt Agent を作成
-4. **Entra SPA アプリ登録の作成**: Voice Live フロントエンド認証用のアプリ登録を作成し、`VOICE_SPA_CLIENT_ID` と `AZURE_TENANT_ID` を `azd env` に保存
-
-補足:
-
-- 現行構成に `llm-content-safety` は含まれません
-- Prompt Shields や tool-response 介入などの追加 guardrail は、このスクリプトでは設定しません
-
-`AZURE_APIM_NAME` が未設定の場合、APIM 関連の設定はスキップされます。スクリプトは冪等で、複数回実行しても安全です。
-
-`postprovision.py` は既定で improvement MCP 用の Function App 名と storage account 名を導出し、Flex Consumption Function App の作成、`mcp_server/` の zip 配備、Function App の `mcp_extension` system key 取得、APIM の named value / backend / `improvement-mcp` API / policy 構成まで自動で実行します。別名や別 RG にしたい場合だけ `IMPROVEMENT_MCP_FUNCTION_APP_NAME` / `IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP` / `IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME` を設定してください。
-
-### 4.3.1 Improvement MCP の登録
-
-現行構成では Container App に `IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を注入し、同じ post-provision で Function App 作成と APIM route 構成まで自動化します。
-
-1. `scripts/postprovision.py` が `mcp_server/` を Flex Consumption Function App へ zip 配備する
-2. 同じスクリプトが Function App の `mcp_extension` system key を取得する
-3. APIM に `improvement-mcp` backend / API / policy を作成または更新する
-4. APIM の公開 route `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` で疎通することを確認する
-5. APIM で subscription key を要求する場合だけ `IMPROVEMENT_MCP_API_KEY` と `IMPROVEMENT_MCP_API_KEY_HEADER` を Container App 側へ設定する
-
-この route が未登録または失敗しても、FastAPI は従来の改善ロジックへ自動フォールバックします。
-
-既定名を上書きしたい場合だけ、事前に次を `azd env` へ設定してください。
-
-```bash
-azd env set IMPROVEMENT_MCP_FUNCTION_APP_NAME func-mcp-<suffix>
-azd env set IMPROVEMENT_MCP_FUNCTION_APP_RESOURCE_GROUP rg-dev
-azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
-```
-
-### 4.4 画像生成モデルの確認
-
-最新の IaC では `gpt-image-1.5` を自動配備します。既存環境が古いテンプレートで作成されている場合のみ、ポータルまたは CLI で追加してください。
-
-CLI 例:
-
-```bash
-az cognitiveservices account deployment create \
-  --name <ai-services-account> \
-  --resource-group <resource-group> \
-  --deployment-name gpt-image-1-5 \
-  --model-name gpt-image-1.5 \
-  --model-format OpenAI \
-  --sku-capacity 1 \
-  --sku-name GlobalStandard
-```
-
-アプリの `brochure_gen.py` はデフォルトで `gpt-image-1.5` を使用します。未配備時は透明 PNG フォールバックです。
-
-#### MAI-Image-2（オプション — 別リソース）
-
-MAI-Image-2 は別の Foundry リソース（East US）にデプロイします。UI から画像モデルとして選択可能です。
-
-```bash
-# 別リソースに MAI-Image-2 を配備
-az cognitiveservices account deployment create \
-  --name <mai-resource-account> \
-  --resource-group <resource-group> \
-  --deployment-name MAI-Image-2 \
-  --model-name MAI-Image-2 \
-  --model-format Microsoft \
-  --sku-capacity 1 \
-  --sku-name GlobalStandard
-```
-
-`.env` に以下を追加:
-
-```bash
-IMAGE_PROJECT_ENDPOINT_MAI=https://<mai-resource-account>.services.ai.azure.com
-```
-
-MAI-Image-2 は GPT Image 1.5 とは異なる API（`/mai/v1/images/generations`）を使用します。パラメータも `width`/`height`（整数、最小 768px、w×h ≤ 1,048,576）で指定します。
-
-### 4.5 Azure AI Search を作成し、規制文書を投入
+### 3.1 Azure AI Search + ナレッジベース投入
 
 ```bash
 az search service create \
   --name <search-name> \
-  --resource-group <resource-group> \
+  --resource-group <rg> \
   --location eastus2 \
   --sku basic
-```
 
-初期投入は次のどちらかで行います。
-
-- Foundry project connection を先に作り、`AZURE_AI_PROJECT_ENDPOINT` を使う
-- `SEARCH_ENDPOINT` と `SEARCH_API_KEY` を設定して直接投入する
-
-```bash
 uv run python scripts/setup_knowledge_base.py
 ```
 
-期待されるインデックス名は `regulations-index` です。
+インデックス名: `regulations-index`。Foundry ポータルでこの Search を既定接続として追加してください。
 
-### 4.6 Foundry project に Azure AI Search 接続を追加
+### 3.2 画像生成モデル
 
-Foundry ポータルで Azure AI Search connection を追加し、既定 connection にしてください。`regulation_check.py` は次を前提にしています。
-
-- `ConnectionType.AZURE_AI_SEARCH`
-- `connections.get_default(...)`
-
-### 4.7 Container App に追加環境変数を入れる
-
-最新の IaC では `CONTENT_UNDERSTANDING_ENDPOINT`、`SPEECH_SERVICE_ENDPOINT`、`SPEECH_SERVICE_REGION`、`LOGIC_APP_CALLBACK_URL`、`IMPROVEMENT_MCP_ENDPOINT` に加えて、`azd env` に `IMAGE_PROJECT_ENDPOINT_MAI` や `MANAGER_APPROVAL_TRIGGER_URL` を入れておけば同じく Container App に注入されます。`MANAGER_APPROVAL_TRIGGER_URL` は自動通知が必要な場合だけ設定してください。`IMPROVEMENT_MCP_ENDPOINT` は APIM route 未登録時でも入りますが、その場合はアプリがフォールバック動作します。古い環境や手動更新環境では、必要に応じて以下で上書きしてください。
+`gpt-image-1.5` は IaC で自動配備されます。MAI-Image-2 は別リソースにデプロイし:
 
 ```bash
-az containerapp update \
-  --name <container-app-name> \
-  --resource-group <resource-group> \
+azd env set IMAGE_PROJECT_ENDPOINT_MAI https://<mai-account>.services.ai.azure.com
+azd env set MAI_RESOURCE_NAME <mai-account-name>
+azd provision   # MI に RBAC を付与
+```
+
+### 3.3 Speech / Photo Avatar
+
+```bash
+az containerapp update --name <app> --resource-group <rg> \
   --set-env-vars \
-    CONTENT_UNDERSTANDING_ENDPOINT=https://<endpoint> \
-    IMAGE_PROJECT_ENDPOINT_MAI=https://<mai-resource-account>.services.ai.azure.com \
-    IMPROVEMENT_MCP_ENDPOINT=https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp \
     SPEECH_SERVICE_ENDPOINT=https://<endpoint> \
-    SPEECH_SERVICE_REGION=eastus2 \
-    LOGIC_APP_CALLBACK_URL=https://<logic-app-trigger-url> \
-    MANAGER_APPROVAL_TRIGGER_URL=https://<teams-enabled-manager-approval-workflow-url> \
-    FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai \
-    FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
+    SPEECH_SERVICE_REGION=eastus2
 ```
 
-### 4.7.1 上司承認の通知 workflow 追加
+### 3.4 Fabric Data Agent
 
-上司承認そのものはアプリ組み込みの承認ページで実行できます。Teams やメールでその承認 URL を自動通知したい場合だけ、`azd up` で作成される Consumption Logic App とは別に通知 workflow を用意してください。現行の公式コネクタ情報では Teams connector は Logic Apps Standard 側の可用性を前提にしているため、現在の Bicep が作る Consumption workflow には含めていません。
-
-詳細な request / callback 契約は [manager-approval-workflow.md](manager-approval-workflow.md) を参照してください。
-
-最低限必要なこと:
-
-- `manager_approval_url` を Teams またはメールで上司へ送る workflow を作る
-- その HTTP trigger URL を `MANAGER_APPROVAL_TRIGGER_URL` として Container App に設定する
-- workflow 側で承認 / 差し戻しまで完結させたい場合だけ、結果を `POST /api/chat/{thread_id}/manager-approval-callback` へ返す
-
-評価専用 deployment を使う場合は、同じコマンドに `EVAL_MODEL_DEPLOYMENT=<deployment-name>` も追加してください。
-
-MAI-Image-2 を既存の Container App から使うには、環境変数だけでなく Managed Identity に別 MAI アカウントへの RBAC も必要です。最新 IaC では `azd env set MAI_RESOURCE_NAME <mai-resource-account-name>` のうえで `azd provision` を再実行すると、Container App MI に必要な Azure AI / Cognitive Services ロールが付与されます。
-
-改善ブリーフ MCP を APIM で subscription key 保護する場合は、追加で以下も Container App に設定してください。
+Agent1 は `FABRIC_DATA_AGENT_URL` を最優先で使用します:
 
 ```bash
-az containerapp update \
-  --name <container-app-name> \
-  --resource-group <resource-group> \
-  --set-env-vars \
-    IMPROVEMENT_MCP_API_KEY=<apim-subscription-key> \
-    IMPROVEMENT_MCP_API_KEY_HEADER=Ocp-Apim-Subscription-Key
+az containerapp update --name <app> --resource-group <rg> \
+  --set-env-vars FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<ws>/dataagents/<da>/aiassistant/openai
 ```
 
-### 4.8 Fabric Data Agent の設定（推奨）
+利用不可の場合は `FABRIC_SQL_ENDPOINT` → CSV の順でフォールバックします。
 
-Agent1 は `FABRIC_DATA_AGENT_URL` が設定されている場合、Fabric Data Agent の Published URL を最優先で使います。
+### 3.5 上司承認通知 (任意)
 
-必要事項:
-
-1. Fabric 側で Data Agent を Publish する
-2. Published URL を取得する（末尾は `/aiassistant/openai`）
-3. Container App の実行主体に Fabric ワークスペース / Data Agent の利用権限を付与する
-4. `FABRIC_DATA_AGENT_URL` を Container App に設定する
+上司承認ページはアプリに組み込まれています。Teams/メールの自動通知は別 workflow を作成し:
 
 ```bash
-az containerapp update \
-  --name <container-app-name> \
-  --resource-group <resource-group> \
-  --set-env-vars FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai
+az containerapp update --name <app> --resource-group <rg> \
+  --set-env-vars MANAGER_APPROVAL_TRIGGER_URL=https://<workflow-url>
 ```
 
-アプリ側では以下を自動処理します。
+詳細は [manager-approval-workflow.md](manager-approval-workflow.md) を参照してください。
 
-- AAD トークン取得スコープ: `https://analysis.windows.net/powerbi/api/.default`
-- OpenAI Assistants 互換エンドポイント呼び出し
-- `api-version=2024-05-01-preview` の付与
-- 利用不可時の SQL / CSV フォールバック
+## 4. 認証と権限
 
-### 4.9 Fabric Lakehouse SQL フォールバックの設定
+Container App の MI に Bicep で付与されるロール:
 
-Agent1 が Fabric Lakehouse にリアルタイム接続するには以下が必要です:
+- Cognitive Services Contributor / OpenAI User / User
+- Azure AI Developer / Azure AI User
+- Cosmos DB Built-in Data Contributor
+- Key Vault Secrets User / AcrPull
 
-1. Fabric Lakehouse `Travel_Lakehouse` に売上テーブル（`sales_results`）とレビューテーブル（`customer_reviews`）を作成
-2. SQL endpoint を取得（Fabric ポータル → Lakehouse → SQL analytics endpoint）
-3. Container App の Managed Identity に Fabric SQL への読み取り権限を付与
-4. `FABRIC_SQL_ENDPOINT` 環境変数を設定
+ランタイムは `DefaultAzureCredential` で Foundry, Fabric, Cosmos DB, AI Search を呼び出します。
+
+## 5. 検証チェックリスト
 
 ```bash
-az containerapp update \
-  --name <container-app-name> \
-  --resource-group <resource-group> \
-  --set-env-vars FABRIC_SQL_ENDPOINT=<fabric-sql-endpoint>
+curl https://<app>/api/health    # → {"status": "ok"}
+curl https://<app>/api/ready     # → {"status": "ready", "missing": []}
 ```
 
-接続は pyodbc + Azure AD トークン認証（`SQL_COPT_SS_ACCESS_TOKEN`）で行います。`FABRIC_SQL_ENDPOINT` 未設定時は CSV ファイル (`data/sales_history.csv`, `data/customer_reviews.csv`) にフォールバックします。
+| 確認項目 | 期待動作 |
+| --- | --- |
+| ナレッジベース | `search_knowledge_base()` が検索結果を返す (静的レスポンスでない) |
+| 画像生成 | ヒーロー画像が透明 PNG でない |
+| 動画生成 | MP4 が返る (SSML ナレーション付き) |
+| Voice Live | `/api/voice-config` が MSAL 設定を返す |
+| Fabric | Agent1 が CSV フォールバックでない |
+| 評価 | `/api/evaluate` が `builtin` + `marketing_quality` を返す |
 
-### 4.10 Voice Live の設定（Entra アプリ登録）
+## 6. トラブルシューティング
 
-Voice Live API のフロントエンド認証には Entra アプリ登録が必要です:
-
-1. Azure Portal → Entra ID → App registrations → New registration
-2. Redirect URI に `http://localhost:5173`（開発）と `https://<container-app-fqdn>`（本番）を SPA として追加
-3. API permissions に `https://cognitiveservices.azure.com/user_impersonation` を追加
-
-環境変数:
-
-```bash
-az containerapp update \
-  --name <container-app-name> \
-  --resource-group <resource-group> \
-  --set-env-vars \
-    VOICE_SPA_CLIENT_ID=<entra-app-client-id> \
-    AZURE_TENANT_ID=<entra-tenant-id>
-```
-
-`scripts/postprovision.py` が Foundry に Voice Live 対応のプロンプトエージェントを自動作成します。
-
-## 5. 検証
-
-### アプリ疎通
-
-```bash
-curl https://<container-app-fqdn>/api/health
-curl https://<container-app-fqdn>/api/ready
-```
-
-### ナレッジベース疎通
-
-- `regulations-index` が存在する
-- Foundry project 既定 connection が Azure AI Search を指している
-- `search_knowledge_base()` が静的レスポンスではなく検索結果 JSON を返す
-
-### 画像生成疎通
-
-- `gpt-image-1.5` が配備済み
-- MAI-Image-2 利用時: `IMAGE_PROJECT_ENDPOINT_MAI` が設定済み、別リソースに `MAI-Image-2` が配備済み、Container App の Managed Identity にそのリソースへの RBAC が付与済み
-- 画像生成が透明 PNG に落ちていない
-
-### 音声 / 動画疎通
-
-- `SPEECH_SERVICE_ENDPOINT` が設定済み
-- `SPEECH_SERVICE_REGION` が設定済み
-- Photo Avatar 動画生成が動作する（`ja-JP-Nanami:DragonHDLatestNeural`、SSML ナレーション、`casual-sitting` スタイル、MP4 出力）
-
-### Voice Live 疎通
-
-- `VOICE_SPA_CLIENT_ID` が設定済み
-- `AZURE_TENANT_ID` が設定済み
-- `/api/voice-config` が MSAL 設定を返す
-- フロントエンドの VoiceInput コンポーネントで音声入力が動作する
-- Voice Live 利用不可時に Web Speech API にフォールバックする
-
-### Fabric Lakehouse 疎通
-
-- `FABRIC_DATA_AGENT_URL` が設定済みなら、Agent1 が `query_data_agent()` を優先し、Lakehouse ベースの自然言語回答を返す
-- `FABRIC_SQL_ENDPOINT` が設定済みなら、Agent1 の `search_sales_history()` / `search_customer_reviews()` が Fabric SQL クエリ結果を返す（CSV フォールバックではない）
-- Managed Identity に Fabric SQL 読み取り権限が付与済み
-
-### Foundry Evaluation 疎通
-
-- `/api/evaluate` が `builtin` / `custom` / `marketing_quality` を返す
-- `EVAL_MODEL_DEPLOYMENT` を設定している場合、その deployment が存在する
-- 評価ログ成功時は `foundry_portal_url` が返る
-
-## 6. 実装差分として知っておくこと
-
-- APIM AI Gateway は Azure に作成され、`scripts/postprovision.py` で Foundry AI Gateway 接続（`travel-ai-gateway`）とポリシーが自動構成される
-- Agent1 は `FABRIC_DATA_AGENT_URL` があれば Fabric Data Agent Published URL を優先利用し、利用不可時のみ Fabric SQL → CSV にフォールバックする
-- Agent4 は顧客向けブローシャを生成し、KPI・社内分析を含めない
-- Agent5（動画生成）は Photo Avatar で SSML ナレーションを生成し、`ja-JP-Nanami:DragonHDLatestNeural` 音声と冒頭ジェスチャー付きの販促動画を生成
-- Agent6 は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で動作
-- Code Interpreter は自動検出でグレースフルフォールバック
-- Voice Live API は MSAL.js + Entra アプリ登録で認証。Web Speech API への自動フォールバックあり
-- `/api/evaluate` は Built-in 評価器に加え、旅行業法準拠・コンバージョン期待度・訴求力・差別化・KPI 妥当性・ブランドトーンを返す
-- 会話履歴は Cosmos DB から `restoreConversation()` で再推論なしに復元
-- 主フローの Azure 実行でも Agent2 完了後に `approval_request` を返し、承認後に Agent3a → Agent3b → Agent4 → Agent5 を続行する
-- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）
-- 品質レビュー（Agent6）は主 workflow participant ではなく、主処理後の追加 `text` イベント
-- Logic Apps callback URL は IaC から Container App secret として注入する
-- Azure AI Search の実行時アクセスは MI だが、bootstrap script には API-key 経路も残る
-
-## 7. 補足
-
-- `gpt-image-1.5` は IaC で自動配備される。古いテンプレートで作成済みの環境のみ手動追加が必要
-- `MAI-Image-2` は別リソース（East US）に手動配備し、`IMAGE_PROJECT_ENDPOINT_MAI` で接続する
-- `MAI_RESOURCE_NAME` を `azd env` または GitHub Variables に設定しておくと、最新 IaC / deploy workflow が Container App MI の RBAC bootstrap に利用する
+| 症状 | 対処 |
+| --- | --- |
+| デモモードになる | `AZURE_AI_PROJECT_ENDPOINT` を設定 |
+| `/api/ready` が `degraded` | `ENVIRONMENT=production` で必須変数が不足 |
+| 画像が透明 PNG | 画像モデル配備を確認。MAI は別リソース + RBAC |
+| MCP 改善が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認。`tool_event` に `status=failed` が出ていないか確認 |
+| KB が静的レスポンス | AI Search 接続と `regulations-index` を確認 |
+| 上司通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認。未設定でも承認ページ自体は動作 |

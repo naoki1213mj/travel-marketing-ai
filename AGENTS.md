@@ -1,18 +1,12 @@
-# Team D ハッカソン — 旅行マーケティング AI マルチエージェント
+# Travel Marketing AI — エージェント詳細仕様
 
 ## プロジェクト概要
 
-旅行会社のマーケ担当者が自然言語で指示すると、企画書・販促ブローシャ・バナー画像を全自動生成するマルチエージェントパイプライン。Microsoft Foundry + Azure のフル PaaS 構成。
-
-要件定義書: `docs/requirements_v4.0.md`
-
-## ハッカソン情報
+旅行会社のマーケ担当者が自然言語で指示すると、企画書・販促ブローシャ・バナー画像・動画を全自動生成するマルチエージェントパイプライン。Microsoft Foundry + Azure のフル PaaS 構成。
 
 - **チーム**: Team D (Tokunaga / Matsumoto / mmatsuzaki)
-- **Deadline**: 未確認（チームに確認すること）
-- **審査基準**: 未確認（チームに確認すること）
-- **リポジトリ**: Public（ハッカソン要件）
-- **デプロイ先**: East US 2（Code Interpreter のリージョン可用性による）
+- **デプロイ先**: East US 2
+- 要件定義書: [docs/requirements_v4.0.md](docs/requirements_v4.0.md)
 
 ## アーキテクチャ
 
@@ -261,7 +255,7 @@ travel-marketing-agents/
 ├── regulations/                  # レギュレーション文書
 ├── tests/                        # pytest テスト群
 ├── docs/                         # ドキュメント
-│   ├── requirements_v3.7.md      # 要件定義書
+│   ├── requirements_v4.0.md      # 要件定義書
 │   ├── api-reference.md          # API リファレンス
 │   ├── deployment-guide.md       # デプロイガイド
 │   └── azure-setup.md            # Azure セットアップガイド

@@ -1,204 +1,164 @@
-# 旅行マーケティング AI マルチエージェントパイプライン
+# Travel Marketing AI
 
 [English README](README.md)
 
-自然言語の指示から、旅行向けの企画書、規制チェック済みの販促テキスト、ブローシャ、画像、任意の品質レビュー結果を生成するアプリケーションです。
+自然言語の指示ひとつで、旅行マーケティングの企画書・規制チェック済みコピー・顧客向けブローシャ・画像・販促動画を一気通貫で生成する AI マルチエージェントパイプラインです。
 
-## 現在の実装範囲
+> **Microsoft Foundry** + **Agent Framework 1.0** + **FastAPI** + **React 19** で構築。
 
-- React 19 フロントエンド: SSE チャット、成果物プレビュー、会話履歴復元（Cosmos DB から再推論なし）、リプレイ、多言語 UI（日英中）、音声入力（Voice Live + MSAL.js 認証 / Web Speech API フォールバック）、モデルセレクター（4 モデル）、ダークモード（WCAG AA コントラスト対応）、専用の評価タブ、版比較カード付きの改善ラウンド比較、生成中や 2 回目の上司承認待ちでも確定版を参照できる成果物バージョン切替、現在版と過去版を並べる上司承認ポータル
-- FastAPI バックエンド: レート制限、`/api/health`、`/api/ready`、静的ファイル配信、`/api/evaluate` 品質評価 API
-- パイプラインの 7 エージェント: データ検索（Fabric Lakehouse SQL + CSV フォールバック）、施策生成、規制チェック、企画書修正、販促物生成（顧客向け HTML）、動画生成（Photo Avatar）、品質レビュー。ユーザーには 5 ステップ表示で、企画書修正後に組み込み承認ページ経由の任意の上司承認ゲートを挟めます
-- 評価起点の改善では、APIM 配下の Azure Functions MCP `generate_improvement_brief` を優先利用します。`IMPROVEMENT_MCP_ENDPOINT` が未設定、未登録、または一時的に失敗した場合は、従来のプロンプトベース改善へ自動フォールバックします
-- `scripts/postprovision.py` はこの MCP 用 Flex Consumption Function App の作成、`mcp_server/` の zip 配備、APIM `improvement-mcp` route の同期まで自動実行します。.github/workflows/deploy.yml でも `scripts/deploy_improvement_mcp.py` 経由で同じ処理を再利用します
-- Fabric データアクセス: `FABRIC_DATA_AGENT_URL` がある場合は Fabric Data Agent Published URL を優先し、利用不可時は Fabric Lakehouse SQL、その次に CSV へフォールバック
-- Foundry Evaluation 連携: Built-in 指標（Relevance / Coherence / Fluency）、業務向けカスタム指標（旅行業法準拠、コンバージョン期待度、訴求力、差別化、KPI 妥当性、ブランドトーン）、Foundry ポータル記録、改善ラウンド比較を前提にした評価起点の再改善
-- Azure 構成時のみ追加で動くオプションの品質レビューエージェント
-- Photo Avatar 動画生成: HD voice + SSML ナレーション、イントロジェスチャー、`casual-sitting` スタイル、MP4/H.264、ソフト字幕埋め込み
-- Voice Live API: MSAL.js による Entra アプリ登録認証、Web Speech API への自動フォールバック
-- Code Interpreter の自動検出とグレースフルフォールバック
-- Microsoft Foundry、Azure AI Search、Cosmos DB、承認後アクション用 Logic Apps、組み込みの上司承認ページ、任意の Teams / メール通知 workflow、Content Understanding、Speech / Photo Avatar、Fabric Lakehouse との連携
-- `azd` + Bicep による Azure Container Apps、ACR、APIM、Key Vault、Cosmos DB、VNet、Log Analytics、Application Insights の構築
-
-## 実装上の現在地
-
-- Azure 接続時の実行経路は、FastAPI から Microsoft Foundry の project endpoint を `DefaultAzureCredential` で直接呼び出します。コンテンツフィルタはモデル配備側に寄せ、アプリ側では明らかな指示上書きだけを軽量ガードで弾きます。
-- APIM AI Gateway は `scripts/postprovision.py` で自動構成され、Foundry AI Gateway 接続（`travel-ai-gateway`）の作成と、生成された `foundry-*` API への `llm-token-limit` / `llm-emit-token-metric` ポリシー適用を行います。
-- APIM 側の content safety は現行構成では有効化していません。Prompt Shields、document or indirect attack 対策、tool response 介入、Spotlighting は Azure / Foundry 側で明示割当した場合にのみ有効になる追加ガードレールとして扱います。
-- Azure モードの `POST /api/chat` は Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
-- 担当者承認後は Agent3a → Agent3b を実行し、`manager_approval_enabled=true` の場合は組み込みの上司承認ページ URL を発行して Agent4 → Agent5 の前で待機します。
-- `MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば、その URL を上司へ送る通知 workflow も併せて呼び出します。未設定または送信失敗時は、担当者が生成済みリンクを共有すればそのまま運用できます。
-- Bicep が自動作成するのは承認後アクション用の Logic Apps だけです。上司承認そのものは組み込みページで処理し、任意の外部通知 workflow の契約は [docs/manager-approval-workflow.md](docs/manager-approval-workflow.md) にまとめています。
-- パイプラインは 5 ユーザー向けステップで、内部は 7 エージェントで構成されています（Agent3a+3b がステップ 4、Agent4+5 がステップ 5 を共有）。
-- Agent1 はまず Fabric Data Agent Published URL（`FABRIC_DATA_AGENT_URL`）を AAD 認証付きの Assistants 互換エンドポイントとして利用し、利用できない場合は Fabric Lakehouse SQL の pyodbc 接続（`SQL_COPT_SS_ACCESS_TOKEN`）、最後に CSV へフォールバックします。
-- Agent4 は顧客向けブローシャを生成し、KPI・売上目標・社内分析を含めません。
-- Agent5（動画生成）は Photo Avatar で SSML ベースのナレーションを組み立て、`ja-JP-Nanami:DragonHDLatestNeural` 音声とイントロジェスチャー付きの販促動画を MP4/H.264 で出力します。
-- Agent6（品質レビュー）は `GitHubCopilotAgent` + `PermissionHandler.approve_all` で自動権限承認を使用します。
-- Code Interpreter は実行時に自動検出され、利用不可の場合はグレースフルにフォールバックします（`ENABLE_CODE_INTERPRETER=false` で無効化可）。
-- 現行リリースでは、Azure Functions MCP を改善ブリーフ生成にだけ使っています。その他の業務ツールは従来どおり FastAPI 内の `@tool` 実装です。
-- フロントエンドでは、このリモート MCP 呼び出しを改善ラウンドのツールバッジとして表示し、`source=mcp` でローカルツール実行と見分けられるようにしています。
-- APIM 側の公開 MCP endpoint は `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` 形式を前提にしています。APIM の `subscriptionRequired=false` 構成なら `IMPROVEMENT_MCP_API_KEY` は空で問題ありません。
-- フロントエンドのモデルセレクターで `gpt-5-4-mini`（既定）、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` を選択できます。
-- `POST /api/evaluate` は `azure-ai-evaluation` の Built-in 評価器（Relevance / Coherence / Fluency）と、code-based / prompt-based のカスタム評価器を組み合わせ、成功時は Foundry ポータル URL も返します。
-- 評価結果からの改善は `POST /api/chat` にフィードバック文を戻して企画書を再生成し、新しい `approval_request` を返します。承認すると規制チェック以降の成果物も再生成されます。
-- フロントエンドは完了ごとに成果物スナップショットを保持し、`VersionSelector` で企画書・ブローシャ・画像・動画をまとめて切り替えます。
-- 最終承認後は、ブローシャと画像の生成が終わった時点でユーザー向けには完了扱いになります。動画のポーリング、品質レビュー、承認後アクション用 Logic Apps は background update として続行され、同じ会話履歴に追記されます。
-- 新しい版の生成中や 2 回目の上司承認待ちでは、右ペインは既定で最新の確定版を表示し続けます。生成中チップから pending 中のライブ版へ切り替えられ、戻っても以前の確定版は失われません。
-- 評価パネルの比較はメインの成果物プレビューを切り替えずに行います。比較領域の上部には「現在の版」と「比較対象版」の両方を要約カードで表示します。
-- 組み込みの上司承認ポータルは `GET /api/chat/{thread_id}/manager-approval-request` から `current_version` と `previous_versions` を受け取り、今回の修正版と過去の確定版を横並びで比較表示します。永続化が追いつかないタイミングでも、バックエンドは pending approval context 側に比較データを保持して表示を維持します。
-- 評価レスポンスに `task_adherence` が含まれていても、現状はノイズが大きいため、フロントエンドではスコア表示、比較差分、総合サマリ、改善フィードバック生成から除外しています。
-- Voice Live API は MSAL.js による Entra アプリ登録認証です。`VoiceInput` コンポーネントは Voice Live + Web Speech API のデュアルモードで動作します。
-- 会話履歴は Cosmos DB から `restoreConversation()` で復元され、再推論は行いません。
-- ナレッジベースの実行時検索は Managed Identity を使いますが、`scripts/setup_knowledge_base.py` には初期投入用の API キー経路も残しています。
-
-Azure アーキテクチャ図と補足は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。詳細な構成図は [docs/architecture.drawio](docs/architecture.drawio) にもあります。
-
-## Azure 実機スナップショット
-
-- `2026-04-05` 時点で、Azure の dev 環境では `/api/health=ok`、`/api/ready=ready` を確認済みです。
-- ランタイム用テキスト deployment、評価用 deployment、`gpt-image-1.5` は Azure 上で稼働確認済みです。
-- 評価起点の改善フローは、APIM 配下の `improvement-mcp` ルートと Azure Functions MCP バックエンドを通した実経路で検証済みです。
-- Fabric 接続、AI Gateway の post-provision 設定、承認後アクション用 Logic Apps callback も Azure 実機で確認済みです。
-
-## アーキテクチャ概要
+## アーキテクチャ
 
 ```mermaid
-flowchart LR
-    user[マーケ担当者] --> ui[React フロントエンド]
+flowchart TD
+    user([マーケ担当者]) --> ui[React フロントエンド]
     ui --> api[FastAPI SSE API]
-    api --> flow[FastAPI オーケストレーション]
-    flow --> a1[data-search-agent]
-    a1 --> fabric[Fabric Lakehouse SQL]
-    a1 -.-> csv[CSV フォールバック]
-    flow --> a2[marketing-plan-agent]
-    a2 --> web[Foundry Web Search]
-    flow --> approval{担当者 approval_request}
-    approval --> a3a[regulation-check-agent]
-    a3a --> kb[Azure AI Search / Foundry IQ]
-    a3a --> safeweb[Web Search 安全情報]
-    a3a --> a3b[plan-revision-agent]
-    a3b --> managerApproval{上司承認オプション}
-    managerApproval -->|off| a4[brochure-gen-agent]
-    managerApproval -->|on| portal[組み込み上司承認ページ]
-    managerApproval -. 任意通知 .-> managerWorkflow[Teams / メール通知 workflow]
-    managerWorkflow --> manager[上司へ承認 URL を送付]
-    manager --> portal
-    portal --> callback[/manager-approval-callback/]
-    callback --> a4[brochure-gen-agent]
-    a4 --> image[gpt-image-1.5 / MAI-Image-2]
-    a4 --> cu[Content Understanding]
-    a4 --> a5[video-gen-agent]
-    a5 --> speech[Speech / Photo Avatar]
-    flow --> ui
-    api -. optional .-> review[quality-review-agent]
-    api -. 承認後アクション .-> logic[Logic Apps]
+
+    subgraph pipeline[エージェントパイプライン]
+        direction TB
+        a1["1 · データ検索"] --> a2["2 · 施策生成"]
+        a2 --> approve{担当者承認}
+        approve --> a3["3 · 規制チェック + 修正"]
+        a3 --> mgr{上司承認?}
+        mgr -->|off| a4["4 · ブローシャ & 画像生成"]
+        mgr -->|on| portal[上司承認ページ]
+        portal --> a4
+        a4 --> a5["5 · 動画生成"]
+    end
+
+    api --> pipeline
+
+    subgraph azure[Azure サービス群]
+        direction LR
+        foundry[Microsoft Foundry]
+        fabric[Fabric Lakehouse]
+        search[Azure AI Search]
+        speech[Speech · Photo Avatar]
+        cosmos[Cosmos DB]
+        apim[APIM AI Gateway]
+        funcs[Functions MCP]
+    end
+
+    a1 -.-> fabric
+    a2 -.-> foundry
+    a3 -.-> search
+    a4 -.-> foundry
+    a5 -.-> speech
+    api -.-> cosmos
+    api -.-> apim
+    apim -.-> funcs
 ```
+
+詳しい Azure リソース構成は [docs/azure-architecture.md](docs/azure-architecture.md) を参照してください。
+
+## 主な機能
+
+| カテゴリ | 内容 |
+| --- | --- |
+| **マルチエージェント** | 7 エージェントを 5 ステップに集約、承認ゲート + 任意の上司承認 |
+| **AI 画像生成** | GPT Image 1.5 / MAI-Image-2（UI から選択可） |
+| **動画生成** | Photo Avatar + SSML ナレーション、MP4/H.264 出力 |
+| **品質評価** | Built-in 指標 + 業務カスタム指標、版比較 UI |
+| **評価起点の改善** | APIM 経由の Azure Functions MCP で改善ブリーフを生成 |
+| **リアルタイム配信** | SSE によるエージェント単位の進捗表示 |
+| **会話履歴** | Cosmos DB 保存、再推論なしで即時復元 |
+| **音声入力** | Voice Live API (MSAL.js) + Web Speech API フォールバック |
+| **多言語 UI** | 日本語・英語・中国語、ダーク/ライトモード (WCAG AA) |
+| **エンタープライズ連携** | Logic Apps 承認後アクション、Teams/メール通知(任意) |
+| **IaC** | Bicep + azd でワンコマンド Azure デプロイ |
+| **CI/CD** | GitHub Actions — Ruff, pytest, tsc, Trivy, Gitleaks |
 
 ## クイックスタート
 
 ### 前提条件
 
-- Python 3.14+
-- Node.js 22+
-- [uv](https://docs.astral.sh/uv/)
-- Azure にデプロイする場合は Azure CLI と Azure Developer CLI (`azd`)
+- Python 3.14+ / Node.js 22+ / [uv](https://docs.astral.sh/uv/)
+- Azure デプロイ時: Azure CLI + [azd](https://learn.microsoft.com/azure/developer/azure-developer-cli/install-azd)
 
-### ローカルセットアップ
+### インストール & 起動
 
 ```bash
-uv sync
-cd frontend && npm ci && cd ..
-cp .env.example .env
+uv sync                                  # Python 依存
+cd frontend && npm ci && cd ..            # Node 依存
+cp .env.example .env                      # Azure 接続情報を設定
+
+uv run uvicorn src.main:app --reload      # バックエンド → http://localhost:8000
+cd frontend && npm run dev                # フロントエンド → http://localhost:5173
 ```
 
-`.env` に Azure の接続情報を入れると実 Azure モードで動作します。`.env` や process env に空欄が残っていても、ローカル起動時のバックエンドは `azd env get-values` の値を補完に使います。そのため `azd up` 済みなら `IMPROVEMENT_MCP_ENDPOINT` や `AZURE_AI_PROJECT_ENDPOINT` を毎回手でコピーしなくても動かせます。複数の azd 環境を使う場合は、FastAPI 起動前に `azd env select <name>` を実行してください。`AZURE_AI_PROJECT_ENDPOINT` が解決できない場合はモック / デモ動作になります。
+> `AZURE_AI_PROJECT_ENDPOINT` 未設定でも**デモモード**で動作します。
 
-### ローカル起動
-
-```bash
-uv run uvicorn src.main:app --reload --port 8000
-cd frontend && npm run dev
-```
-
-- フロントエンド: `http://localhost:5173`
-- バックエンド: `http://localhost:8000`
-
-### 検証コマンド
+### テスト & リント
 
 ```bash
-uv run pytest
-uv run ruff check .
-cd frontend && npm run lint
-cd frontend && npx tsc --noEmit
-cd frontend && npm run build
+uv run pytest                             # バックエンドテスト
+uv run ruff check .                       # Python リント
+cd frontend && npm run lint               # フロントエンドリント
+cd frontend && npx tsc --noEmit           # TypeScript 型チェック
 ```
 
 ### Azure デプロイ
 
 ```bash
 azd auth login
-azd up
+azd up                                    # プロビジョニング + ビルド + デプロイ
 ```
 
-`azd up` の後、`scripts/postprovision.py` が AI Gateway 接続と APIM ポリシーを自動構成します。残りの手動設定（Azure AI Search や Speech / Logic Apps の環境変数投入）は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
+`scripts/postprovision.py` が APIM AI Gateway、MCP Function App、Voice Agent、Entra SPA 登録を自動構成します。残りの手動設定は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
 
-Teams やメールで上司承認の自動通知を行う場合は、[docs/manager-approval-workflow.md](docs/manager-approval-workflow.md) も参照して `MANAGER_APPROVAL_TRIGGER_URL` を設定してください。
-
-## 主要な環境変数
+## 環境変数
 
 | 変数名 | 必須 | 用途 |
 | --- | --- | --- |
 | `AZURE_AI_PROJECT_ENDPOINT` | 本番 | Microsoft Foundry project endpoint |
-| `MODEL_NAME` | 任意 | テキスト推論の deployment 名。既定値は `gpt-5-4-mini`。フロントエンドのモデルセレクターでは `gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1` も選択可 |
-| `EVAL_MODEL_DEPLOYMENT` | 推奨 | `/api/evaluate` 用の専用 deployment 名。未設定時は `MODEL_NAME` を使用 |
-| `IMPROVEMENT_MCP_ENDPOINT` | 任意 | `generate_improvement_brief` 用の APIM 公開 MCP endpoint。未設定または到達不可時は従来の改善ロジックへフォールバック |
-| `IMPROVEMENT_MCP_API_KEY` | 任意 | APIM subscription key など、MCP API が鍵を要求する場合だけ設定 |
-| `IMPROVEMENT_MCP_API_KEY_HEADER` | 任意 | MCP gateway key のヘッダー名。既定値は `Ocp-Apim-Subscription-Key` |
-| `ENVIRONMENT` | 任意 | `development`、`staging`、`production` |
-| `SERVE_STATIC` | 任意 | ビルド済みフロントエンドを FastAPI から配信する場合に `true` |
-| `API_KEY` | 任意 | 設定すると `health` / `ready` 以外の `/api/*` が `x-api-key` 必須になる |
-| `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存。未設定時はインメモリ |
-| `FABRIC_DATA_AGENT_URL` | 推奨 | `/aiassistant/openai` で終わる Fabric Data Agent Published URL。Agent1 はこれを最優先で利用 |
-| `FABRIC_SQL_ENDPOINT` | 任意 | Fabric Data Agent が使えない場合や追加の構造化検索が必要な場合の SQL endpoint |
-| `CONTENT_UNDERSTANDING_ENDPOINT` | 任意 | PDF 解析用 |
-| `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint。設定時のみ UI から選択可能 |
-| `SPEECH_SERVICE_ENDPOINT` | 任意 | Speech / Photo Avatar 動画生成用 |
-| `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
-| `VOICE_AGENT_NAME` | 任意 | `/api/voice-config` で返す Voice Live エージェント名 |
-| `VOICE_SPA_CLIENT_ID` | 任意 | Voice Live の MSAL.js 認証用 Entra アプリ登録クライアント ID |
-| `AZURE_TENANT_ID` | 任意 | Voice Live 認証用 Entra テナント ID |
-| `LOGIC_APP_CALLBACK_URL` | 任意 | 承認継続後アクション用の Logic Apps HTTP トリガー |
-| `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認リンクを送る通知 workflow の HTTP トリガー |
-| `APPLICATIONINSIGHTS_CONNECTION_STRING` | 任意 | Application Insights の接続文字列 |
+| `MODEL_NAME` | 任意 | テキスト deployment 名（既定: `gpt-5-4-mini`） |
+| `EVAL_MODEL_DEPLOYMENT` | 推奨 | `/api/evaluate` 用の専用 deployment |
+| `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存（未設定時はインメモリ） |
+| `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
+| `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
+| `IMPROVEMENT_MCP_ENDPOINT` | 任意 | 評価改善用 APIM MCP ルート |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI-Image-2 用の別 Foundry アカウント |
 
-詳細は [.env.example](.env.example) を参照してください。
-
-Azure へのプロビジョニングや GitHub Actions deploy では、Container App の Managed Identity に別 MAI アカウントの RBAC を付与するため、追加で `MAI_RESOURCE_NAME` の設定も必要です。
-
-## 現在の MCP 利用範囲
-
-- 現行リリースで Azure Functions MCP を使っているのは、評価起点の改善における `generate_improvement_brief` だけです。
-- それ以外のパイプライン処理は引き続きエージェント内の `@tool` 実装で完結し、主フローはシンプルに保っています。
-- 今後リモートツールを増やす場合も、Azure Functions MCP extension + APIM 公開 + FastAPI 側の graceful fallback という同じパターンを推奨します。
+全項目は [.env.example](.env.example) を参照してください。
 
 ## ディレクトリ構成
 
 ```text
-src/                 FastAPI アプリ、エージェント、ワークフロー、ミドルウェア
-frontend/            React UI、SSE フック、成果物ビュー、会話履歴
-infra/               Azure リソースの Bicep テンプレート
-data/                デモデータとリプレイ用データ
-regulations/         ナレッジベース投入元の規制文書
-tests/               バックエンドテスト
-docs/                API、デプロイ、Azure セットアップ、アーキテクチャ資料
+src/                 FastAPI バックエンド、エージェント定義、ミドルウェア
+  agents/            7 エージェント（データ検索 → 品質レビュー）
+  api/               REST + SSE エンドポイント
+frontend/            React 19 · Vite · Tailwind CSS · i18n
+infra/               Bicep IaC モジュール
+data/                デモ CSV データとリプレイペイロード
+regulations/         ナレッジベース投入用の規制文書
+tests/               バックエンド pytest テスト
+scripts/             ポストプロビジョン & デプロイ自動化
+docs/                アーキテクチャ、API リファレンス、デプロイガイド
 ```
 
 ## ドキュメント
 
-- [docs/azure-architecture.md](docs/azure-architecture.md): 現在の Azure 構成図と補足
-- [docs/api-reference.md](docs/api-reference.md): REST API と SSE の現行仕様
-- [docs/deployment-guide.md](docs/deployment-guide.md): ローカル、Docker、CI/CD、Azure デプロイの説明
-- [docs/azure-setup.md](docs/azure-setup.md): Azure 構築と post-provision 手順
-- [mcp_server/README.md](mcp_server/README.md): Azure Functions MCP ツール、APIM 登録、互換性メモ
-- [docs/manager-approval-workflow.md](docs/manager-approval-workflow.md): 任意の外部通知 workflow 向け request / callback 契約
-- [docs/requirements_v4.0.md](docs/requirements_v4.0.md): 要件定義書（v4.0、現行実装に追従）
+| ドキュメント | 説明 |
+| --- | --- |
+| [docs/azure-architecture.md](docs/azure-architecture.md) | Azure リソース構成とランタイムフロー |
+| [docs/api-reference.md](docs/api-reference.md) | REST API と SSE イベント仕様 |
+| [docs/deployment-guide.md](docs/deployment-guide.md) | ローカル、Docker、CI/CD、Azure デプロイ |
+| [docs/azure-setup.md](docs/azure-setup.md) | ポストプロビジョン設定とトラブルシューティング |
+| [AGENTS.md](AGENTS.md) | エージェント詳細と技術スタック |
+
+## 技術スタック
+
+| 層 | 技術 |
+| --- | --- |
+| フロントエンド | React 19 · TypeScript · Vite · Tailwind CSS |
+| バックエンド | Python 3.14 · FastAPI · uvicorn |
+| AI モデル | gpt-5.4-mini · GPT Image 1.5 · MAI-Image-2 |
+| エージェント | Microsoft Agent Framework 1.0.0 (GA) |
+| データ | Fabric Lakehouse · Delta Parquet + SQL |
+| ナレッジ | Foundry IQ · Azure AI Search |
+| 動画 | Speech / Photo Avatar |
+| インフラ | Container Apps · APIM · Cosmos DB · Key Vault · VNet |
+| CI/CD | GitHub Actions · azd · Bicep |
+
+## ライセンス
+
+このプロジェクトはデモンストレーション目的です。

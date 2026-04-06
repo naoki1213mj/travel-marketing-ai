@@ -1,6 +1,6 @@
 # API リファレンス
 
-このドキュメントは、現在の実装を基準にした REST API と SSE の仕様です。要件書にある将来像ではなく、`src/api/chat.py`、`src/api/conversations.py`、`src/api/evaluate.py`、`src/api/voice.py`、`src/api/health.py` の現行挙動をまとめています。
+REST API と SSE イベントの仕様です。
 
 ## ベース URL
 
