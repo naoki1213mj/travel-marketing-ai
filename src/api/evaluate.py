@@ -39,6 +39,8 @@ _ASSET_CUSTOM_METRICS = (
     "disclosure_completeness",
     "accessibility_readiness",
 )
+_MAX_EVAL_QUERY_CHARS = 4000
+_MAX_EVAL_RESPONSE_CHARS = 12000
 _METRIC_LABELS = {
     "relevance": "依頼適合性",
     "coherence": "構成の一貫性",
@@ -69,6 +71,13 @@ class EvaluateRequest(BaseModel):
     html: str = Field("", description="ブローシャの HTML テキスト（オプション）")
     conversation_id: str | None = Field(default=None, description="保存先の会話ID")
     artifact_version: int | None = Field(default=None, ge=1, description="評価対象の成果物バージョン")
+
+
+def _truncate_for_evaluation(text: str, limit: int) -> str:
+    """評価器へ渡すテキスト長を制限する。"""
+    if len(text) <= limit:
+        return text
+    return f"{text[:limit].rstrip()}\n\n[truncated]"
 
 
 def _average(values: list[float]) -> float:
@@ -681,6 +690,9 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
     if not endpoint:
         return {"error": "AZURE_AI_PROJECT_ENDPOINT が未設定です"}
 
+    trimmed_query = _truncate_for_evaluation(query, _MAX_EVAL_QUERY_CHARS)
+    trimmed_response = _truncate_for_evaluation(response, _MAX_EVAL_RESPONSE_CHARS)
+
     try:
         from azure.identity import DefaultAzureCredential
 
@@ -715,7 +727,7 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         results: dict[str, dict] = {}
         for name, evaluator in evaluators.items():
             try:
-                result = evaluator(query=query, response=response)
+                result = evaluator(query=trimmed_query, response=trimmed_response)
                 score = result.get(name, result.get(f"gpt_{name}"))
                 reason = result.get(f"{name}_reason", result.get(f"{name}_label", ""))
                 results[name] = {
@@ -725,6 +737,9 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
             except (ValueError, OSError, RuntimeError) as exc:
                 logger.warning("Built-in 評価器 %s でエラー: %s", name, exc)
                 results[name] = {"score": -1, "reason": str(exc)}
+            except Exception as exc:
+                logger.exception("Built-in 評価器 %s で予期しないエラー", name)
+                results[name] = {"score": -1, "reason": str(exc)}
 
         return results
 
@@ -732,6 +747,9 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         return {"error": f"azure-ai-evaluation が未インストール: {exc}"}
     except (ValueError, OSError) as exc:
         return {"error": f"認証エラー: {exc}"}
+    except Exception as exc:
+        logger.exception("Built-in 評価器の初期化に失敗")
+        return {"error": f"Built-in 評価器の実行に失敗: {exc}"}
 
 
 # --- Prompt-based カスタム評価器 ---
@@ -743,6 +761,9 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
     endpoint = settings["project_endpoint"]
     if not endpoint:
         return {"score": -1, "reason": "AZURE_AI_PROJECT_ENDPOINT が未設定"}
+
+    trimmed_query = _truncate_for_evaluation(query, _MAX_EVAL_QUERY_CHARS)
+    trimmed_response = _truncate_for_evaluation(response, _MAX_EVAL_RESPONSE_CHARS)
 
     try:
         from src.agent_client import get_shared_credential
@@ -792,7 +813,7 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
             model=eval_model,
             messages=[
                 {"role": "system", "content": "JSON のみ出力してください。"},
-                {"role": "user", "content": judge_prompt.format(query=query, response=response)},
+                {"role": "user", "content": judge_prompt.format(query=trimmed_query, response=trimmed_response)},
             ],
             temperature=0.1,
             max_completion_tokens=500,
@@ -807,6 +828,9 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
 
     except (ImportError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Marketing Quality Evaluator でエラー: %s", exc)
+        return {"score": -1, "reason": str(exc)}
+    except Exception as exc:
+        logger.exception("Marketing Quality Evaluator で予期しないエラー")
         return {"score": -1, "reason": str(exc)}
 
 
@@ -948,10 +972,24 @@ async def evaluate_artifacts(
     }
 
     # Built-in AI-assisted 評価器
-    results["builtin"] = await _run_builtin_evaluators(body.query, body.response)
+    try:
+        results["builtin"] = await _run_builtin_evaluators(body.query, body.response)
+    except (ValueError, OSError, RuntimeError) as exc:
+        logger.warning("Built-in 評価器呼び出しに失敗: %s", exc)
+        results["builtin"] = {"error": str(exc)}
+    except Exception as exc:
+        logger.exception("Built-in 評価器呼び出しで予期しないエラー")
+        results["builtin"] = {"error": str(exc)}
 
     # Prompt-based カスタム評価器（LLM ジャッジ）
-    results["marketing_quality"] = await _run_marketing_quality_evaluator(body.query, body.response)
+    try:
+        results["marketing_quality"] = await _run_marketing_quality_evaluator(body.query, body.response)
+    except (ValueError, OSError, RuntimeError) as exc:
+        logger.warning("Marketing Quality Evaluator 呼び出しに失敗: %s", exc)
+        results["marketing_quality"] = {"score": -1, "reason": str(exc)}
+    except Exception as exc:
+        logger.exception("Marketing Quality Evaluator 呼び出しで予期しないエラー")
+        results["marketing_quality"] = {"score": -1, "reason": str(exc)}
 
     results["plan_quality"] = _build_plan_quality_result(
         builtin=results["builtin"],

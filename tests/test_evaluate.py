@@ -271,3 +271,79 @@ def test_evaluate_endpoint_detects_regression_against_previous_version(monkeypat
     assert any(item["key"] == "cta_visibility" and item["area"] == "asset" for item in guard["degraded_metrics"])
     assert guard["plan_overall_delta"] < 0
     assert guard["asset_overall_delta"] < 0
+
+
+def test_truncate_for_evaluation_keeps_short_text_intact():
+    text = "短いテキスト"
+
+    assert evaluate_module._truncate_for_evaluation(text, 20) == text
+
+
+def test_truncate_for_evaluation_marks_trimmed_text():
+    text = "a" * 50
+
+    truncated = evaluate_module._truncate_for_evaluation(text, 10)
+
+    assert truncated.startswith("a" * 10)
+    assert truncated.endswith("[truncated]")
+
+
+def test_evaluate_endpoint_returns_200_when_v2_evaluators_raise(monkeypatch):
+    persist_calls: list[tuple[str, int]] = []
+
+    async def broken_builtin(_query: str, _response: str) -> dict:
+        raise RuntimeError("builtin evaluator unavailable")
+
+    async def broken_marketing(_query: str, _response: str) -> dict:
+        raise Exception("marketing evaluator unavailable")
+
+    async def fake_persist(_conversation_id: str, _artifact_version: int, _result: dict) -> dict | None:
+        persist_calls.append((_conversation_id, _artifact_version))
+        return {"version": 2, "round": 1, "created_at": "2026-04-06T00:00:00+00:00"}
+
+    async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
+        return None
+
+    async def fake_get_conversation(_conversation_id: str) -> dict:
+        return {
+            "messages": [
+                {
+                    "event": "done",
+                    "data": {
+                        "conversation_id": "conv-v2",
+                        "metrics": {"latency_seconds": 1, "tool_calls": 1, "total_tokens": 10},
+                    },
+                },
+                {
+                    "event": "done",
+                    "data": {
+                        "conversation_id": "conv-v2",
+                        "metrics": {"latency_seconds": 1, "tool_calls": 1, "total_tokens": 10},
+                    },
+                },
+            ]
+        }
+
+    monkeypatch.setattr(evaluate_module, "_run_builtin_evaluators", broken_builtin)
+    monkeypatch.setattr(evaluate_module, "_run_marketing_quality_evaluator", broken_marketing)
+    monkeypatch.setattr(evaluate_module, "_persist_evaluation_result", fake_persist)
+    monkeypatch.setattr(evaluate_module, "_log_to_foundry", fake_log)
+    monkeypatch.setattr(evaluate_module, "get_conversation", fake_get_conversation)
+
+    response = client.post(
+        "/api/evaluate",
+        json={
+            "query": "改善版の京都プランを評価",
+            "response": "# 改善版企画書\nターゲット: シニア\nKPI: 予約数 120 件",
+            "html": "<html><body>予約はこちら</body></html>",
+            "conversation_id": "conv-v2",
+            "artifact_version": 2,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["builtin"] == {"error": "builtin evaluator unavailable"}
+    assert payload["marketing_quality"] == {"score": -1, "reason": "marketing evaluator unavailable"}
+    assert payload["evaluation_meta"] is None or payload["evaluation_meta"]["version"] == 2
+    assert persist_calls == [("conv-v2", 2)] or persist_calls == []
