@@ -26,8 +26,8 @@
 ### セットアップ
 
 ```bash
-git clone https://github.com/naoki1213mj/hackathon-teamD.git
-cd hackathon-teamD
+git clone https://github.com/naoki1213mj/travel-marketing-ai.git
+cd travel-marketing-ai
 uv sync
 cd frontend && npm ci && cd ..
 cp .env.example .env
