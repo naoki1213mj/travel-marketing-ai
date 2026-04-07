@@ -348,7 +348,7 @@ class TestBrochureGenTools:
 
     @pytest.mark.asyncio
     async def test_generate_promo_video_uses_hd_ssml_payload(self, monkeypatch):
-        """動画生成は HD voice の SSML と品質寄り avatar 設定で送信する"""
+        """動画生成は avatar 互換の簡素な SSML と既定 avatar 設定で送信する"""
         import src.agents.video_gen as vg
 
         captured: dict[str, object] = {}
@@ -397,8 +397,55 @@ class TestBrochureGenTools:
         assert payload["avatarConfig"]["bitrateKbps"] == 4000
         ssml_content = payload["inputs"][0]["content"]
         assert "ja-JP-Nanami:DragonHDLatestNeural" in ssml_content
-        assert "gesture.wave-left-1" in ssml_content
+        assert "gesture.show-front-1" in ssml_content
         assert "詳しくはブローシャをご確認のうえ" in ssml_content
+        assert "mstts:express-as" not in ssml_content
+        assert "mstts:paralinguistic" not in ssml_content
+        assert "<prosody" not in ssml_content
+        assert "<emphasis" not in ssml_content
+
+    @pytest.mark.asyncio
+    async def test_generate_promo_video_guide_uses_valid_avatar_style(self, monkeypatch):
+        """guide 指定時は Lori の有効な casual スタイルを使う"""
+        import src.agents.video_gen as vg
+
+        captured: dict[str, object] = {}
+
+        class _Token:
+            token = "test-token"
+
+        class _Credential:
+            def get_token(self, _scope: str) -> _Token:
+                return _Token()
+
+        class _Response:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return b'{"id": "promo-job-guide"}'
+
+        def _fake_urlopen(request, timeout: int = 0):
+            del timeout
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return _Response()
+
+        monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://test.cognitiveservices.azure.com")
+        monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
+        monkeypatch.setattr(vg, "DefaultAzureCredential", lambda: _Credential())
+        monkeypatch.setattr(vg.urllib.request, "urlopen", _fake_urlopen)
+
+        result = await vg.generate_promo_video("沖縄の海と文化を体験できる旅です。", "guide")
+        parsed = json.loads(result)
+        payload = captured["payload"]
+
+        assert parsed["status"] == "submitted"
+        assert payload["avatarConfig"]["talkingAvatarCharacter"] == "lori"
+        assert payload["avatarConfig"]["talkingAvatarStyle"] == "casual"
+        assert "gesture.hello" in payload["inputs"][0]["content"]
 
     @pytest.mark.asyncio
     async def test_generate_promo_video_respects_env_overrides(self, monkeypatch):

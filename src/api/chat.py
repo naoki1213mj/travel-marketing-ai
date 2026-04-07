@@ -87,7 +87,7 @@ _VIDEO_POLL_TIMEOUT_MESSAGE = (
 )
 
 
-def _build_video_poll_completion_events(video_url: str | None, *, background_update: bool = False) -> list[dict]:
+def _build_video_poll_completion_events(video_url: str | dict | None, *, background_update: bool = False) -> list[dict]:
     """動画ジョブのポーリング結果を保存用イベントへ正規化する。"""
 
     def _build_text_event(content: str, content_type: str) -> dict:
@@ -100,11 +100,30 @@ def _build_video_poll_completion_events(video_url: str | None, *, background_upd
             data["background_update"] = True
         return {"event": SSEEventType.TEXT.value, "data": data}
 
-    if video_url and video_url.startswith("https://"):
-        return [_build_text_event(video_url, "video")]
+    if isinstance(video_url, dict):
+        status = _sanitize_optional_text(str(video_url.get("status", ""))).lower()
+        resolved_video_url = _sanitize_optional_text(str(video_url.get("video_url") or ""))
+        detail = _sanitize_optional_text(str(video_url.get("message") or ""))
 
-    if video_url:
-        logger.warning("Photo Avatar: 無効な video_url を無視: %s", video_url[:100])
+        if resolved_video_url.startswith("https://"):
+            return [_build_text_event(resolved_video_url, "video")]
+
+        if resolved_video_url:
+            logger.warning("Photo Avatar: 無効な video_url を無視: %s", resolved_video_url[:100])
+
+        if status in {"failed", "cancelled", "error"}:
+            failure_message = "⚠️ アバター動画の生成に失敗しました。"
+            if detail:
+                failure_message = f"{failure_message} {detail}"
+            return [_build_text_event(failure_message, "text")]
+
+        if status == "timeout" and detail:
+            return [_build_text_event(f"{_VIDEO_POLL_TIMEOUT_MESSAGE} {detail}", "text")]
+
+    elif video_url and video_url.startswith("https://"):
+        return [_build_text_event(video_url, "video")]
+    elif video_url:
+        logger.warning("Photo Avatar: 無効な video_url を無視: %s", str(video_url)[:100])
 
     return [_build_text_event(_VIDEO_POLL_TIMEOUT_MESSAGE, "text")]
 

@@ -1290,6 +1290,31 @@ def test_build_video_poll_completion_events_returns_timeout_message_for_missing_
     ]
 
 
+def test_build_video_poll_completion_events_returns_failure_detail() -> None:
+    """動画ジョブ失敗時は timeout ではなく失敗詳細を返す"""
+
+    events = chat_module._build_video_poll_completion_events(
+        {
+            "status": "failed",
+            "video_url": None,
+            "message": "Unsupported gesture for lisa/casual-sitting.",
+        },
+        background_update=True,
+    )
+
+    assert events == [
+        {
+            "event": "text",
+            "data": {
+                "content": "⚠️ アバター動画の生成に失敗しました。 Unsupported gesture for lisa/casual-sitting.",
+                "agent": "video-gen-agent",
+                "content_type": "text",
+                "background_update": True,
+            },
+        }
+    ]
+
+
 @pytest.mark.asyncio
 async def test_post_approval_emits_video_timeout_message_when_polling_times_out(monkeypatch) -> None:
     """動画 polling が完了しない場合でも、永続化用の warning を SSE に流す"""

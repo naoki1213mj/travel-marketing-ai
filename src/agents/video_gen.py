@@ -12,6 +12,7 @@ import threading
 import time
 import urllib.error
 import urllib.request
+from typing import TypedDict
 from xml.sax.saxutils import escape
 
 import httpx
@@ -38,6 +39,16 @@ _VIDEO_SECTION_LABELS = {
     "販促チャネル",
     "kpi",
 }
+_AVATAR_PROFILES: dict[str, tuple[str, str]] = {
+    "concierge": ("lisa", "casual-sitting"),
+    "guide": ("lori", "casual"),
+    "presenter": ("lisa", "graceful-sitting"),
+}
+_SUPPORTED_GESTURES: dict[tuple[str, str], list[str]] = {
+    ("lisa", "casual-sitting"): ["show-front-1", "show-front-2", "thumbsup-left-1"],
+    ("lisa", "graceful-sitting"): ["wave-left-1", "show-left-1", "show-right-1"],
+    ("lori", "casual"): ["hello", "open", "thanks"],
+}
 
 # --- Side-channel 動画ジョブストア ---
 # Photo Avatar バッチ合成は非同期ジョブのため、ジョブ情報を side-channel で保存する
@@ -47,6 +58,14 @@ _conversation_id_var: contextvars.ContextVar[str] = contextvars.ContextVar(
     "video_conversation_id",
     default="",
 )
+
+
+class VideoPollResult(TypedDict):
+    """動画ポーリング結果。"""
+
+    status: str
+    video_url: str | None
+    message: str
 
 
 def set_current_conversation_id(conversation_id: str) -> None:
@@ -83,6 +102,73 @@ def _read_positive_int_env(name: str, default_value: int) -> int:
         logger.warning("%s が正の整数ではないため既定値を使用します: %s", name, raw_value)
         return default_value
     return parsed_value
+
+
+def _resolve_avatar_profile(
+    avatar_style: str,
+    configured_character: str,
+    configured_style: str,
+) -> tuple[str, str]:
+    """アバター種別から互換性のある character/style を解決する。"""
+    default_character, default_style = _AVATAR_PROFILES.get(avatar_style, ("lisa", _DEFAULT_AVATAR_STYLE))
+    character = configured_character or default_character
+    style = configured_style or default_style
+    return character, style
+
+
+def _select_avatar_gestures(character: str, avatar_pose: str) -> list[str]:
+    """標準アバターの組み合わせに対応したジェスチャー列を返す。"""
+    return list(_SUPPORTED_GESTURES.get((character.lower(), avatar_pose.lower()), []))
+
+
+def _stringify_poll_detail(value: object) -> str:
+    """ポーリング応答内の詳細情報を UI 向けに文字列化する。"""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return _MULTISPACE_RE.sub(" ", value).strip()
+    if isinstance(value, dict):
+        preferred_parts: list[str] = []
+        for key in ("message", "details", "reason", "error", "code"):
+            nested_value = value.get(key)
+            if isinstance(nested_value, str) and nested_value.strip():
+                preferred_parts.append(nested_value.strip())
+        if preferred_parts:
+            return _MULTISPACE_RE.sub(" ", " / ".join(preferred_parts)).strip()
+    try:
+        return _MULTISPACE_RE.sub(" ", json.dumps(value, ensure_ascii=False)).strip()
+    except TypeError:
+        return _MULTISPACE_RE.sub(" ", str(value)).strip()
+
+
+def _extract_poll_failure_detail(data: dict[str, object]) -> str:
+    """Speech Avatar の失敗詳細を応答 JSON から抽出する。"""
+    candidates: list[object] = [
+        data.get("statusMessage"),
+        data.get("message"),
+        data.get("error"),
+    ]
+
+    outputs = data.get("outputs")
+    if isinstance(outputs, dict):
+        candidates.append(outputs.get("summary"))
+
+    properties = data.get("properties")
+    if isinstance(properties, dict):
+        candidates.extend(
+            [
+                properties.get("statusDetails"),
+                properties.get("error"),
+                properties.get("errorMessage"),
+                properties.get("reason"),
+            ]
+        )
+
+    for candidate in candidates:
+        detail = _stringify_poll_detail(candidate)
+        if detail:
+            return detail[:280]
+    return ""
 
 
 def _normalize_summary_text(summary_text: str) -> str:
@@ -132,15 +218,8 @@ def _split_sentences(summary_text: str) -> list[str]:
     return sentences[:4]
 
 
-def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
-    """Photo Avatar 用の高品質な SSML を構築する。
-
-    ナレーション構成:
-    1. 導入（wave ジェスチャー + 明るいトーン）
-    2. メインの見出し（強調 + テンポアップ）
-    3. 詳細説明（ジェスチャー付き、落ち着いたトーン）
-    4. 締め（hand-gesture + 少し声量を上げて案内）
-    """
+def _build_avatar_ssml(summary_text: str, voice_name: str, gestures: list[str]) -> str:
+    """Photo Avatar 用の互換性重視 SSML を構築する。"""
     source_sentences = _split_sentences(summary_text)
     if not source_sentences:
         source_sentences = ["おすすめの旅行プランをご紹介します。"]
@@ -149,49 +228,43 @@ def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
     headline = source_sentences[0]
     detail_sentences = source_sentences[1:3]
     closing = "詳しくはブローシャをご確認のうえ、ぜひお問い合わせください。"
+    intro_gesture = gestures[0] if len(gestures) > 0 else ""
+    headline_gesture = gestures[1] if len(gestures) > 1 else ""
+    detail_gestures = gestures[1:] if len(gestures) > 1 else []
+    closing_gesture = gestures[-1] if gestures else ""
 
     ssml_parts = [
         "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' ",
         "xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='ja-JP'>",
         f"<voice name='{escape(voice_name)}' parameters='temperature=0.72'>",
-        # 1. 導入: wave ジェスチャー + cheerful トーン
-        "<bookmark mark='gesture.wave-left-1'/>",
-        "<mstts:express-as style='cheerful'>",
-        f"<prosody rate='+4.0%' pitch='+2Hz'>{escape(intro)}</prosody>",
-        "</mstts:express-as>",
-        "<break time='500ms'/>",
-        # 2. メイン見出し: 強調 + テンポアップ
-        "<bookmark mark='gesture.explain-left-1'/>",
-        "<mstts:express-as style='friendly'>",
-        "<prosody rate='+6.0%' pitch='+3Hz'>",
-        f"<emphasis level='moderate'>{escape(headline)}</emphasis>",
-        "</prosody>",
-        "</mstts:express-as>",
     ]
 
-    # 3. 詳細説明: ジェスチャーを交互に + 落ち着いたトーン
-    detail_gestures = ["gesture.explain-right-1", "gesture.point-left-1"]
-    for i, sentence in enumerate(detail_sentences):
-        gesture = detail_gestures[i % len(detail_gestures)]
-        ssml_parts.extend(
-            [
-                "<break time='400ms'/>",
-                f"<bookmark mark='{gesture}'/>",
-                f"<prosody rate='+2.0%' pitch='+1Hz'>{escape(sentence)}</prosody>",
-            ]
-        )
-
-    # 4. 締め: 息継ぎ + hand-gesture + 声量アップ
+    if intro_gesture:
+        ssml_parts.append(f"<bookmark mark='gesture.{escape(intro_gesture)}'/>")
     ssml_parts.extend(
         [
+            escape(intro),
             "<break time='500ms'/>",
-            "<mstts:paralinguistic type='breathing'/>",
-            "<bookmark mark='gesture.hand-gesture-right-1'/>",
-            "<mstts:express-as style='cheerful'>",
-            "<prosody rate='+5.0%' pitch='+2Hz' volume='+5%'>",
-            f"<emphasis level='moderate'>{escape(closing)}</emphasis>",
-            "</prosody>",
-            "</mstts:express-as>",
+        ]
+    )
+
+    if headline_gesture:
+        ssml_parts.append(f"<bookmark mark='gesture.{escape(headline_gesture)}'/>")
+    ssml_parts.append(escape(headline))
+
+    for index, sentence in enumerate(detail_sentences):
+        gesture = detail_gestures[index] if index < len(detail_gestures) else ""
+        ssml_parts.append("<break time='400ms'/>")
+        if gesture:
+            ssml_parts.append(f"<bookmark mark='gesture.{escape(gesture)}'/>")
+        ssml_parts.append(escape(sentence))
+
+    ssml_parts.append("<break time='500ms'/>")
+    if closing_gesture:
+        ssml_parts.append(f"<bookmark mark='gesture.{escape(closing_gesture)}'/>")
+    ssml_parts.extend(
+        [
+            escape(closing),
             "</voice>",
             "</speak>",
         ]
@@ -199,7 +272,7 @@ def _build_avatar_ssml(summary_text: str, voice_name: str) -> str:
     return "".join(ssml_parts)
 
 
-async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
+async def poll_video_job(job_id: str, max_wait: int = 180) -> VideoPollResult | None:
     """Photo Avatar バッチジョブの完了をポーリングし、動画 URL を返す。
 
     Args:
@@ -229,6 +302,7 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
     client = get_http_client()
 
     start = time.time()
+    last_error_detail = ""
     while time.time() - start < max_wait:
         try:
             resp = await client.get(poll_url, headers=headers, timeout=10)
@@ -241,18 +315,29 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
                 video_url = outputs.get("result", "")
                 if video_url:
                     logger.info("Photo Avatar 動画生成完了: %s", video_url)
-                    return video_url
+                    return {"status": "succeeded", "video_url": video_url, "message": ""}
                 logger.warning("Photo Avatar: Succeeded だが result URL なし")
-                return None
+                return {
+                    "status": "failed",
+                    "video_url": None,
+                    "message": "Photo Avatar ジョブは成功扱いですが動画 URL を返しませんでした。",
+                }
 
             if status in ("Failed", "Cancelled"):
-                logger.warning("Photo Avatar ジョブ失敗: status=%s", status)
-                return None
+                detail = _extract_poll_failure_detail(data)
+                logger.warning("Photo Avatar ジョブ失敗: status=%s detail=%s", status, detail or "<empty>")
+                return {
+                    "status": status.lower(),
+                    "video_url": None,
+                    "message": detail or f"Photo Avatar ジョブが {status} で終了しました。",
+                }
 
             logger.debug("Photo Avatar ポーリング中: status=%s", status)
         except httpx.HTTPStatusError as exc:
+            last_error_detail = f"HTTP {exc.response.status_code}"
             logger.warning("Photo Avatar ポーリング HTTP エラー: %s", exc)
         except (httpx.RequestError, json.JSONDecodeError) as exc:
+            last_error_detail = str(exc)
             logger.warning("Photo Avatar ポーリングエラー: %s", exc)
 
         # 適応型ポーリング: 初期は短く、徐々に延長
@@ -265,7 +350,10 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> str | None:
             await asyncio.sleep(10)
 
     logger.warning("Photo Avatar ポーリングタイムアウト (job_id=%s)", job_id)
-    return None
+    timeout_message = "Photo Avatar ジョブの完了待機がタイムアウトしました。"
+    if last_error_detail:
+        timeout_message = f"{timeout_message} 最後のエラー: {last_error_detail}"
+    return {"status": "timeout", "video_url": None, "message": timeout_message}
 
 
 # --- ツール定義 ---
@@ -301,22 +389,16 @@ async def generate_promo_video(
             ensure_ascii=False,
         )
 
-    # アバタースタイルに応じた Photo Avatar キャラクター ID のマッピング
-    avatar_characters: dict[str, str] = {
-        "concierge": "lisa",
-        "guide": "lori",
-        "presenter": "lisa",
-    }
     configured_character = os.environ.get("VIDEO_GEN_AVATAR_CHARACTER", "").strip()
     configured_style = os.environ.get("VIDEO_GEN_AVATAR_STYLE", "").strip()
     configured_voice = os.environ.get("VIDEO_GEN_VOICE", _DEFAULT_PROMO_VOICE).strip()
     background_color = os.environ.get("VIDEO_GEN_BACKGROUND_COLOR", _DEFAULT_BACKGROUND_COLOR).strip()
     bitrate_kbps = _read_positive_int_env("VIDEO_GEN_BITRATE_KBPS", _DEFAULT_BITRATE_KBPS)
 
-    character = configured_character or avatar_characters.get(avatar_style, "lisa")
-    avatar_pose = configured_style or _DEFAULT_AVATAR_STYLE
+    character, avatar_pose = _resolve_avatar_profile(avatar_style, configured_character, configured_style)
     voice_name = configured_voice or _DEFAULT_PROMO_VOICE
-    ssml_content = _build_avatar_ssml(summary_text, voice_name)
+    gesture_sequence = _select_avatar_gestures(character, avatar_pose)
+    ssml_content = _build_avatar_ssml(summary_text, voice_name, gesture_sequence)
 
     try:
         credential = DefaultAzureCredential()
