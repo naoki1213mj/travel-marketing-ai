@@ -757,6 +757,72 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state).toBe(previousState)
   })
 
+  it('refetches a cached conversation when switching back from another conversation', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = String(input)
+      const headers = (init && typeof init === 'object' && 'headers' in init
+        ? init.headers
+        : undefined) as Record<string, string> | undefined
+
+      if (url.endsWith('/api/conversations/conv-new')) {
+        if (headers?.['If-None-Match'] === 'W/"etag-new"') {
+          return new Response(null, { status: 304, headers: { ETag: 'W/"etag-new"' } })
+        }
+
+        return new Response(JSON.stringify({
+          status: 'completed',
+          input: '新しい会話',
+          messages: [
+            { event: 'text', data: { content: 'new plan', agent: 'marketing-plan-agent' } },
+            { event: 'done', data: { conversation_id: 'conv-new', metrics: { latency_seconds: 9, tool_calls: 1, total_tokens: 110 } } },
+          ],
+        }), { headers: { ETag: 'W/"etag-new"' } })
+      }
+
+      if (url.endsWith('/api/conversations/conv-old')) {
+        return new Response(JSON.stringify({
+          status: 'completed',
+          input: '古い会話',
+          messages: [
+            { event: 'text', data: { content: 'old plan', agent: 'marketing-plan-agent' } },
+            { event: 'done', data: { conversation_id: 'conv-old', metrics: { latency_seconds: 11, tool_calls: 1, total_tokens: 120 } } },
+          ],
+        }), { headers: { ETag: 'W/"etag-old"' } })
+      }
+
+      throw new Error(`Unexpected URL: ${url}`)
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-new')
+    })
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-old')
+    })
+
+    expect(result.current.state.conversationId).toBe('conv-old')
+    expect(result.current.state.textContents.at(-1)?.content).toBe('old plan')
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-new')
+    })
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3)
+    const [, , thirdCall] = vi.mocked(globalThis.fetch).mock.calls
+    expect(thirdCall?.[1]).toMatchObject({
+      cache: 'no-store',
+      headers: {
+        'Cache-Control': 'no-cache',
+      },
+    })
+    expect((thirdCall?.[1] as { headers?: Record<string, string> } | undefined)?.headers?.['If-None-Match']).toBeUndefined()
+    expect(result.current.state.conversationId).toBe('conv-new')
+    expect(result.current.state.textContents.at(-1)?.content).toBe('new plan')
+  })
+
   it('keeps refinement prompts after restore polling completes', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',

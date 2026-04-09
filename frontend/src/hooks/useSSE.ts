@@ -957,6 +957,7 @@ export function useSSE() {
   const restoreConversation = useCallback(async (conversationId: string, options?: RestoreConversationOptions) => {
     const passive = options?.passive === true
     const foregroundRequestId = activeRequestIdRef.current
+    const isCurrentConversation = stateRef.current.conversationId === conversationId
 
     if (passive && abortControllerRef.current) {
       return
@@ -976,7 +977,7 @@ export function useSSE() {
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
       }
-      const knownEtag = conversationEtagsRef.current[conversationId]
+      const knownEtag = isCurrentConversation ? conversationEtagsRef.current[conversationId] : undefined
       if (knownEtag) {
         headers['If-None-Match'] = knownEtag
       }
