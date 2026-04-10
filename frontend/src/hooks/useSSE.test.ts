@@ -909,6 +909,37 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.versions[1].textContents.at(-1)?.content).toBe('# Plan v2 updated')
   })
 
+  it('starts a new conversation while preserving model settings', async () => {
+    const { result } = renderHook(() => useSSE())
+
+    act(() => {
+      result.current.updateSettings({
+        ...DEFAULT_SETTINGS,
+        model: 'gpt-5.4',
+        managerApprovalEnabled: true,
+        managerEmail: 'manager@example.com',
+      })
+    })
+
+    await act(async () => {
+      await result.current.sendMessage('次の会話の前に一度実行して')
+    })
+
+    act(() => {
+      result.current.startNewConversation()
+    })
+
+    expect(result.current.state.status).toBe('idle')
+    expect(result.current.state.conversationId).toBeNull()
+    expect(result.current.state.userMessages).toEqual([])
+    expect(result.current.state.versions).toEqual([])
+    expect(result.current.state.settings).toMatchObject({
+      model: 'gpt-5.4',
+      managerApprovalEnabled: true,
+      managerEmail: 'manager@example.com',
+    })
+  })
+
   it('keeps refinement prompts after restore polling completes', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',

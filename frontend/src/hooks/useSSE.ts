@@ -961,6 +961,21 @@ export function useSSE() {
     delete localEvaluationCacheRef.current[DRAFT_EVALUATION_CACHE_KEY]
   }, [])
 
+  const startNewConversation = useCallback(() => {
+    abortControllerRef.current?.abort()
+    abortControllerRef.current = null
+    activeRequestIdRef.current += 1
+    activeRestoreRequestIdRef.current += 1
+    const preservedSettings = { ...stateRef.current.settings }
+    setState({
+      ...initialState,
+      settings: preservedSettings,
+    })
+    conversationIdRef.current = null
+    conversationEtagsRef.current = {}
+    delete localEvaluationCacheRef.current[DRAFT_EVALUATION_CACHE_KEY]
+  }, [])
+
   const restoreVersion = useCallback((version: number) => {
     setState(prev => {
       if (prev.pendingVersion) return prev
@@ -1053,5 +1068,5 @@ export function useSSE() {
     }
   }, [getCachedEvaluationRecords])
 
-  return { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation }
+  return { state, sendMessage, approve, reset, startNewConversation, restoreVersion, updateSettings, restoreConversation, saveEvaluation }
 }

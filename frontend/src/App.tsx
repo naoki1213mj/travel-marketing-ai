@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react'
+import { Download, PlusCircle } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { ApprovalBanner } from './components/ApprovalBanner'
 import { ArtifactTabs } from './components/ArtifactTabs'
@@ -43,7 +43,7 @@ const AGENT_STEP_KEY: Record<string, string> = {
 }
 
 function App() {
-  const { state, sendMessage, approve, reset, restoreVersion, updateSettings, restoreConversation, saveEvaluation } = useSSE()
+  const { state, sendMessage, approve, reset, startNewConversation, restoreVersion, updateSettings, restoreConversation, saveEvaluation } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
   const [managerPortalRequest] = useState(() => {
@@ -211,6 +211,14 @@ function App() {
     t('panel.preview.hint.plan'),
     t('panel.preview.hint.assets'),
   ]
+  const hasActiveConversation = state.status !== 'idle'
+    || Boolean(state.conversationId)
+    || state.userMessages.length > 0
+    || state.versions.length > 0
+  const requiresNewConversationConfirmation = state.status === 'running'
+    || state.status === 'approval'
+    || state.managerApprovalPolling
+    || state.backgroundUpdatesPending
 
   useEffect(() => {
     if (managerPortalRequest) return
@@ -253,7 +261,19 @@ function App() {
   const handleReset = () => {
     setRevisionInProgress(false)
     setPendingPreviewSelection(null)
+    setSelectedPlanVersionIndexes({})
+    setVoiceDraft(prev => ({ id: prev.id + 1, text: '' }))
     reset()
+  }
+  const handleStartNewConversation = () => {
+    if (requiresNewConversationConfirmation && !window.confirm(t('action.new_conversation.confirm'))) {
+      return
+    }
+    setRevisionInProgress(false)
+    setPendingPreviewSelection(null)
+    setSelectedPlanVersionIndexes({})
+    setVoiceDraft(prev => ({ id: prev.id + 1, text: '' }))
+    startNewConversation()
   }
   const handleRestoreConversation = (conversationId: string) => {
     setRevisionInProgress(false)
@@ -325,6 +345,16 @@ function App() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            {hasActiveConversation && (
+              <button
+                type="button"
+                onClick={handleStartNewConversation}
+                className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-3 py-2 text-xs font-medium text-[var(--text-secondary)] transition hover:border-[var(--accent)]/40 hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+              >
+                <PlusCircle className="h-4 w-4" />
+                <span>{t('action.new_conversation')}</span>
+              </button>
+            )}
             <LanguageSwitcher locale={locale} onChange={setLocale} t={t} />
             <ThemeToggle theme={theme} onChange={setTheme} t={t} />
           </div>

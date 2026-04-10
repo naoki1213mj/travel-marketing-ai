@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 
 export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number {
-  const [elapsed, setElapsed] = useState(0)
-  const startRef = useRef<number>(0)
+  const [elapsedState, setElapsedState] = useState({
+    value: 0,
+    isRunning,
+    resetKey,
+  })
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
@@ -11,15 +14,16 @@ export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number
       timerRef.current = null
     }
     if (!isRunning) {
-      startRef.current = 0
-      setElapsed(0)
       return () => undefined
     }
 
-    startRef.current = Date.now()
-    setElapsed(0)
+    const startTime = Date.now()
     timerRef.current = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startRef.current) / 1000))
+      setElapsedState({
+        value: Math.floor((Date.now() - startTime) / 1000),
+        isRunning,
+        resetKey,
+      })
     }, 1000)
 
     return () => {
@@ -30,5 +34,13 @@ export function useElapsedTime(isRunning: boolean, resetKey: number = 0): number
     }
   }, [isRunning, resetKey])
 
-  return isRunning ? elapsed : 0
+  if (!isRunning) {
+    return 0
+  }
+
+  if (elapsedState.isRunning !== isRunning || elapsedState.resetKey !== resetKey) {
+    return 0
+  }
+
+  return elapsedState.value
 }

@@ -31,6 +31,8 @@ vi.mock('./hooks/useI18n', () => ({
         'panel.workflow.hint.rounds': 'Rounds hint',
         'panel.composer': 'Composer',
         'panel.composer.subtitle': 'Composer subtitle',
+        'action.new_conversation': 'New conversation',
+        'action.new_conversation.confirm': 'Confirm new conversation',
         'panel.preview': 'Preview',
         'panel.preview.subtitle': 'Preview subtitle',
         'panel.preview.hint.version': 'Version hint',
@@ -632,5 +634,148 @@ describe('App', () => {
         artifactVersion: 2,
       },
     })
+  })
+
+  it('starts a new conversation without requiring a page reload', () => {
+    const startNewConversation = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm')
+
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'completed',
+        conversationId: 'conv-new-session',
+        agentProgress: null,
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v1',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan v1',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 1,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['別の企画を始めたい'],
+      },
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      startNewConversation,
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(startNewConversation).toHaveBeenCalledTimes(1)
+
+    confirmSpy.mockRestore()
+  })
+
+  it('asks for confirmation before replacing an unfinished conversation', () => {
+    const startNewConversation = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm')
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true)
+
+    mockUseSSE.mockReturnValue({
+      state: {
+        status: 'running',
+        conversationId: 'conv-in-progress',
+        agentProgress: {
+          agent: 'marketing-plan-agent',
+          status: 'running',
+          step: 2,
+          total_steps: 5,
+        },
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan draft',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [
+              {
+                agent: 'marketing-plan-agent',
+                content: '# Plan draft',
+              },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 1,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['まだ実行中'],
+      },
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      startNewConversation,
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    expect(confirmSpy).toHaveBeenCalledWith('Confirm new conversation')
+    expect(startNewConversation).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: 'New conversation' }))
+    expect(startNewConversation).toHaveBeenCalledTimes(1)
+
+    confirmSpy.mockRestore()
   })
 })

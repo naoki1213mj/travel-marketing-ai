@@ -154,21 +154,35 @@ export function WorkflowAccordion({
   }, [activeStepKey, currentStep, currentAgent, agentProgress, latestRoundContents])
 
   // 手動トグル用の state（ユーザー操作のみ）
-  const [userToggled, setUserToggled] = useState<Record<string, boolean>>({})
+  const [toggleState, setToggleState] = useState<{
+    conversationKey: string
+    values: Record<string, boolean>
+  }>({
+    conversationKey,
+    values: {},
+  })
 
-  useEffect(() => {
-    setUserToggled({})
-  }, [conversationKey])
+  const userToggled = toggleState.conversationKey === conversationKey
+    ? toggleState.values
+    : {}
 
   const isSectionCollapsed = (sectionKey: string, fallback: boolean): boolean => {
     if (sectionKey in userToggled) return userToggled[sectionKey]
     return fallback
   }
 
-  const toggle = (sectionKey: string, fallback: boolean) => setUserToggled(prev => ({
-    ...prev,
-    [sectionKey]: !isSectionCollapsed(sectionKey, fallback),
-  }))
+  const toggle = (sectionKey: string, fallback: boolean) => setToggleState(prev => {
+    const currentValues = prev.conversationKey === conversationKey ? prev.values : {}
+    const currentCollapsed = sectionKey in currentValues ? currentValues[sectionKey] : fallback
+
+    return {
+      conversationKey,
+      values: {
+        ...currentValues,
+        [sectionKey]: !currentCollapsed,
+      },
+    }
+  })
 
   // アクティブセクションにスクロール
   useEffect(() => {
