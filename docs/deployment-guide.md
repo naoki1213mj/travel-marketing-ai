@@ -93,10 +93,12 @@ azd deploy
 - AI Gateway 接続 (`travel-ai-gateway`) と token policy
 - Improvement MCP 用 Function App の作成・managed identity storage 構成・zip 配備・APIM route 登録
 - Voice Agent (Prompt Agent) の作成
-- Entra SPA アプリ登録 (Voice Live 認証用)
+- Entra SPA アプリ登録 (Voice Live + Work IQ delegated auth 用)
 
 ### postprovision 後の手動作業
 
+- 現在の rebuilt `workiq-dev` tenant では **Search/KB**, **Work IQ admin consent**, **gpt-4.1 / gpt-5.4 deployments**, **別 East US MAI endpoint** までは完了済みです
+- 新しい tenant を一から立ち上げる場合は、以下の項目が引き続き手動です
 - Azure AI Search の作成と `regulations-index` の投入
 - Foundry → AI Search 接続の追加
 - `FABRIC_DATA_AGENT_URL` / `SPEECH_SERVICE_ENDPOINT` 等の設定
@@ -107,6 +109,16 @@ azd deploy
 Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API** を per-user delegated token で呼び出します。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
+
+### Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-17)
+
+| Area | State |
+| --- | --- |
+| Search / Foundry IQ | Azure AI Search was created in **East US** (East US 2 had no capacity), and `regulations-index`, `regulations-ks`, and `regulations-kb` are already wired into the Container App |
+| Work IQ | SPA redirect URIs, Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
+| Text models | `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` exist on the main East US 2 Foundry account |
+| MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
+| Remaining manual work | Fabric capacity / Lakehouse / SQL endpoint rebuild, plus Teams / SharePoint connections and the manager-approval workflow |
 
 ### Improvement MCP の追加デプロイ
 
@@ -126,11 +138,13 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `MODEL_NAME` | 任意 | テキスト deployment 名 (既定: `gpt-5-4-mini`) |
 | `EVAL_MODEL_DEPLOYMENT` | 推奨 | 評価用の専用 deployment |
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存 |
+| `SEARCH_ENDPOINT` | 任意 | Azure AI Search endpoint (`search_knowledge_base()` はこれを最優先で使う) |
+| `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー。live tenant では Container Apps secret で保持 |
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 10） |
-| `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI-Image-2 用の別 Foundry アカウント |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
 | `LOGIC_APP_CALLBACK_URL` | 任意 | 承認後アクション |
@@ -172,7 +186,8 @@ Trivy, Gitleaks, npm audit, pip-audit
 | --- | --- |
 | デモモードになる | `AZURE_AI_PROJECT_ENDPOINT` を設定 |
 | `/api/ready` が `degraded` | `ENVIRONMENT=production` で必須変数が不足 |
-| 画像が透明 PNG | 画像モデルの配備を確認。MAI-Image-2 は別リソース + RBAC が必要 |
+| `gpt-4.1` / `gpt-5.4` が使えない | Azure 側の deployment 名が UI 値と一致しているか確認 (`gpt-4.1`, `gpt-4-1-mini`, `gpt-5.4`) |
+| 画像が透明 PNG | `IMAGE_PROJECT_ENDPOINT_MAI` と別 East US MAI account の RBAC を確認。`MAI-Image-2` quota が無い subscription では `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認 |
 | 上司承認通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認。未設定でも承認ページ自体は動作 |
-| KB が静的レスポンス | AI Search 接続と `regulations-index` を確認 |
+| KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |

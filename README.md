@@ -103,7 +103,17 @@ azd auth login
 azd up                                    # provision + build + deploy
 ```
 
-`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for remaining manual steps.
+`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and remaining manual steps.
+
+### Current Azure status (`workiq-dev` tenant)
+
+| Area | Current state |
+| --- | --- |
+| Work IQ delegated auth | SPA redirect URIs, Microsoft Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
+| Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
+| Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` |
+| MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
+| Remaining manual work | Fabric capacity / Lakehouse / SQL endpoint rebuild, plus Teams / SharePoint connections and the manager-approval workflow |
 
 ## Environment Variables
 
@@ -113,10 +123,12 @@ azd up                                    # provision + build + deploy
 | `MODEL_NAME` | Optional | Text deployment name (default: `gpt-5-4-mini`) |
 | `EVAL_MODEL_DEPLOYMENT` | Recommended | Separate deployment for `/api/evaluate` |
 | `COSMOS_DB_ENDPOINT` | Optional | Conversation persistence (in-memory fallback) |
+| `SEARCH_ENDPOINT` | Optional | Azure AI Search endpoint for Foundry IQ / direct knowledge-base lookup |
+| `SEARCH_API_KEY` | Optional | Azure AI Search admin key (stored as a secret in Container Apps for the live tenant) |
 | `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent Published URL |
 | `SPEECH_SERVICE_ENDPOINT` | Optional | Photo Avatar video generation |
 | `IMPROVEMENT_MCP_ENDPOINT` | Optional | APIM MCP route for evaluation refinement |
-| `IMAGE_PROJECT_ENDPOINT_MAI` | Optional | MAI-Image-2 on a separate Foundry account |
+| `IMAGE_PROJECT_ENDPOINT_MAI` | Optional | Separate MAI-capable AI Services endpoint |
 
 Full list in [.env.example](.env.example).
 
@@ -165,7 +177,7 @@ docs/                Architecture, API reference, deployment guides
 | --- | --- |
 | Frontend | React 19 · TypeScript · Vite 8 · Tailwind CSS 4 |
 | Backend | Python 3.14 · FastAPI · uvicorn |
-| AI Models | gpt-5.4-mini · GPT Image 1.5 · MAI-Image-2 |
+| AI Models | gpt-5.4-mini · gpt-4.1 family · gpt-5.4 · GPT Image 1.5 · MAI route (separate East US account) |
 | Agent Framework | Microsoft Agent Framework 1.0.0 (GA) |
 | Data | Fabric Lakehouse · Fabric Data Agent · Delta Parquet + SQL |
 | Knowledge | Foundry IQ · Azure AI Search |
