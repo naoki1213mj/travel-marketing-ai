@@ -1089,66 +1089,172 @@ def apply_ai_gateway_policy(
 
 
 # ---------------------------------------------------------------------------
-# Step 3: Entra ID SPA アプリ登録（Voice Live ブラウザ認証用）
+# Step 3: Entra ID SPA アプリ登録（Voice Live / Work IQ ブラウザ認証用）
 # ---------------------------------------------------------------------------
 
+_MICROSOFT_GRAPH_APP_ID = "00000003-0000-0000-c000-000000000000"
+_SPA_BROWSER_GRAPH_SCOPE_VALUES = (
+    "User.Read",
+    "Sites.Read.All",
+    "Mail.Read",
+    "People.Read.All",
+    "OnlineMeetingTranscript.Read.All",
+    "Chat.Read",
+    "ChannelMessage.Read.All",
+    "ExternalItem.Read.All",
+)
 
-def create_entra_app(
-    app_name: str = "travel-voice-spa",
-    container_app_url: str = "",
-) -> str | None:
-    """Voice Live 用の Entra ID SPA アプリ登録を作成する。"""
-    # 既存アプリの確認
+
+def _parse_json_stdout(raw: str) -> object:
+    """CLI の JSON stdout を安全に解析する。"""
+    try:
+        return json.loads(raw or "null")
+    except json.JSONDecodeError:
+        return None
+
+
+def _patch_graph_application(app_object_id: str, body: dict[str, object]) -> bool:
+    """Microsoft Graph application manifest を PATCH する。"""
+    try:
+        token = _get_token("https://graph.microsoft.com/.default")
+    except ClientAuthenticationError as exc:
+        logger.warning("Graph token の取得に失敗しました: %s", exc)
+        return False
+    except (OSError, RuntimeError, ValueError) as exc:
+        logger.warning("Graph token の取得に失敗しました: %s", exc)
+        return False
+
+    url = f"https://graph.microsoft.com/v1.0/applications/{app_object_id}"
+    request_body = json.dumps(body).encode("utf-8")
+    request = urllib.request.Request(
+        url,
+        data=request_body,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        },
+        method="PATCH",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return 200 <= getattr(response, "status", 0) < 300
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")
+        logger.warning("Graph application PATCH に失敗しました: HTTP %s %s", exc.code, error_body[:500])
+        return False
+    except (OSError, ValueError, RuntimeError) as exc:
+        logger.warning("Graph application PATCH に失敗しました: %s", exc)
+        return False
+
+
+def _ensure_spa_redirect_uris(app_id: str, redirect_uris: list[str]) -> None:
+    """SPA redirect URI を既存値とマージして同期する。"""
     result = _run_cli(
-        ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
+        ["az", "ad", "app", "show", "--id", app_id, "--query", "{id:id,redirectUris:spa.redirectUris}", "-o", "json"],
         capture_output=True,
     )
-    existing_id = result.stdout.strip()
-    if existing_id:
-        logger.info("Entra App 既存: %s (%s)", app_name, existing_id)
-        return existing_id
+    app_details = _parse_json_stdout(result.stdout) if result.returncode == 0 else None
+    app_object_id = str(app_details.get("id") or "").strip() if isinstance(app_details, dict) else ""
+    existing_redirects = app_details.get("redirectUris") if isinstance(app_details, dict) else None
 
-    # 新規 SPA アプリ作成
+    merged_redirects: list[str] = []
+    for uri in [*(existing_redirects if isinstance(existing_redirects, list) else []), *redirect_uris]:
+        normalized = str(uri).strip()
+        if normalized and normalized not in merged_redirects:
+            merged_redirects.append(normalized)
+
+    if not app_object_id or not merged_redirects:
+        return
+
+    if not _patch_graph_application(app_object_id, {"spa": {"redirectUris": merged_redirects}}):
+        logger.warning("Entra App redirect URI 更新失敗: %s", app_id)
+
+
+def _resolve_graph_scope_ids(scope_values: tuple[str, ...]) -> dict[str, str]:
+    """Microsoft Graph delegated scope 名から permission ID を解決する。"""
+    result = _run_cli(
+        [
+            "az",
+            "ad",
+            "sp",
+            "show",
+            "--id",
+            _MICROSOFT_GRAPH_APP_ID,
+            "--query",
+            "oauth2PermissionScopes[].{value:value,id:id}",
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Microsoft Graph scope 一覧の取得に失敗しました: %s", result.stderr.strip())
+        return {}
+
+    scope_items = _parse_json_stdout(result.stdout)
+    available_scope_ids: dict[str, str] = {}
+    if isinstance(scope_items, list):
+        for item in scope_items:
+            if not isinstance(item, dict):
+                continue
+            value = str(item.get("value") or "").strip()
+            scope_id = str(item.get("id") or "").strip()
+            if value and scope_id:
+                available_scope_ids[value] = scope_id
+
+    missing_scope_values = [scope for scope in scope_values if scope not in available_scope_ids]
+    if missing_scope_values:
+        logger.warning("Microsoft Graph scope ID を解決できませんでした: %s", ", ".join(missing_scope_values))
+
+    return {scope: available_scope_ids[scope] for scope in scope_values if scope in available_scope_ids}
+
+
+def _get_existing_graph_scope_ids(app_id: str) -> set[str]:
+    """アプリ登録に既に追加済みの Microsoft Graph delegated scope ID を返す。"""
     result = _run_cli(
         [
             "az",
             "ad",
             "app",
-            "create",
-            "--display-name",
-            app_name,
-            "--sign-in-audience",
-            "AzureADMyOrg",
-            "--enable-id-token-issuance",
-            "true",
+            "show",
+            "--id",
+            app_id,
             "--query",
-            "appId",
+            f"requiredResourceAccess[?resourceAppId=='{_MICROSOFT_GRAPH_APP_ID}'].resourceAccess[].id",
             "-o",
-            "tsv",
+            "json",
         ],
         capture_output=True,
     )
     if result.returncode != 0:
-        logger.warning("Entra App 作成失敗: %s", result.stderr)
-        return None
+        logger.warning("Entra App の既存 Graph 権限取得に失敗しました: %s", result.stderr.strip())
+        return set()
 
-    app_id = result.stdout.strip()
+    raw_scope_ids = _parse_json_stdout(result.stdout)
+    if not isinstance(raw_scope_ids, list):
+        return set()
 
-    # SPA リダイレクト URI を設定
-    redirect_uris = [
-        "http://localhost:5173",
-        "http://localhost:8000",
+    return {str(scope_id).strip() for scope_id in raw_scope_ids if str(scope_id).strip()}
+
+
+def _ensure_graph_delegated_permissions(app_id: str) -> None:
+    """Voice Live / Work IQ で使う Microsoft Graph delegated permissions を同期する。"""
+    scope_ids_by_value = _resolve_graph_scope_ids(_SPA_BROWSER_GRAPH_SCOPE_VALUES)
+    if not scope_ids_by_value:
+        return
+
+    existing_scope_ids = _get_existing_graph_scope_ids(app_id)
+    missing_permission_args = [
+        f"{scope_id}=Scope"
+        for scope_value, scope_id in scope_ids_by_value.items()
+        if scope_id not in existing_scope_ids
     ]
-    if container_app_url:
-        redirect_uris.append(container_app_url)
+    if not missing_permission_args:
+        logger.info("Entra App の Graph delegated permissions は既に最新です: %s", app_id)
+        return
 
-    _run_cli(
-        ["az", "ad", "app", "update", "--id", app_id, "--spa-redirect-uris", *redirect_uris],
-        capture_output=True,
-    )
-
-    # Microsoft Graph User.Read 権限を追加
-    _run_cli(
+    add_result = _run_cli(
         [
             "az",
             "ad",
@@ -1158,14 +1264,69 @@ def create_entra_app(
             "--id",
             app_id,
             "--api",
-            "00000003-0000-0000-c000-000000000000",
+            _MICROSOFT_GRAPH_APP_ID,
             "--api-permissions",
-            "e1fe6dd8-ba31-4d61-89e7-88639da4683d=Scope",
+            *missing_permission_args,
         ],
         capture_output=True,
     )
+    if add_result.returncode != 0:
+        logger.warning("Entra App の Graph delegated permissions 追加に失敗しました: %s", add_result.stderr.strip())
+        return
 
-    logger.info("Entra App 作成完了: %s (%s)", app_name, app_id)
+    logger.info("Entra App の Graph delegated permissions を追加しました: %s", app_id)
+
+
+def create_entra_app(
+    app_name: str = "travel-voice-spa",
+    container_app_url: str = "",
+) -> str | None:
+    """Voice Live / Work IQ 用の Entra ID SPA アプリ登録を作成または再同期する。"""
+    result = _run_cli(
+        ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
+        capture_output=True,
+    )
+    app_id = result.stdout.strip()
+
+    if app_id:
+        logger.info("Entra App 既存: %s (%s)", app_name, app_id)
+    else:
+        result = _run_cli(
+            [
+                "az",
+                "ad",
+                "app",
+                "create",
+                "--display-name",
+                app_name,
+                "--sign-in-audience",
+                "AzureADMyOrg",
+                "--enable-id-token-issuance",
+                "true",
+                "--query",
+                "appId",
+                "-o",
+                "tsv",
+            ],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            logger.warning("Entra App 作成失敗: %s", result.stderr.strip())
+            return None
+        app_id = result.stdout.strip()
+
+    redirect_uris = [
+        "http://localhost:5173",
+        "http://localhost:8000",
+    ]
+    normalized_container_app_url = container_app_url.strip()
+    if normalized_container_app_url:
+        redirect_uris.append(normalized_container_app_url)
+
+    _ensure_spa_redirect_uris(app_id, redirect_uris)
+    _ensure_graph_delegated_permissions(app_id)
+
+    logger.info("Entra App 構成を同期しました: %s (%s)", app_name, app_id)
     return app_id
 
 

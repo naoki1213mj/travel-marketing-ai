@@ -410,3 +410,165 @@ def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) 
 
     assert result is True
     assert fake_client.agents.create_called is False
+
+
+def test_create_entra_app_reconciles_existing_app_redirects_and_graph_permissions(monkeypatch) -> None:
+    """既存 SPA アプリでも redirect URI と Work IQ 用 Graph 権限を追補する"""
+    commands: list[list[str]] = []
+    patched_applications: list[dict[str, object]] = []
+
+    graph_scope_rows = [
+        {"value": "User.Read", "id": "scope-user-read"},
+        {"value": "Sites.Read.All", "id": "scope-sites-read"},
+        {"value": "Mail.Read", "id": "scope-mail-read"},
+        {"value": "People.Read.All", "id": "scope-people-read"},
+        {"value": "OnlineMeetingTranscript.Read.All", "id": "scope-meeting-read"},
+        {"value": "Chat.Read", "id": "scope-chat-read"},
+        {"value": "ChannelMessage.Read.All", "id": "scope-channel-read"},
+        {"value": "ExternalItem.Read.All", "id": "scope-external-read"},
+    ]
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+
+        if command[:4] == ["az", "ad", "app", "list"]:
+            return subprocess.CompletedProcess(command, 0, stdout="existing-app-id\n", stderr="")
+        if command[:4] == ["az", "ad", "app", "show"] and "{id:id,redirectUris:spa.redirectUris}" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps({"id": "existing-object-id", "redirectUris": ["http://localhost:5173"]}),
+                stderr="",
+            )
+        if command[:4] == ["az", "ad", "sp", "show"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(graph_scope_rows), stderr="")
+        if command[:4] == ["az", "ad", "app", "show"] and any(
+            "requiredResourceAccess" in part for part in command
+        ):
+            return subprocess.CompletedProcess(command, 0, stdout='["scope-user-read"]', stderr="")
+        if command[:5] == ["az", "ad", "app", "permission", "add"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+    monkeypatch.setattr(
+        postprovision_module,
+        "_patch_graph_application",
+        lambda app_object_id, body: patched_applications.append({"app_object_id": app_object_id, "body": body}) or True,
+    )
+
+    app_id = postprovision_module.create_entra_app(container_app_url="https://example.contoso.com")
+
+    assert app_id == "existing-app-id"
+    assert patched_applications == [
+        {
+            "app_object_id": "existing-object-id",
+            "body": {
+                "spa": {
+                    "redirectUris": [
+                        "http://localhost:5173",
+                        "http://localhost:8000",
+                        "https://example.contoso.com",
+                    ]
+                }
+            },
+        }
+    ]
+
+    permission_add_command = next(command for command in commands if command[:5] == ["az", "ad", "app", "permission", "add"])
+    assert permission_add_command == [
+        "az",
+        "ad",
+        "app",
+        "permission",
+        "add",
+        "--id",
+        "existing-app-id",
+        "--api",
+        postprovision_module._MICROSOFT_GRAPH_APP_ID,
+        "--api-permissions",
+        "scope-sites-read=Scope",
+        "scope-mail-read=Scope",
+        "scope-people-read=Scope",
+        "scope-meeting-read=Scope",
+        "scope-chat-read=Scope",
+        "scope-channel-read=Scope",
+        "scope-external-read=Scope",
+    ]
+
+
+def test_create_entra_app_creates_app_when_missing(monkeypatch) -> None:
+    """SPA アプリが未作成なら作成後に redirect URI と Graph 権限を同期する"""
+    commands: list[list[str]] = []
+    patched_applications: list[dict[str, object]] = []
+
+    graph_scope_rows = [
+        {"value": scope_value, "id": f"scope-{index}"}
+        for index, scope_value in enumerate(postprovision_module._SPA_BROWSER_GRAPH_SCOPE_VALUES, start=1)
+    ]
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+
+        if command[:4] == ["az", "ad", "app", "list"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        if command[:4] == ["az", "ad", "app", "create"]:
+            return subprocess.CompletedProcess(command, 0, stdout="new-app-id\n", stderr="")
+        if command[:4] == ["az", "ad", "app", "show"] and "{id:id,redirectUris:spa.redirectUris}" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps({"id": "new-object-id", "redirectUris": []}),
+                stderr="",
+            )
+        if command[:4] == ["az", "ad", "sp", "show"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps(graph_scope_rows), stderr="")
+        if command[:4] == ["az", "ad", "app", "show"] and any(
+            "requiredResourceAccess" in part for part in command
+        ):
+            return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+        if command[:5] == ["az", "ad", "app", "permission", "add"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+    monkeypatch.setattr(
+        postprovision_module,
+        "_patch_graph_application",
+        lambda app_object_id, body: patched_applications.append({"app_object_id": app_object_id, "body": body}) or True,
+    )
+
+    app_id = postprovision_module.create_entra_app(container_app_url="https://example.contoso.com")
+
+    assert app_id == "new-app-id"
+    assert any(command[:4] == ["az", "ad", "app", "create"] for command in commands)
+    assert patched_applications == [
+        {
+            "app_object_id": "new-object-id",
+            "body": {
+                "spa": {
+                    "redirectUris": [
+                        "http://localhost:5173",
+                        "http://localhost:8000",
+                        "https://example.contoso.com",
+                    ]
+                }
+            },
+        }
+    ]
+
+    permission_add_command = next(command for command in commands if command[:5] == ["az", "ad", "app", "permission", "add"])
+    assert permission_add_command[-len(postprovision_module._SPA_BROWSER_GRAPH_SCOPE_VALUES):] == [
+        "scope-1=Scope",
+        "scope-2=Scope",
+        "scope-3=Scope",
+        "scope-4=Scope",
+        "scope-5=Scope",
+        "scope-6=Scope",
+        "scope-7=Scope",
+        "scope-8=Scope",
+    ]
