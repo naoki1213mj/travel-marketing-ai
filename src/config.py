@@ -17,6 +17,9 @@ class AppSettings(TypedDict):
 
     project_endpoint: str
     model_name: str
+    entra_tenant_id: str
+    entra_client_id: str
+    work_iq_timeout_seconds: str
     improvement_mcp_endpoint: str
     improvement_mcp_api_key: str
     improvement_mcp_api_key_header: str
@@ -38,6 +41,9 @@ class AppSettings(TypedDict):
 _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "project_endpoint": ("AZURE_AI_PROJECT_ENDPOINT", "FOUNDRY_PROJECT_ENDPOINT"),
     "model_name": ("MODEL_NAME", "FOUNDRY_MODEL"),
+    "entra_tenant_id": ("ENTRA_TENANT_ID", "AZURE_TENANT_ID"),
+    "entra_client_id": ("ENTRA_CLIENT_ID", "VOICE_SPA_CLIENT_ID"),
+    "work_iq_timeout_seconds": ("WORK_IQ_TIMEOUT_SECONDS",),
     "improvement_mcp_endpoint": ("IMPROVEMENT_MCP_ENDPOINT", "IMPROVEMENT_MCP_URL"),
     "improvement_mcp_api_key": ("IMPROVEMENT_MCP_API_KEY",),
     "improvement_mcp_api_key_header": ("IMPROVEMENT_MCP_API_KEY_HEADER",),
@@ -58,6 +64,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
     "model_name": "gpt-5-4-mini",
+    "work_iq_timeout_seconds": "10",
     "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "allowed_origins": "http://localhost:5173",

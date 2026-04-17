@@ -3,6 +3,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { getDelegatedApiHeaders } from '../lib/api-auth'
 
 interface Conversation {
   id: string
@@ -29,6 +30,7 @@ export function ConversationHistory({ onSelect, t, locale }: ConversationHistory
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
       }
+      Object.assign(headers, await getDelegatedApiHeaders())
       if (listEtagRef.current) {
         headers['If-None-Match'] = listEtagRef.current
       }

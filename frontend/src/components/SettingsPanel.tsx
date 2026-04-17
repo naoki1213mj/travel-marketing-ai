@@ -2,7 +2,7 @@
  * モデル設定パネル。Temperature / Max Tokens / Top P / Foundry IQ パラメータを調整する。
  */
 
-import { ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
+import { Building2, ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 
 export interface ModelSettings {
@@ -20,6 +20,14 @@ export interface ModelSettings {
   managerEmail: string
 }
 
+export type WorkIqSourceScope = 'meeting_notes' | 'emails' | 'teams_chats' | 'documents_notes'
+export type WorkIqUiStatus = 'off' | 'ready' | 'enabled' | 'sign_in_required' | 'consent_required' | 'unavailable'
+
+export interface ConversationSettings {
+  workIqEnabled: boolean
+  workIqSourceScope: WorkIqSourceScope[]
+}
+
 // eslint-disable-next-line react-refresh/only-export-components
 export const DEFAULT_SETTINGS: ModelSettings = {
   model: 'gpt-5-4-mini',
@@ -34,6 +42,20 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   imageHeight: 1024,
   managerApprovalEnabled: false,
   managerEmail: '',
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const DEFAULT_WORKIQ_SOURCE_SCOPE: WorkIqSourceScope[] = [
+  'meeting_notes',
+  'emails',
+  'teams_chats',
+  'documents_notes',
+]
+
+// eslint-disable-next-line react-refresh/only-export-components
+export const DEFAULT_CONVERSATION_SETTINGS: ConversationSettings = {
+  workIqEnabled: false,
+  workIqSourceScope: [...DEFAULT_WORKIQ_SOURCE_SCOPE],
 }
 
 const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -58,11 +80,15 @@ const IMAGE_QUALITY_OPTIONS = [
 
 interface SettingsPanelProps {
   settings: ModelSettings
+  conversationSettings: ConversationSettings
+  workIqStatus: WorkIqUiStatus
   onChange: (settings: ModelSettings) => void
+  onConversationSettingsChange: (settings: ConversationSettings) => void
+  workIqLocked?: boolean
   t: (key: string) => string
 }
 
-type SettingsSection = 'model' | 'image' | 'manager'
+type SettingsSection = 'model' | 'image' | 'manager' | 'workiq'
 
 interface SliderFieldProps {
   inputId: string
@@ -105,17 +131,48 @@ function SliderField({ inputId, label, tooltip, value, min, max, step, onChange 
   )
 }
 
-export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
+const WORKIQ_STATUS_STYLES: Record<WorkIqUiStatus, string> = {
+  off: 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)]',
+  ready: 'border-[var(--accent)]/20 bg-[var(--accent-soft)] text-[var(--accent-strong)]',
+  enabled: 'border-emerald-300/70 bg-emerald-100/80 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200',
+  sign_in_required: 'border-amber-300/80 bg-amber-100/80 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200',
+  consent_required: 'border-violet-300/80 bg-violet-100/80 text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200',
+  unavailable: 'border-rose-300/80 bg-rose-100/80 text-rose-800 dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200',
+}
+
+const WORKIQ_STATUS_MESSAGE_KEYS: Record<WorkIqUiStatus, string> = {
+  off: 'settings.workiq.message.off',
+  ready: 'settings.workiq.message.ready',
+  enabled: 'settings.workiq.message.enabled',
+  sign_in_required: 'settings.workiq.message.sign_in_required',
+  consent_required: 'settings.workiq.message.consent_required',
+  unavailable: 'settings.workiq.message.unavailable',
+}
+
+export function SettingsPanel({
+  settings,
+  conversationSettings,
+  workIqStatus,
+  onChange,
+  onConversationSettingsChange,
+  workIqLocked = false,
+  t,
+}: SettingsPanelProps) {
   const [activeSection, setActiveSection] = useState<SettingsSection | null>(null)
   const trimmedManagerEmail = settings.managerEmail.trim()
   const isManagerEmailInvalid = settings.managerApprovalEnabled
     && trimmedManagerEmail.length > 0
     && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)
+  const isWorkIqEnabled = conversationSettings.workIqEnabled
+  const isResetDisabled = activeSection === 'workiq' && workIqLocked
+  const workIqStatusLabel = t(`settings.workiq.status.${workIqStatus}`)
+  const workIqMessage = t(WORKIQ_STATUS_MESSAGE_KEYS[workIqStatus])
 
   const sectionOptions: Array<{ key: SettingsSection; label: string; Icon: typeof SlidersHorizontal }> = [
     { key: 'model', label: t('settings.title'), Icon: SlidersHorizontal },
     { key: 'image', label: t('settings.image.title'), Icon: ImagePlus },
     { key: 'manager', label: t('settings.manager.title'), Icon: ShieldCheck },
+    { key: 'workiq', label: t('settings.workiq.title'), Icon: Building2 },
   ]
 
   const update = (key: keyof ModelSettings, value: number | string | boolean) => {
@@ -143,6 +200,15 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
         imageQuality: DEFAULT_SETTINGS.imageQuality,
         imageWidth: DEFAULT_SETTINGS.imageWidth,
         imageHeight: DEFAULT_SETTINGS.imageHeight,
+      })
+      return
+    }
+
+    if (section === 'workiq') {
+      if (workIqLocked) return
+      onConversationSettingsChange({
+        workIqEnabled: DEFAULT_CONVERSATION_SETTINGS.workIqEnabled,
+        workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
       })
       return
     }
@@ -189,7 +255,10 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
             <button
               type="button"
               onClick={() => resetSectionDefaults(activeSection)}
-              className="rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+              disabled={isResetDisabled}
+              className={`rounded-full border border-[var(--panel-border)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors ${isResetDisabled
+                ? 'cursor-not-allowed opacity-50'
+                : 'hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]'}`}
             >
               {t('settings.reset')}
             </button>
@@ -387,6 +456,66 @@ export function SettingsPanel({ settings, onChange, t }: SettingsPanelProps) {
                   {isManagerEmailInvalid && (
                     <p className="text-[11px] text-rose-500">{t('settings.manager.email.invalid')}</p>
                   )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeSection === 'workiq' && (
+            <div className="space-y-4">
+              <label
+                htmlFor="settings-workiq-enabled"
+                className={`flex items-center justify-between rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2.5 ${workIqLocked ? 'opacity-70' : ''}`}
+              >
+                <div className="pr-4">
+                  <p className="text-xs font-medium text-[var(--text-primary)]">{t('settings.workiq.enabled')}</p>
+                  <p className="mt-1 text-[11px] text-[var(--text-muted)]">{t('settings.workiq.enabled.desc')}</p>
+                </div>
+                <input
+                  id="settings-workiq-enabled"
+                  type="checkbox"
+                  checked={isWorkIqEnabled}
+                  disabled={workIqLocked}
+                  onChange={(e) => onConversationSettingsChange({
+                    ...conversationSettings,
+                    workIqEnabled: e.target.checked,
+                  })}
+                  className="h-4 w-4 rounded border-[var(--panel-border)] text-[var(--accent-strong)] focus:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                />
+              </label>
+
+              <div className="rounded-xl border border-[var(--panel-border)] bg-[var(--surface)] px-3 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[11px] font-medium text-[var(--text-muted)]">{t('settings.workiq.status')}</span>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${WORKIQ_STATUS_STYLES[workIqStatus]}`}>
+                    {workIqStatusLabel}
+                  </span>
+                </div>
+                <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
+                  {workIqMessage}
+                </p>
+                {workIqLocked && (
+                  <p className="mt-2 text-[11px] text-[var(--text-muted)]">
+                    {t('settings.workiq.locked')}
+                  </p>
+                )}
+              </div>
+
+              {isWorkIqEnabled && (
+                <div className="space-y-2">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--text-muted)]">
+                    {t('settings.workiq.sources')}
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {conversationSettings.workIqSourceScope.map((source) => (
+                      <span
+                        key={source}
+                        className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2.5 py-1 text-[10px] font-medium text-[var(--text-secondary)]"
+                      >
+                        {t(`settings.workiq.source.${source}`)}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

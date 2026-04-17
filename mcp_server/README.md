@@ -34,10 +34,11 @@ uv run python scripts/deploy_improvement_mcp.py
 このスクリプトは次を行います。
 
 1. improvement MCP 用 storage account と Function App を作成または再利用する
-2. `mcp_server/` を zip 化して Flex Consumption Function App へ remote build 付きで配備する
-3. Function App の system key `mcp_extension` を取得する
-4. APIM の backend / `improvement-mcp` API / policy を更新する
-5. FastAPI 側の `IMPROVEMENT_MCP_ENDPOINT` が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を向く状態に揃える
+2. Function App に system assigned managed identity を付与し、runtime / deployment storage を keyless 構成へ揃える
+3. `mcp_server/` を zip 化して Flex Consumption Function App へ remote build 付きで配備する
+4. Function App の system key `mcp_extension` を取得する
+5. APIM の backend / `improvement-mcp` API / policy を更新する
+6. FastAPI 側の `IMPROVEMENT_MCP_ENDPOINT` が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を向く状態に揃える
 
 ## APIM 登録
 
@@ -52,3 +53,4 @@ uv run python scripts/deploy_improvement_mcp.py
 - クライアントは `Accept: application/json, text/event-stream` を送る
 - Azure Functions MCP extension では JSON-RPC request id を数値文字列にすると安定する
 - `tools/call` の `content[].text` は JSON だけでなく Python リテラル文字列として返る場合がある
+- 新しい tenant / policy では storage account の key-based auth が無効化されることがあるため、postprovision は managed identity ベースの deployment storage に自動で切り替える

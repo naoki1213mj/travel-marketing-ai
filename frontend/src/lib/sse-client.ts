@@ -2,7 +2,8 @@
  * SSE クライアント。POST /api/chat に接続し、イベントをハンドラに振り分ける。
  */
 
-import type { ModelSettings } from '../components/SettingsPanel'
+import type { ConversationSettings, ModelSettings } from '../components/SettingsPanel'
+import { getDelegatedApiHeaders } from './api-auth'
 
 /** SSE タイムアウト（15 分 — 画像生成と動画待機を考慮） */
 const SSE_TIMEOUT_MS = 900_000
@@ -87,6 +88,7 @@ export async function connectSSE(
   conversationId?: string,
   signal?: AbortSignal,
   settings?: ModelSettings,
+  conversationSettings?: ConversationSettings,
   options?: ChatRequestOptions,
 ): Promise<void> {
   const combinedSignal = buildSignal(signal)
@@ -124,12 +126,28 @@ export async function connectSSE(
       manager_email: trimmedManagerEmail,
     }
   }
+  if (conversationSettings && !conversationId) {
+    body.conversation_settings = {
+      work_iq_enabled: conversationSettings.workIqEnabled,
+      source_scope: conversationSettings.workIqSourceScope,
+      work_iq_source_scope: conversationSettings.workIqSourceScope,
+    }
+  }
+
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (conversationSettings?.workIqEnabled) {
+    Object.assign(
+      headers,
+      await getDelegatedApiHeaders({ interactive: !conversationId }),
+    )
+    headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+  }
 
   let response: Response
   try {
     response = await fetch('/api/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
       signal: combinedSignal,
     })
@@ -157,14 +175,19 @@ export async function sendApproval(
   response: string,
   handlers: SSEHandlers,
   signal?: AbortSignal,
+  useDelegatedAuth = false,
 ): Promise<void> {
   const combinedSignal = buildSignal(signal)
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (useDelegatedAuth) {
+    Object.assign(headers, await getDelegatedApiHeaders())
+  }
 
   let res: Response
   try {
     res = await fetch(`/api/chat/${threadId}/approve`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ conversation_id: threadId, response }),
       signal: combinedSignal,
     })

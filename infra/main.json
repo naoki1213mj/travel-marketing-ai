@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "2633903649709976355"
+      "templateHash": "5572760674031436582"
     }
   },
   "parameters": {
@@ -999,7 +999,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "11163536967227564431"
+              "templateHash": "1863573869286756417"
             }
           },
           "parameters": {
@@ -1079,7 +1079,6 @@
           },
           "variables": {
             "containerSecrets": "[concat(if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'logic-app-callback-url', 'value', parameters('logicAppCallbackUrl'))), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'manager-approval-trigger-url', 'value', parameters('managerApprovalTriggerUrl'))), createArray()))]",
-            "isAcrImage": "[contains(parameters('imageName'), '.azurecr.io')]",
             "containerEnv": "[concat(createArray(createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'SERVE_STATIC', 'value', 'true'), createObject('name', 'MODEL_NAME', 'value', parameters('modelName')), createObject('name', 'ENVIRONMENT', 'value', 'production')), if(not(empty(parameters('projectEndpoint'))), createArray(createObject('name', 'AZURE_AI_PROJECT_ENDPOINT', 'value', parameters('projectEndpoint'))), createArray()), if(not(empty(parameters('imageProjectEndpointMai'))), createArray(createObject('name', 'IMAGE_PROJECT_ENDPOINT_MAI', 'value', parameters('imageProjectEndpointMai'))), createArray()), if(not(empty(parameters('cosmosDbEndpoint'))), createArray(createObject('name', 'COSMOS_DB_ENDPOINT', 'value', parameters('cosmosDbEndpoint'))), createArray()), if(not(empty(parameters('contentUnderstandingEndpoint'))), createArray(createObject('name', 'CONTENT_UNDERSTANDING_ENDPOINT', 'value', parameters('contentUnderstandingEndpoint'))), createArray()), if(not(empty(parameters('speechServiceEndpoint'))), createArray(createObject('name', 'SPEECH_SERVICE_ENDPOINT', 'value', parameters('speechServiceEndpoint'))), createArray()), if(not(empty(parameters('speechServiceRegion'))), createArray(createObject('name', 'SPEECH_SERVICE_REGION', 'value', parameters('speechServiceRegion'))), createArray()), if(not(empty(parameters('logicAppCallbackUrl'))), createArray(createObject('name', 'LOGIC_APP_CALLBACK_URL', 'secretRef', 'logic-app-callback-url')), createArray()), if(not(empty(parameters('managerApprovalTriggerUrl'))), createArray(createObject('name', 'MANAGER_APPROVAL_TRIGGER_URL', 'secretRef', 'manager-approval-trigger-url')), createArray()), if(not(empty(parameters('voiceSpaClientId'))), createArray(createObject('name', 'VOICE_SPA_CLIENT_ID', 'value', parameters('voiceSpaClientId'))), createArray()), if(not(empty(parameters('tenantId'))), createArray(createObject('name', 'AZURE_TENANT_ID', 'value', parameters('tenantId'))), createArray()), if(not(empty(parameters('improvementMcpEndpoint'))), createArray(createObject('name', 'IMPROVEMENT_MCP_ENDPOINT', 'value', parameters('improvementMcpEndpoint'))), createArray()))]"
           },
           "resources": [
@@ -1101,7 +1100,12 @@
                     "targetPort": 8000,
                     "transport": "auto"
                   },
-                  "registries": "[if(variables('isAcrImage'), createArray(createObject('server', reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), '2023-11-01-preview').loginServer, 'identity', 'system')), createArray())]"
+                  "registries": [
+                    {
+                      "server": "[reference(resourceId('Microsoft.ContainerRegistry/registries', parameters('containerRegistryName')), '2023-11-01-preview').loginServer]",
+                      "identity": "system"
+                    }
+                  ]
                 },
                 "template": {
                   "containers": [

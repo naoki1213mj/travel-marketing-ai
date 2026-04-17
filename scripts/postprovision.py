@@ -21,8 +21,11 @@ import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-from azure.core.exceptions import ClientAuthenticationError
+from azure.ai.projects import AIProjectClient
+from azure.ai.projects.models import PromptAgentDefinition
+from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
 from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
@@ -171,6 +174,36 @@ def _sync_improvement_mcp_env(function_app_name: str, function_app_rg: str, stor
         _set_azd_env_value(key, value)
 
 
+def _update_container_app_env(container_app_name: str, resource_group: str, env_vars: dict[str, str]) -> None:
+    """Container App の環境変数を同期する。"""
+    if not container_app_name or not resource_group:
+        return
+
+    pairs = [f"{key}={value}" for key, value in env_vars.items() if value]
+    if not pairs:
+        return
+
+    result = _run_cli(
+        [
+            "az",
+            "containerapp",
+            "update",
+            "--name",
+            container_app_name,
+            "--resource-group",
+            resource_group,
+            "--set-env-vars",
+            *pairs,
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Container App の env 同期に失敗しました: %s", result.stderr.strip())
+        return
+
+    logger.info("Container App の env を同期しました: %s", container_app_name)
+
+
 def _get_token(scope: str = "https://management.azure.com/.default") -> str:
     """DefaultAzureCredential でアクセストークンを取得"""
     credential = DefaultAzureCredential()
@@ -308,6 +341,8 @@ _IMPROVEMENT_MCP_BACKEND_ID = "improvement-mcp-backend"
 _IMPROVEMENT_MCP_NAMED_VALUE = "func-mcp-extension-key"
 _IMPROVEMENT_MCP_READY_ATTEMPTS = 6
 _IMPROVEMENT_MCP_READY_DELAY_SECONDS = 10
+_IMPROVEMENT_MCP_RBAC_WAIT_SECONDS = 30
+_STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE = "Storage Blob Data Contributor"
 _IMPROVEMENT_MCP_POLICY_XML = """\
 <policies>
   <inbound>
@@ -381,6 +416,8 @@ def ensure_storage_account(resource_group: str, location: str, storage_account_n
             "Standard_LRS",
             "--kind",
             "StorageV2",
+            "--allow-shared-key-access",
+            "false",
             "--allow-blob-public-access",
             "false",
             "--min-tls-version",
@@ -439,6 +476,275 @@ def ensure_improvement_mcp_function_app(
     return False
 
 
+def _ensure_function_app_identity(function_app_name: str, resource_group: str) -> str | None:
+    """Function App に system assigned managed identity を付与する。"""
+    result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "identity",
+            "assign",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Function App の managed identity 付与に失敗しました: %s", result.stderr.strip())
+        return None
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        payload = {}
+
+    principal_id = str(payload.get("principalId") or "").strip()
+    if not principal_id:
+        logger.warning("Function App の principalId を取得できません: %s", function_app_name)
+        return None
+
+    return principal_id
+
+
+def _get_storage_account_resource_id(resource_group: str, storage_account_name: str) -> str:
+    """storage account の resource id を返す。"""
+    result = _run_cli(
+        [
+            "az",
+            "storage",
+            "account",
+            "show",
+            "--name",
+            storage_account_name,
+            "--resource-group",
+            resource_group,
+            "--query",
+            "id",
+            "-o",
+            "tsv",
+        ],
+        capture_output=True,
+    )
+    if result.returncode == 0:
+        return result.stdout.strip()
+
+    logger.warning("storage account resource id の取得に失敗しました: %s", result.stderr.strip())
+    return ""
+
+
+def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: str) -> bool:
+    """Function App の managed identity に Blob Data Contributor を付与する。"""
+    list_result = _run_cli(
+        [
+            "az",
+            "role",
+            "assignment",
+            "list",
+            "--assignee-object-id",
+            principal_id,
+            "--scope",
+            storage_account_id,
+            "--role",
+            _STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE,
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if list_result.returncode == 0:
+        try:
+            assignments = json.loads(list_result.stdout)
+        except json.JSONDecodeError:
+            assignments = []
+
+        if isinstance(assignments, list) and assignments:
+            logger.info("Blob Data Contributor ロール割り当て既存: %s", principal_id)
+            return True
+
+    create_result = _run_cli(
+        [
+            "az",
+            "role",
+            "assignment",
+            "create",
+            "--assignee-object-id",
+            principal_id,
+            "--assignee-principal-type",
+            "ServicePrincipal",
+            "--role",
+            _STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE,
+            "--scope",
+            storage_account_id,
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if create_result.returncode == 0:
+        logger.info("Blob Data Contributor ロールを付与しました: %s", principal_id)
+        return True
+
+    stderr = create_result.stderr.strip()
+    if "already exists" in stderr.lower():
+        logger.info("Blob Data Contributor ロール割り当て既存: %s", principal_id)
+        return True
+
+    logger.warning("Blob Data Contributor ロール付与に失敗しました: %s", stderr)
+    return False
+
+
+def _get_deployment_storage_container_name(function_app_name: str, resource_group: str) -> str:
+    """Function App の deployment storage container 名を返す。"""
+    result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "deployment",
+            "config",
+            "show",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        logger.warning("Function App deployment config の取得に失敗しました: %s", result.stderr.strip())
+        return ""
+
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        logger.warning("Function App deployment config の JSON 解析に失敗しました: %s", function_app_name)
+        return ""
+
+    storage = payload.get("storage") if isinstance(payload, dict) else None
+    deployment_value = str(storage.get("value") or "").strip() if isinstance(storage, dict) else ""
+    if not deployment_value:
+        logger.warning("Function App deployment storage の URL を取得できません: %s", function_app_name)
+        return ""
+
+    parsed_path = urlparse(deployment_value).path.strip("/")
+    if not parsed_path:
+        logger.warning("Function App deployment storage container 名を解決できません: %s", function_app_name)
+        return ""
+
+    container_name, *_ = parsed_path.split("/", 1)
+    return container_name
+
+
+def ensure_improvement_mcp_managed_identity_storage(
+    resource_group: str,
+    function_app_name: str,
+    storage_account_name: str,
+) -> bool:
+    """Improvement MCP Function App を keyless storage 構成へ揃える。"""
+    principal_id = _ensure_function_app_identity(function_app_name, resource_group)
+    if not principal_id:
+        return False
+
+    storage_account_id = _get_storage_account_resource_id(resource_group, storage_account_name)
+    if not storage_account_id:
+        return False
+
+    if not _ensure_storage_blob_role_assignment(storage_account_id, principal_id):
+        return False
+
+    deployment_container_name = _get_deployment_storage_container_name(function_app_name, resource_group)
+    if not deployment_container_name:
+        return False
+
+    appsettings_result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "config",
+            "appsettings",
+            "set",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+            "--settings",
+            f"AzureWebJobsStorage__accountName={storage_account_name}",
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if appsettings_result.returncode != 0:
+        logger.warning("Function App の AzureWebJobsStorage 設定更新に失敗しました: %s", appsettings_result.stderr.strip())
+        return False
+
+    delete_result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "config",
+            "appsettings",
+            "delete",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+            "--setting-names",
+            "AzureWebJobsStorage",
+            "DEPLOYMENT_STORAGE_CONNECTION_STRING",
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if delete_result.returncode != 0:
+        logger.warning("Function App の旧 storage 設定削除に失敗しました: %s", delete_result.stderr.strip())
+        return False
+
+    deployment_config_result = _run_cli(
+        [
+            "az",
+            "functionapp",
+            "deployment",
+            "config",
+            "set",
+            "--name",
+            function_app_name,
+            "--resource-group",
+            resource_group,
+            "--deployment-storage-name",
+            storage_account_name,
+            "--deployment-storage-container-name",
+            deployment_container_name,
+            "--deployment-storage-auth-type",
+            "SystemAssignedIdentity",
+            "-o",
+            "json",
+        ],
+        capture_output=True,
+    )
+    if deployment_config_result.returncode != 0:
+        logger.warning("Function App の deployment storage 設定更新に失敗しました: %s", deployment_config_result.stderr.strip())
+        return False
+
+    logger.info(
+        "improvement-mcp Function App を keyless storage 構成へ更新しました: %s",
+        function_app_name,
+    )
+    logger.info(
+        "managed identity の RBAC 反映待ち (%d秒): %s",
+        _IMPROVEMENT_MCP_RBAC_WAIT_SECONDS,
+        function_app_name,
+    )
+    time.sleep(_IMPROVEMENT_MCP_RBAC_WAIT_SECONDS)
+    return True
+
+
 def deploy_improvement_mcp_function(
     resource_group: str,
     location: str,
@@ -449,6 +755,8 @@ def deploy_improvement_mcp_function(
     if not ensure_storage_account(resource_group, location, storage_account_name):
         return False
     if not ensure_improvement_mcp_function_app(resource_group, location, function_app_name, storage_account_name):
+        return False
+    if not ensure_improvement_mcp_managed_identity_storage(resource_group, function_app_name, storage_account_name):
         return False
 
     package_path = _build_mcp_package()
@@ -785,10 +1093,11 @@ def apply_ai_gateway_policy(
 # ---------------------------------------------------------------------------
 
 
-def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
+def create_entra_app(
+    app_name: str = "travel-voice-spa",
+    container_app_url: str = "",
+) -> str | None:
     """Voice Live 用の Entra ID SPA アプリ登録を作成する。"""
-    import os as _os
-
     # 既存アプリの確認
     result = _run_cli(
         ["az", "ad", "app", "list", "--display-name", app_name, "--query", "[0].appId", "-o", "tsv"],
@@ -812,8 +1121,6 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
             "AzureADMyOrg",
             "--enable-id-token-issuance",
             "true",
-            "--web-redirect-uris",
-            "",
             "--query",
             "appId",
             "-o",
@@ -828,7 +1135,6 @@ def create_entra_app(app_name: str = "travel-voice-spa") -> str | None:
     app_id = result.stdout.strip()
 
     # SPA リダイレクト URI を設定
-    container_app_url = _os.environ.get("SERVICE_WEB_ENDPOINTS", "").strip("[]\"' ")
     redirect_uris = [
         "http://localhost:5173",
         "http://localhost:8000",
@@ -872,21 +1178,17 @@ def create_voice_agent(
     project_endpoint: str,
     subscription_id: str,
     rg: str,
-) -> None:
+) -> bool:
     """Voice Live 用の Foundry Prompt Agent を作成する。"""
-    ai_services_name = project_endpoint.split("//")[1].split(".")[0]
-    project_name = project_endpoint.rstrip("/").split("/")[-1]
+    del subscription_id, rg
+    agent_name = os.environ.get("VOICE_AGENT_NAME", "travel-voice-orchestrator").strip() or "travel-voice-orchestrator"
+    model_name = os.environ.get("MODEL_NAME", "").strip() or os.environ.get("FOUNDRY_MODEL", "").strip() or "gpt-5-4-mini"
 
-    token = _get_token()
-
-    agent_name = "travel-voice-orchestrator"
-
-    # Voice Live 設定
     voice_live_config = json.dumps(
         {
             "session": {
                 "voice": {
-                    "name": "ja-JP-NanamiNeural",
+                    "name": "ja-JP-Nanami:DragonHDLatestNeural",
                     "type": "azure-standard",
                     "temperature": 0.8,
                 },
@@ -895,15 +1197,17 @@ def create_voice_agent(
                 },
                 "turn_detection": {
                     "type": "azure_semantic_vad",
-                    "silence_duration_ms": 500,
+                    "end_of_utterance_detection": {
+                        "model": "semantic_detection_v1_multilingual",
+                    },
                 },
                 "input_audio_noise_reduction": {"type": "azure_deep_noise_suppression"},
                 "input_audio_echo_cancellation": {"type": "server_echo_cancellation"},
             }
-        }
+        },
+        ensure_ascii=False,
     )
 
-    # メタデータに Voice Live 設定を格納（512文字制限のためチャンク化）
     metadata: dict[str, str] = {}
     limit = 512
     metadata["microsoft.voice-live.configuration"] = voice_live_config[:limit]
@@ -914,37 +1218,44 @@ def create_voice_agent(
         remaining = remaining[limit:]
         chunk_num += 1
 
-    url = (
-        f"https://management.azure.com/subscriptions/{subscription_id}"
-        f"/resourceGroups/{rg}"
-        f"/providers/Microsoft.CognitiveServices/accounts/{ai_services_name}"
-        f"/projects/{project_name}/agents/{agent_name}/versions/1.0"
-        "?api-version=2025-04-01-preview"
+    instructions = (
+        "あなたは旅行マーケティングのアシスタントです。\n"
+        "ユーザーの音声指示を聞き取り、旅行プランの企画を支援します。\n"
+        "ユーザーが旅行プランの企画を依頼したら、具体的な旅行先・季節・ターゲット・予算を確認し、\n"
+        "企画の方向性を提案してください。\n"
+        "日本語で応答してください。"
     )
 
-    body = {
-        "properties": {
-            "definition": {
-                "type": "PromptAgent",
-                "model": "gpt-5-4-mini",
-                "instructions": (
-                    "あなたは旅行マーケティングのアシスタントです。\n"
-                    "ユーザーの音声指示を聞き取り、旅行プランの企画を支援します。\n"
-                    "ユーザーが旅行プランの企画を依頼したら、具体的な旅行先・季節・ターゲット・予算を確認し、\n"
-                    "企画の方向性を提案してください。\n"
-                    "日本語で応答してください。"
-                ),
-            },
-            "metadata": metadata,
-        }
-    }
+    project_client: AIProjectClient | None = None
+    try:
+        project_client = AIProjectClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
+        try:
+            project_client.agents.get(agent_name=agent_name)
+            logger.info("Voice Agent 既存: %s", agent_name)
+            return True
+        except ResourceNotFoundError:
+            logger.info("Voice Agent を作成中: %s", agent_name)
 
-    logger.info("Voice Agent を作成中: %s", agent_name)
-    result = _rest_call(url, method="PUT", body=body, token=token)
-    if result is not None:
+        project_client.agents.create_version(
+            agent_name=agent_name,
+            definition=PromptAgentDefinition(model=model_name, instructions=instructions),
+            metadata=metadata,
+        )
         logger.info("Voice Agent を作成しました: %s", agent_name)
-    else:
-        logger.warning("Voice Agent の作成に失敗しました")
+        return True
+    except ClientAuthenticationError as exc:
+        logger.warning("Voice Agent の認証に失敗しました: %s", exc)
+        return False
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
+        logger.warning("Voice Agent の作成に失敗しました: %s", exc)
+        return False
+    except Exception as exc:
+        logger.warning("Voice Agent の作成中に予期しないエラーが発生しました: %s", exc)
+        return False
+    finally:
+        close_method = getattr(project_client, "close", None)
+        if callable(close_method):
+            close_method()
 
 
 # ---------------------------------------------------------------------------
@@ -960,11 +1271,14 @@ def main() -> None:
     logger.info("postprovision を開始します")
 
     # azd 環境変数を読み込み
-    env = _merge_env(_get_azd_env())
-    subscription_id = env.get("AZURE_SUBSCRIPTION_ID", "")
-    rg = env.get("AZURE_RESOURCE_GROUP", "")
-    apim_name = env.get("AZURE_APIM_NAME", "")
-    project_endpoint = env.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    azd_env = _get_azd_env()
+    env = _merge_env(azd_env)
+    subscription_id = azd_env.get("AZURE_SUBSCRIPTION_ID", "") or env.get("AZURE_SUBSCRIPTION_ID", "")
+    rg = azd_env.get("AZURE_RESOURCE_GROUP", "") or env.get("AZURE_RESOURCE_GROUP", "")
+    apim_name = azd_env.get("AZURE_APIM_NAME", "") or env.get("AZURE_APIM_NAME", "")
+    project_endpoint = azd_env.get("AZURE_AI_PROJECT_ENDPOINT", "") or env.get("AZURE_AI_PROJECT_ENDPOINT", "")
+    service_web_endpoints = azd_env.get("SERVICE_WEB_ENDPOINTS", "") or env.get("SERVICE_WEB_ENDPOINTS", "")
+    container_app_name = azd_env.get("AZURE_CONTAINER_APP_NAME", "") or env.get("AZURE_CONTAINER_APP_NAME", "")
 
     if not all([subscription_id, rg, project_endpoint]):
         logger.error(
@@ -1012,13 +1326,23 @@ def main() -> None:
         capture_output=True,
     )
     tenant_id = tenant_result.stdout.strip()
-    app_id = create_entra_app()
+    container_app_url = service_web_endpoints.strip("[]\"' ")
+    app_id = create_entra_app(container_app_url=container_app_url)
     if app_id:
         if _set_azd_env_value("VOICE_SPA_CLIENT_ID", app_id):
             logger.info("Voice SPA Client ID を azd env に保存: %s", app_id)
     if tenant_id:
         if _set_azd_env_value("AZURE_TENANT_ID", tenant_id):
             logger.info("Azure Tenant ID を azd env に保存: %s", tenant_id)
+
+    _update_container_app_env(
+        container_app_name,
+        rg,
+        {
+            "VOICE_SPA_CLIENT_ID": app_id or "",
+            "AZURE_TENANT_ID": tenant_id,
+        },
+    )
 
     logger.info("postprovision 完了")
 

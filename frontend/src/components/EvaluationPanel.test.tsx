@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EvaluationPanel } from './EvaluationPanel'
 
 const originalFetch = globalThis.fetch
+const { getDelegatedApiHeaders } = vi.hoisted(() => ({
+  getDelegatedApiHeaders: vi.fn(async () => ({})),
+}))
+
+vi.mock('../lib/api-auth', () => ({
+  getDelegatedApiHeaders,
+}))
 
 const evaluationV1 = {
   version: 1,
@@ -254,6 +261,9 @@ describe('EvaluationPanel', () => {
 
   beforeEach(() => {
     globalThis.fetch = mockFetch
+    mockFetch.mockReset()
+    getDelegatedApiHeaders.mockReset()
+    getDelegatedApiHeaders.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -375,6 +385,43 @@ describe('EvaluationPanel', () => {
           asset_quality: expect.objectContaining({ overall: 4.2 }),
         }),
       }))
+    })
+  })
+
+  it('adds delegated auth headers when requested', async () => {
+    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    mockFetch.mockResolvedValueOnce(createJsonResponse({
+      plan_quality: evaluationV2.result.plan_quality,
+      asset_quality: evaluationV2.result.asset_quality,
+      regression_guard: evaluationV2.result.regression_guard,
+      legacy_overall: evaluationV2.result.legacy_overall,
+      evaluation_meta: { version: 2, round: 2, created_at: '2026-04-02T01:00:00+00:00' },
+    }))
+
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        conversationId="conv-1"
+        artifactVersion={2}
+        evaluations={[]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([])]}
+        useDelegatedAuth
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Evaluation' }))
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalled()
+    })
+
+    const [, options] = mockFetch.mock.calls[0]
+    expect(options.headers).toMatchObject({
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer delegated-token',
     })
   })
 

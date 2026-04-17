@@ -148,7 +148,12 @@ def test_evaluate_endpoint_persists_grouped_result_for_version(monkeypatch):
             "reason": "solid",
         }
 
-    async def fake_persist(conversation_id: str, artifact_version: int, result: dict) -> dict | None:
+    async def fake_persist(
+        conversation_id: str,
+        artifact_version: int,
+        result: dict,
+        owner_id: str | None = None,
+    ) -> dict | None:
         persist_calls.append((conversation_id, artifact_version, result))
         return {"version": artifact_version, "round": 2, "created_at": "2026-04-02T01:00:00+00:00"}
 
@@ -227,7 +232,11 @@ def test_evaluate_endpoint_detects_regression_against_previous_version(monkeypat
         },
     }
 
-    async def fake_get_conversation(_conversation_id: str) -> dict:
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ) -> dict:
         return {
             "messages": [
                 {
@@ -241,7 +250,12 @@ def test_evaluate_endpoint_detects_regression_against_previous_version(monkeypat
             ]
         }
 
-    async def fake_persist(_conversation_id: str, _artifact_version: int, _result: dict) -> dict | None:
+    async def fake_persist(
+        _conversation_id: str,
+        _artifact_version: int,
+        _result: dict,
+        owner_id: str | None = None,
+    ) -> dict | None:
         return None
 
     async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
@@ -297,14 +311,23 @@ def test_evaluate_endpoint_returns_200_when_v2_evaluators_raise(monkeypatch):
     async def broken_marketing(_query: str, _response: str) -> dict:
         raise Exception("marketing evaluator unavailable")
 
-    async def fake_persist(_conversation_id: str, _artifact_version: int, _result: dict) -> dict | None:
+    async def fake_persist(
+        _conversation_id: str,
+        _artifact_version: int,
+        _result: dict,
+        owner_id: str | None = None,
+    ) -> dict | None:
         persist_calls.append((_conversation_id, _artifact_version))
         return {"version": 2, "round": 1, "created_at": "2026-04-06T00:00:00+00:00"}
 
     async def fake_log(_query: str, _response: str, _scores: dict) -> str | None:
         return None
 
-    async def fake_get_conversation(_conversation_id: str) -> dict:
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ) -> dict:
         return {
             "messages": [
                 {

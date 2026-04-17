@@ -2,9 +2,17 @@
  * SSE クライアントのテスト
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { connectSSE, type SSEHandlers } from '../sse-client'
+import { DEFAULT_CONVERSATION_SETTINGS } from '../../components/SettingsPanel'
+import { connectSSE, sendApproval, type SSEHandlers } from '../sse-client'
 
 const originalFetch = global.fetch
+const { getDelegatedApiHeaders } = vi.hoisted(() => ({
+  getDelegatedApiHeaders: vi.fn(async () => ({})),
+}))
+
+vi.mock('../api-auth', () => ({
+  getDelegatedApiHeaders,
+}))
 
 function createMockResponse(body: string, status = 200): Response {
   const encoder = new TextEncoder()
@@ -25,6 +33,9 @@ describe('connectSSE', () => {
 
   beforeEach(() => {
     global.fetch = mockFetch
+    mockFetch.mockReset()
+    getDelegatedApiHeaders.mockReset()
+    getDelegatedApiHeaders.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -45,6 +56,51 @@ describe('connectSSE', () => {
     expect(options.headers['Content-Type']).toBe('application/json')
     const body = JSON.parse(options.body)
     expect(body.message).toBe('hello')
+  })
+
+  it('sends conversation settings when starting a new conversation', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE('hello', {}, undefined, undefined, undefined, {
+      workIqEnabled: true,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.conversation_settings).toEqual({
+      work_iq_enabled: true,
+      source_scope: DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope,
+      work_iq_source_scope: DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope,
+    })
+  })
+
+  it('adds delegated auth headers when Work IQ is enabled', async () => {
+    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE('hello', {}, undefined, undefined, undefined, {
+      workIqEnabled: true,
+      workIqSourceScope: ['emails'],
+    })
+
+    expect(getDelegatedApiHeaders).toHaveBeenCalledWith({ interactive: true })
+    const [, options] = mockFetch.mock.calls[0]
+    expect(options.headers.Authorization).toBe('Bearer delegated-token')
+    expect(options.headers['X-User-Timezone']).toBeTruthy()
+  })
+
+  it('omits conversation settings when continuing an existing conversation', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE('hello', {}, 'conv-1', undefined, undefined, {
+      workIqEnabled: true,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.conversation_settings).toBeUndefined()
   })
 
   it('parses SSE events and dispatches to correct handlers', async () => {
@@ -134,5 +190,15 @@ describe('connectSSE', () => {
     expect(imageHandler).toHaveBeenCalledTimes(1)
     expect(toolHandler).toHaveBeenCalledWith(expect.objectContaining({ tool: 'web_search' }))
     expect(imageHandler).toHaveBeenCalledWith(expect.objectContaining({ url: 'http://img.png' }))
+  })
+
+  it('adds delegated auth headers to approval requests when enabled', async () => {
+    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await sendApproval('conv-1', '承認', {}, undefined, true)
+
+    const [, options] = mockFetch.mock.calls[0]
+    expect(options.headers.Authorization).toBe('Bearer delegated-token')
   })
 })

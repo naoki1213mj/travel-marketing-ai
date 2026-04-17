@@ -1,10 +1,19 @@
 """会話 API とリプレイ API のテスト"""
 
+import base64
+import json
+
 from fastapi.testclient import TestClient
 
 from src.main import app
 
 client = TestClient(app)
+
+
+def _make_bearer_token(payload: dict[str, object]) -> str:
+    header = base64.urlsafe_b64encode(json.dumps({"alg": "none", "typ": "JWT"}).encode("utf-8")).decode("utf-8").rstrip("=")
+    body = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("utf-8").rstrip("=")
+    return f"{header}.{body}."
 
 
 def test_conversations_list_returns_200():
@@ -21,7 +30,7 @@ def test_conversations_list_returns_200():
 def test_conversations_list_returns_304_when_etag_matches(monkeypatch):
     """会話一覧も If-None-Match 一致時は 304 を返す"""
 
-    async def fake_list_conversations(limit: int = 20):
+    async def fake_list_conversations(owner_id: str | None = None, limit: int = 20):
         return [
             {
                 "id": "conv-1",
@@ -55,14 +64,27 @@ def test_conversation_detail_returns_404_for_unknown():
 def test_conversation_detail_hides_sensitive_metadata(monkeypatch):
     """会話詳細は callback token を返さない"""
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(_conversation_id: str, owner_id: str | None = None, allow_cross_owner: bool = False):
         return {
             "id": "conv-1",
+            "user_id": "user-123",
             "input": "沖縄プラン",
             "updated_at": "2026-04-05T00:00:00+00:00",
             "messages": [],
             "metadata": {
                 "manager_approval_callback_token": "secret-token",
+                "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+                "work_iq_session": {
+                    "enabled": True,
+                    "source_scope": ["emails"],
+                    "auth_mode": "delegated",
+                    "owner_oid": "oid-123",
+                    "owner_tid": "tid-123",
+                    "owner_upn": "user@example.com",
+                    "brief_summary": "要約",
+                    "status": "completed",
+                    "raw_excerpt": "should-not-leak",
+                },
                 "latency": 1.2,
             },
         }
@@ -74,13 +96,24 @@ def test_conversation_detail_hides_sensitive_metadata(monkeypatch):
     assert response.headers["Cache-Control"].startswith("no-store")
     assert response.headers["ETag"].startswith('W/"')
     data = response.json()
-    assert data["metadata"] == {"latency": 1.2}
+    assert "user_id" not in data
+    assert data["metadata"] == {
+        "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+        "work_iq_session": {
+            "enabled": True,
+            "source_scope": ["emails"],
+            "auth_mode": "delegated",
+            "brief_summary": "要約",
+            "status": "completed",
+        },
+        "latency": 1.2,
+    }
 
 
 def test_conversation_detail_returns_304_when_etag_matches(monkeypatch):
     """If-None-Match が一致すれば会話本文を返さず 304 を返す"""
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(_conversation_id: str, owner_id: str | None = None, allow_cross_owner: bool = False):
         return {
             "id": "conv-1",
             "input": "沖縄プラン",
@@ -104,6 +137,25 @@ def test_conversation_detail_returns_304_when_etag_matches(monkeypatch):
     assert conditional_response.status_code == 304
     assert conditional_response.headers["ETag"] == etag
     assert conditional_response.content == b""
+
+
+def test_conversations_list_uses_authenticated_owner_id(monkeypatch):
+    """Authorization Bearer 付き一覧は delegated user_id で絞り込む"""
+    captured: dict[str, object] = {}
+
+    async def fake_list_conversations(owner_id: str | None = None, limit: int = 20):
+        captured["owner_id"] = owner_id
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr("src.api.conversations.list_conversations", fake_list_conversations)
+
+    token = _make_bearer_token({"oid": "oid-123", "tid": "tid-123", "preferred_username": "user@example.com"})
+    response = client.get("/api/conversations", headers={"Authorization": f"Bearer {token}"})
+
+    assert response.status_code == 200
+    assert isinstance(captured.get("owner_id"), str)
+    assert str(captured["owner_id"]).startswith("user-")
 
 
 def test_replay_returns_error_for_unknown():

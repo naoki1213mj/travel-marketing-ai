@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
+import { getDelegatedApiHeaders } from '../lib/api-auth'
 import {
     buildEvaluationFeedback,
     calculateEvaluationOverall,
@@ -30,6 +31,7 @@ interface EvaluationPanelProps {
   evaluations?: EvaluationRecord[]
   versions?: ArtifactSnapshot[]
   isLatestVersion?: boolean
+  useDelegatedAuth?: boolean
   onEvaluationRecorded?: (record: EvaluationRecord) => void
   onRefine?: (feedback: string, artifactVersion?: number) => void
 }
@@ -318,6 +320,7 @@ export function EvaluationPanel({
   evaluations = [],
   versions = [],
   isLatestVersion = true,
+  useDelegatedAuth = false,
   onEvaluationRecorded,
   onRefine,
 }: EvaluationPanelProps) {
@@ -390,9 +393,13 @@ export function EvaluationPanel({
     setLoading(true)
     setError(null)
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      if (useDelegatedAuth) {
+        Object.assign(headers, await getDelegatedApiHeaders())
+      }
       const res = await fetch('/api/evaluate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           query,
           response,

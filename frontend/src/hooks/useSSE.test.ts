@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { DEFAULT_SETTINGS } from '../components/SettingsPanel'
+import { DEFAULT_CONVERSATION_SETTINGS, DEFAULT_SETTINGS } from '../components/SettingsPanel'
 import { buildRestoredPipelineState, useSSE } from './useSSE'
 
 const originalFetch = globalThis.fetch
@@ -8,10 +8,17 @@ const { connectSSE, sendApproval } = vi.hoisted(() => ({
   connectSSE: vi.fn(async () => {}),
   sendApproval: vi.fn(async () => {}),
 }))
+const { getDelegatedApiHeaders } = vi.hoisted(() => ({
+  getDelegatedApiHeaders: vi.fn(async () => ({})),
+}))
 
 vi.mock('../lib/sse-client', () => ({
   connectSSE,
   sendApproval,
+}))
+
+vi.mock('../lib/api-auth', () => ({
+  getDelegatedApiHeaders,
 }))
 
 describe('buildRestoredPipelineState', () => {
@@ -19,6 +26,7 @@ describe('buildRestoredPipelineState', () => {
     globalThis.fetch = vi.fn()
     connectSSE.mockClear()
     sendApproval.mockClear()
+    getDelegatedApiHeaders.mockClear()
   })
 
   afterEach(() => {
@@ -209,6 +217,50 @@ describe('buildRestoredPipelineState', () => {
     ])
   })
 
+  it('restores locked Work IQ state from conversation metadata', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        metadata: {
+          work_iq_session: {
+            enabled: true,
+            status: 'consent_required',
+            source_scope: ['emails', 'teams_chats'],
+          },
+        },
+        messages: [],
+      },
+      'conv-workiq',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.conversationSettings).toEqual({
+      workIqEnabled: true,
+      workIqSourceScope: ['emails', 'teams_chats'],
+    })
+    expect(state.workIq.status).toBe('consent_required')
+  })
+
+  it('restores Work IQ warning_code when status is absent', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        metadata: {
+          work_iq_session: {
+            enabled: true,
+            warning_code: 'auth_required',
+            source_scope: ['emails'],
+          },
+        },
+        messages: [],
+      },
+      'conv-workiq-warning',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.workIq.status).toBe('sign_in_required')
+  })
+
   it('rebuilds version snapshots from completed multi-round conversations', () => {
     const state = buildRestoredPipelineState(
       {
@@ -395,6 +447,7 @@ describe('buildRestoredPipelineState', () => {
       undefined,
       expect.any(AbortSignal),
       DEFAULT_SETTINGS,
+      DEFAULT_CONVERSATION_SETTINGS,
       undefined,
     )
 
@@ -409,6 +462,7 @@ describe('buildRestoredPipelineState', () => {
       'conv-v1',
       expect.any(AbortSignal),
       DEFAULT_SETTINGS,
+      DEFAULT_CONVERSATION_SETTINGS,
       undefined,
     )
   })
@@ -432,6 +486,7 @@ describe('buildRestoredPipelineState', () => {
       undefined,
       expect.any(AbortSignal),
       DEFAULT_SETTINGS,
+      DEFAULT_CONVERSATION_SETTINGS,
       {
         refineContext: {
           source: 'evaluation',
@@ -668,6 +723,7 @@ describe('buildRestoredPipelineState', () => {
       '価格訴求を少し控えめにしてください',
       expect.any(Object),
       expect.any(AbortSignal),
+      false,
     )
   })
 
@@ -919,6 +975,10 @@ describe('buildRestoredPipelineState', () => {
         managerApprovalEnabled: true,
         managerEmail: 'manager@example.com',
       })
+      result.current.updateConversationSettings({
+        workIqEnabled: true,
+        workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+      })
     })
 
     await act(async () => {
@@ -938,6 +998,61 @@ describe('buildRestoredPipelineState', () => {
       managerApprovalEnabled: true,
       managerEmail: 'manager@example.com',
     })
+    expect(result.current.state.conversationSettings).toEqual({
+      workIqEnabled: true,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+    expect(result.current.state.draftConversationSettings).toEqual({
+      workIqEnabled: true,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+  })
+
+  it('restores a saved conversation with its locked Work IQ state without mutating the draft setting', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'completed',
+      metadata: {
+        work_iq_session: {
+          enabled: true,
+          status: 'auth_required',
+          source_scope: ['meeting_notes', 'documents_notes'],
+        },
+      },
+      messages: [],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    act(() => {
+      result.current.updateConversationSettings({
+        workIqEnabled: false,
+        workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+      })
+    })
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-workiq-history')
+    })
+
+    expect(result.current.state.conversationSettings).toEqual({
+      workIqEnabled: true,
+      workIqSourceScope: ['meeting_notes', 'documents_notes'],
+    })
+    expect(result.current.state.workIq.status).toBe('sign_in_required')
+    expect(result.current.state.draftConversationSettings).toEqual({
+      workIqEnabled: false,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+
+    act(() => {
+      result.current.startNewConversation()
+    })
+
+    expect(result.current.state.conversationSettings).toEqual({
+      workIqEnabled: false,
+      workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    })
+    expect(result.current.state.workIq.status).toBe('off')
   })
 
   it('keeps refinement prompts after restore polling completes', async () => {

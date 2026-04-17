@@ -7,6 +7,7 @@ import pytest
 
 import src.conversations as _conv_mod
 from src.conversations import (
+    _build_memory_key,
     _get_container,
     _get_cosmos_client,
     _memory_store,
@@ -45,8 +46,8 @@ async def test_save_conversation_to_memory():
         user_input="沖縄プラン作って",
         events=[{"event": "text", "data": "ok"}],
     )
-    assert "test-conv-1" in _memory_store
-    assert _memory_store["test-conv-1"]["input"] == "沖縄プラン作って"
+    assert _build_memory_key("anonymous", "test-conv-1") in _memory_store
+    assert _memory_store[_build_memory_key("anonymous", "test-conv-1")]["input"] == "沖縄プラン作って"
 
 
 async def test_save_conversation_preserves_status():
@@ -57,7 +58,7 @@ async def test_save_conversation_preserves_status():
         events=[],
         status="awaiting_approval",
     )
-    assert _memory_store["test-conv-status"]["status"] == "awaiting_approval"
+    assert _memory_store[_build_memory_key("anonymous", "test-conv-status")]["status"] == "awaiting_approval"
 
 
 async def test_save_conversation_preserves_created_at_on_update():
@@ -68,7 +69,7 @@ async def test_save_conversation_preserves_created_at_on_update():
         events=[],
         status="awaiting_approval",
     )
-    created_at = _memory_store["test-conv-update"]["created_at"]
+    created_at = _memory_store[_build_memory_key("anonymous", "test-conv-update")]["created_at"]
 
     await save_conversation(
         conversation_id="test-conv-update",
@@ -77,8 +78,8 @@ async def test_save_conversation_preserves_created_at_on_update():
         status="completed",
     )
 
-    assert _memory_store["test-conv-update"]["created_at"] == created_at
-    assert _memory_store["test-conv-update"]["status"] == "completed"
+    assert _memory_store[_build_memory_key("anonymous", "test-conv-update")]["created_at"] == created_at
+    assert _memory_store[_build_memory_key("anonymous", "test-conv-update")]["status"] == "completed"
 
 
 async def test_append_conversation_events_preserves_existing_messages():
@@ -98,7 +99,7 @@ async def test_append_conversation_events_preserves_existing_messages():
         status="completed",
     )
 
-    doc = _memory_store["test-conv-append"]
+    doc = _memory_store[_build_memory_key("anonymous", "test-conv-append")]
     assert [event["event"] for event in doc["messages"]] == ["text", "evaluation_result"]
     assert doc["metadata"]["user_messages"] == ["初回入力"]
     assert doc["metadata"]["background_updates_pending"] is False
@@ -178,7 +179,7 @@ class TestSaveConversationDetails:
             artifacts={"html": "<p>test</p>"},
             metrics={"latency": 1.5},
         )
-        doc = _memory_store["test-artifacts"]
+        doc = _memory_store[_build_memory_key("anonymous", "test-artifacts")]
         assert isinstance(doc["artifacts"], list)
         assert len(doc["artifacts"]) == 1
         assert doc["artifacts"][0]["html"] == "<p>test</p>"
@@ -192,18 +193,31 @@ class TestSaveConversationDetails:
             user_input="テスト",
             events=[],
         )
-        doc = _memory_store["test-defaults"]
+        doc = _memory_store[_build_memory_key("anonymous", "test-defaults")]
         assert doc["artifacts"] == []
         assert doc["metadata"] == {}
 
     async def test_save_sets_user_id(self):
-        """user_id が 'demo-user' に設定されること"""
+        """user_id は匿名 owner 既定値に設定されること"""
         await save_conversation(
             conversation_id="test-uid",
             user_input="テスト",
             events=[],
         )
-        assert _memory_store["test-uid"]["user_id"] == "demo-user"
+        assert _memory_store[_build_memory_key("anonymous", "test-uid")]["user_id"] == "anonymous"
+
+    async def test_owner_isolation_allows_same_conversation_id_per_user(self):
+        """同じ conversation_id でも owner が異なれば別会話として保持できる"""
+        await save_conversation("shared-conv", "owner-a", [], owner_id="user-a")
+        await save_conversation("shared-conv", "owner-b", [], owner_id="user-b")
+
+        owner_a = await get_conversation("shared-conv", owner_id="user-a")
+        owner_b = await get_conversation("shared-conv", owner_id="user-b")
+
+        assert owner_a is not None
+        assert owner_b is not None
+        assert owner_a["input"] == "owner-a"
+        assert owner_b["input"] == "owner-b"
 
     async def test_save_conversation_merges_existing_metadata(self):
         """metadata は更新時にマージされる"""
@@ -221,7 +235,7 @@ class TestSaveConversationDetails:
             metrics={"latency": 1.23},
         )
 
-        assert _memory_store["test-metadata-merge"]["metadata"] == {
+        assert _memory_store[_build_memory_key("anonymous", "test-metadata-merge")]["metadata"] == {
             "manager_approval_callback_token": "secret-token",
             "latency": 1.23,
         }
@@ -249,6 +263,24 @@ class TestGetConversationEdgeCases:
         # 最新が先頭
         assert result[0]["created_at"] >= result[1]["created_at"]
 
+    async def test_get_conversation_rejects_other_owner(self):
+        """別 owner の会話は取得できない"""
+        await save_conversation("owner-bound", "secret", [], owner_id="user-a")
+
+        result = await get_conversation("owner-bound", owner_id="user-b")
+
+        assert result is None
+
+    async def test_list_conversations_filters_by_owner(self):
+        """一覧は caller owner に属する会話だけ返す"""
+        await save_conversation("owner-a-1", "A1", [], owner_id="user-a")
+        await save_conversation("owner-a-2", "A2", [], owner_id="user-a")
+        await save_conversation("owner-b-1", "B1", [], owner_id="user-b")
+
+        result = await list_conversations(owner_id="user-a")
+
+        assert {item["id"] for item in result} == {"owner-a-1", "owner-a-2"}
+
 
 class TestReplayData:
     """リプレイデータのテスト"""
@@ -274,10 +306,18 @@ class TestReplayData:
     async def test_replay_data_stored_with_prefix(self):
         """replay データが replay- プレフィックスで保存されること"""
         await save_replay_data("test-123", [{"event": "text"}])
-        assert "replay-test-123" in _memory_store
-        doc = _memory_store["replay-test-123"]
+        assert _build_memory_key("anonymous", "replay-test-123") in _memory_store
+        doc = _memory_store[_build_memory_key("anonymous", "replay-test-123")]
         assert doc["type"] == "replay"
         assert doc["conversation_id"] == "test-123"
+
+    async def test_get_replay_data_rejects_other_owner(self):
+        """別 owner の replay は取得できない"""
+        await save_replay_data("shared-replay", [{"event": "text"}], owner_id="user-a")
+
+        result = await get_replay_data("shared-replay", owner_id="user-b")
+
+        assert result is None
 
 
 class TestCosmosDBPaths:
@@ -302,7 +342,7 @@ class TestCosmosDBPaths:
 
         assert result == {"id": "cosmos-get", "input": "test"}
         assert captured["func"] == mock_container.read_item
-        assert captured["kwargs"] == {"item": "cosmos-get", "partition_key": "demo-user"}
+        assert captured["kwargs"] == {"item": "cosmos-get", "partition_key": "anonymous"}
 
     async def test_save_conversation_cosmos_upsert(self, monkeypatch):
         """Cosmos DB コンテナがある場合 upsert_item が呼ばれること"""
@@ -328,7 +368,7 @@ class TestCosmosDBPaths:
                 user_input="テスト",
                 events=[],
             )
-            assert "cosmos-fallback" in _memory_store
+            assert _build_memory_key("anonymous", "cosmos-fallback") in _memory_store
 
     async def test_save_conversation_cosmos_unexpected_error(self, monkeypatch):
         """Cosmos DB で予期しないエラーが発生した場合もフォールバック"""
@@ -341,7 +381,7 @@ class TestCosmosDBPaths:
                 user_input="テスト",
                 events=[],
             )
-            assert "cosmos-unexpected" in _memory_store
+            assert _build_memory_key("anonymous", "cosmos-unexpected") in _memory_store
 
     async def test_get_conversation_cosmos_success(self, monkeypatch):
         """Cosmos DB から会話を読み取れる場合"""
@@ -419,7 +459,7 @@ class TestCosmosDBPaths:
 
         with patch("src.conversations._get_container", return_value=mock_container):
             await save_replay_data("replay-fallback", [{"event": "text"}])
-            assert "replay-replay-fallback" in _memory_store
+            assert _build_memory_key("anonymous", "replay-replay-fallback") in _memory_store
 
     async def test_get_replay_data_cosmos_success(self, monkeypatch):
         """Cosmos DB からリプレイデータを取得"""
@@ -457,7 +497,7 @@ class TestCosmosDBPaths:
 
         with patch("src.conversations._get_container", return_value=mock_container):
             await save_replay_data("replay-unexpected", [{"event": "text"}])
-            assert "replay-replay-unexpected" in _memory_store
+            assert _build_memory_key("anonymous", "replay-replay-unexpected") in _memory_store
 
 
 class TestCosmosClientCreation:

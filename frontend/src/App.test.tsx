@@ -151,10 +151,51 @@ vi.mock('./components/VideoPreview', () => ({ VideoPreview: () => null }))
 vi.mock('./components/VoiceInput', () => ({ VoiceInput: () => null }))
 vi.mock('./components/WorkflowAccordion', () => ({ WorkflowAccordion: () => null }))
 
+function buildState(overrides: Record<string, unknown>) {
+  return {
+    status: 'idle',
+    conversationId: null,
+    managerApprovalPolling: false,
+    backgroundUpdatesPending: false,
+    hasManagerApprovalPhase: false,
+    agentProgress: null,
+    toolEvents: [],
+    textContents: [],
+    images: [],
+    approvalRequest: null,
+    metrics: null,
+    error: null,
+    versions: [],
+    currentVersion: 0,
+    pendingVersion: null,
+    settings: {
+      model: 'gpt-5-4-mini',
+      temperature: 0.7,
+      max_tokens: 2000,
+      top_p: 1,
+    },
+    conversationSettings: {
+      workIqEnabled: false,
+      workIqSourceScope: ['meeting_notes', 'emails', 'teams_chats', 'documents_notes'],
+    },
+    draftConversationSettings: {
+      workIqEnabled: false,
+      workIqSourceScope: ['meeting_notes', 'emails', 'teams_chats', 'documents_notes'],
+    },
+    workIq: {
+      workIqEnabled: false,
+      workIqSourceScope: ['meeting_notes', 'emails', 'teams_chats', 'documents_notes'],
+      status: 'off',
+    },
+    userMessages: [],
+    ...overrides,
+  }
+}
+
 describe('App', () => {
   it('keeps the live pending version selected while a newer version is generating', () => {
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'running',
         conversationId: 'conv-1',
         agentProgress: {
@@ -214,7 +255,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['北海道プランを改善して'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -240,7 +281,7 @@ describe('App', () => {
 
   it('keeps the latest committed evaluation visible after generation completes', () => {
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'completed',
         conversationId: 'conv-1',
         agentProgress: {
@@ -295,7 +336,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['北海道プランを改善して'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -313,7 +354,7 @@ describe('App', () => {
 
   it('shows the in-flight plan during second manager approval by default', () => {
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'approval',
         conversationId: 'conv-manager-2',
         agentProgress: {
@@ -385,7 +426,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['北海道プランを改善して'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -408,7 +449,7 @@ describe('App', () => {
 
   it('renders explicit workflow and preview header hints', () => {
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'completed',
         conversationId: 'conv-hints',
         agentProgress: null,
@@ -449,7 +490,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['北海道プランを改善して'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -471,7 +512,7 @@ describe('App', () => {
 
   it('passes version-scoped user intent to the evaluation panel', () => {
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'completed',
         conversationId: 'conv-query-history',
         agentProgress: null,
@@ -528,7 +569,7 @@ describe('App', () => {
           '価格を強く出しすぎないで',
           '価格訴求を控えて高級感を強めて',
         ],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -550,7 +591,7 @@ describe('App', () => {
     const sendMessage = vi.fn()
 
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'completed',
         conversationId: 'conv-refine-context',
         agentProgress: null,
@@ -614,7 +655,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['北海道プランを改善して', '価格を強く出しすぎないで'],
-      },
+      }),
       sendMessage,
       approve: vi.fn(),
       reset: vi.fn(),
@@ -641,7 +682,7 @@ describe('App', () => {
     const confirmSpy = vi.spyOn(window, 'confirm')
 
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'completed',
         conversationId: 'conv-new-session',
         agentProgress: null,
@@ -682,7 +723,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['別の企画を始めたい'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),
@@ -710,7 +751,7 @@ describe('App', () => {
       .mockReturnValueOnce(true)
 
     mockUseSSE.mockReturnValue({
-      state: {
+      state: buildState({
         status: 'running',
         conversationId: 'conv-in-progress',
         agentProgress: {
@@ -756,7 +797,7 @@ describe('App', () => {
           top_p: 1,
         },
         userMessages: ['まだ実行中'],
-      },
+      }),
       sendMessage: vi.fn(),
       approve: vi.fn(),
       reset: vi.fn(),

@@ -36,8 +36,8 @@ var containerSecrets = concat(!empty(logicAppCallbackUrl) ? [
   }
 ] : [])
 
-// ACR イメージを使う場合のみ registry 参照が必要
-var isAcrImage = contains(imageName, '.azurecr.io')
+// 初回 provision は公開イメージを使う場合があるが、後段の azd deploy では ACR イメージへ切り替わる。
+// 先に registry 設定を入れておかないと、deploy 時に pull 認証が不足して revision 作成が失敗する。
 var containerEnv = concat([
   {
     name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
@@ -134,12 +134,12 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         targetPort: 8000
         transport: 'auto'
       }
-      registries: isAcrImage ? [
+      registries: [
         {
           server: acr.properties.loginServer
           identity: 'system'
         }
-      ] : []
+      ]
     }
     template: {
       containers: [

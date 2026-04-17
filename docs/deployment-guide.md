@@ -91,7 +91,7 @@ azd deploy
 ### postprovision で自動構成される項目
 
 - AI Gateway 接続 (`travel-ai-gateway`) と token policy
-- Improvement MCP 用 Function App の作成・zip 配備・APIM route 登録
+- Improvement MCP 用 Function App の作成・managed identity storage 構成・zip 配備・APIM route 登録
 - Voice Agent (Prompt Agent) の作成
 - Entra SPA アプリ登録 (Voice Live 認証用)
 
@@ -100,6 +100,11 @@ azd deploy
 - Azure AI Search の作成と `regulations-index` の投入
 - Foundry → AI Search 接続の追加
 - `FABRIC_DATA_AGENT_URL` / `SPEECH_SERVICE_ENDPOINT` 等の設定
+- Work IQ 用 SPA app registration の Graph delegated permissions 追加 + admin consent
+- Fabric Lakehouse / SQL endpoint / Fabric Data Agent の新テナント側再作成
+- Logic Apps の Teams / SharePoint connector を新テナントで再接続
+
+Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API** を per-user delegated token で呼び出します。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
 
@@ -124,6 +129,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |
+| `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 10） |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | MAI-Image-2 用の別 Foundry アカウント |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |

@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 
 from src.config import get_settings
 from src.conversations import append_conversation_events, get_conversation
+from src.request_identity import extract_request_identity
 
 router = APIRouter(prefix="/api", tags=["evaluation"])
 logger = logging.getLogger(__name__)
@@ -450,9 +451,10 @@ async def _persist_evaluation_result(
     conversation_id: str,
     artifact_version: int,
     result: dict,
+    owner_id: str | None = None,
 ) -> dict | None:
     """評価結果を会話イベントとして保存する。"""
-    existing = await get_conversation(conversation_id)
+    existing = await get_conversation(conversation_id, owner_id=owner_id)
     if not existing:
         return None
 
@@ -495,6 +497,7 @@ async def _persist_evaluation_result(
         ],
         metrics=existing.get("metadata") if isinstance(existing.get("metadata"), dict) else {},
         status=str(existing.get("status", "completed")),
+        owner_id=owner_id or str(existing.get("user_id", "")),
     )
     return evaluation_meta
 
@@ -947,6 +950,7 @@ async def evaluate_artifacts(
     カスタム評価器（旅行業法準拠 / 企画書構成 / ブローシャアクセシビリティ / 企画書品質）
     でスコアリングし、結果を返す。
     """
+    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
     results: dict = {}
 
     # Code-based カスタム評価器（即座に実行）
@@ -1001,7 +1005,7 @@ async def evaluate_artifacts(
     previous_result = None
     if body.conversation_id and body.artifact_version and body.artifact_version > 1:
         try:
-            previous_conversation = await get_conversation(body.conversation_id)
+            previous_conversation = await get_conversation(body.conversation_id, owner_id=caller_identity["user_id"])
             previous_result = _extract_latest_evaluation_result_for_version(
                 previous_conversation, body.artifact_version - 1
             )
@@ -1028,6 +1032,7 @@ async def evaluate_artifacts(
                 conversation_id=body.conversation_id,
                 artifact_version=body.artifact_version,
                 result=results.copy(),
+                owner_id=caller_identity["user_id"],
             )
         except (ValueError, OSError) as exc:
             logger.warning("評価結果の保存に失敗: %s", exc)

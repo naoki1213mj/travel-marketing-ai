@@ -16,6 +16,11 @@ def test_get_settings_returns_all_fields(monkeypatch):
     for key in [
         "AZURE_AI_PROJECT_ENDPOINT",
         "MODEL_NAME",
+        "ENTRA_TENANT_ID",
+        "AZURE_TENANT_ID",
+        "ENTRA_CLIENT_ID",
+        "VOICE_SPA_CLIENT_ID",
+        "WORK_IQ_TIMEOUT_SECONDS",
         "IMPROVEMENT_MCP_ENDPOINT",
         "IMPROVEMENT_MCP_API_KEY",
         "IMPROVEMENT_MCP_API_KEY_HEADER",
@@ -80,6 +85,16 @@ def test_improvement_mcp_header_default(monkeypatch):
     assert settings["improvement_mcp_api_key_header"] == "Ocp-Apim-Subscription-Key"
 
 
+def test_work_iq_timeout_default(monkeypatch):
+    """Work IQ timeout は 10 秒を既定値にする"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("WORK_IQ_TIMEOUT_SECONDS", raising=False)
+
+    settings = get_settings()
+
+    assert settings["work_iq_timeout_seconds"] == "10"
+
+
 def test_foundry_env_aliases(monkeypatch):
     """FOUNDRY_* エイリアス環境変数も解決できる"""
     _disable_azd_env(monkeypatch)
@@ -92,6 +107,20 @@ def test_foundry_env_aliases(monkeypatch):
 
     assert settings["project_endpoint"] == "https://example.services.ai.azure.com/api/projects/demo"
     assert settings["model_name"] == "gpt-5-4-mini"
+
+
+def test_entra_env_aliases(monkeypatch):
+    """ENTRA / Azure alias 環境変数も解決できる"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+    monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+    monkeypatch.setenv("AZURE_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("VOICE_SPA_CLIENT_ID", "client-123")
+
+    settings = get_settings()
+
+    assert settings["entra_tenant_id"] == "tenant-123"
+    assert settings["entra_client_id"] == "client-123"
 
 
 def test_get_settings_falls_back_to_azd_env(monkeypatch):

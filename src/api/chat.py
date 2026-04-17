@@ -10,7 +10,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
@@ -27,6 +27,20 @@ from src.config import get_settings
 from src.conversations import append_conversation_events, get_conversation, save_conversation
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
+from src.request_identity import extract_request_identity, request_has_bearer_token
+from src.work_iq_context import generate_workplace_context_brief
+from src.work_iq_session import (
+    CONVERSATION_SETTINGS_METADATA_KEY,
+    WORK_IQ_SESSION_METADATA_KEY,
+    ConversationSettings,
+    WorkIQSessionMetadata,
+    build_work_iq_session_metadata,
+    conversation_settings_conflict,
+    get_conversation_settings_from_metadata,
+    has_work_iq_overrides,
+    normalize_conversation_settings,
+    sanitize_work_iq_session_for_storage,
+)
 
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -64,6 +78,16 @@ class SSEEventType(StrEnum):
 def format_sse(event_type: str, data: dict) -> str:
     """SSE フォーマットに変換する"""
     return f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _error_stream(message: str, code: str, *, status_code: int = 200) -> StreamingResponse:
+    """単一 error event を返す共通レスポンス。"""
+    return StreamingResponse(
+        iter([format_sse(SSEEventType.ERROR, {"message": message, "code": code})]),
+        status_code=status_code,
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _is_approval_response(response_text: str) -> bool:
@@ -145,6 +169,9 @@ class PendingApprovalContext(TypedDict):
     workflow_settings: WorkflowSettings | None
     approval_scope: str
     manager_callback_token: str | None
+    owner_id: NotRequired[str]
+    conversation_settings: NotRequired[ConversationSettings]
+    work_iq_session: NotRequired[WorkIQSessionMetadata | None]
     previous_versions: NotRequired[list[dict[str, object]]]
 
 
@@ -174,6 +201,7 @@ class PostCompletionUpdateContext(TypedDict):
     revised_plan_markdown: str
     brochure_html: str
     video_job_id: str | None
+    owner_id: str
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
@@ -188,6 +216,12 @@ _TOOL_EVENT_HINTS: dict[str, list[str]] = {
         "analyze_existing_brochure",
     ],
     "video-gen-agent": ["generate_promo_video"],
+}
+_WORK_IQ_SOURCE_LABELS = {
+    "meeting_notes": "会議メモ",
+    "emails": "メール",
+    "teams_chats": "Teams チャット",
+    "documents_notes": "文書 / ノート",
 }
 
 
@@ -222,6 +256,81 @@ def _sanitize_optional_text(value: str | None) -> str:
     if value is None:
         return ""
     return _CONTROL_CHAR_RE.sub("", value).strip()
+
+
+def _resolve_context_owner_lookup(
+    context: Mapping[str, object] | None,
+    fallback_owner_id: str | None = None,
+) -> tuple[str, bool]:
+    """context と fallback から会話 lookup 用の owner 条件を組み立てる。"""
+    normalized_fallback_owner_id = _sanitize_optional_text(fallback_owner_id)
+    owner_id_provided = normalized_fallback_owner_id != ""
+    raw_owner_id: object | None = None
+    if context is not None:
+        owner_id_provided = owner_id_provided or "owner_id" in context
+        raw_owner_id = context.get("owner_id")
+    owner_id = _sanitize_optional_text(str(raw_owner_id or normalized_fallback_owner_id))
+    return owner_id, not owner_id_provided
+
+
+def _pending_approval_key(conversation_id: str, owner_id: str | None = None) -> str:
+    """pending approval の辞書キーを返す。"""
+    normalized_owner_id = _sanitize_optional_text(owner_id)
+    return f"{normalized_owner_id}:{conversation_id}" if normalized_owner_id else conversation_id
+
+
+def _get_pending_approval_context_from_memory(
+    conversation_id: str,
+    owner_id: str | None = None,
+) -> PendingApprovalContext | None:
+    """in-memory pending approval を owner 単位で取得する。"""
+    normalized_owner_id = _sanitize_optional_text(owner_id)
+    if normalized_owner_id:
+        direct = _pending_approvals.get(_pending_approval_key(conversation_id, normalized_owner_id))
+        if isinstance(direct, dict):
+            return direct
+
+    legacy = _pending_approvals.get(conversation_id)
+    if isinstance(legacy, dict):
+        stored_owner_id = _sanitize_optional_text(str(legacy.get("owner_id") or ""))
+        if not normalized_owner_id or not stored_owner_id or stored_owner_id == normalized_owner_id:
+            return legacy
+        return None
+
+    for key, context in _pending_approvals.items():
+        if not isinstance(context, dict):
+            continue
+        if key == conversation_id or key.endswith(f":{conversation_id}"):
+            stored_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
+            if not normalized_owner_id or not stored_owner_id or stored_owner_id == normalized_owner_id:
+                return context
+    return None
+
+
+def _store_pending_approval_context(conversation_id: str, context: PendingApprovalContext) -> None:
+    """pending approval を owner 付きキーで保存する。"""
+    owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
+    _pending_approvals[_pending_approval_key(conversation_id, owner_id)] = context
+
+
+def _pop_pending_approval_context(conversation_id: str, owner_id: str | None = None) -> PendingApprovalContext | None:
+    """pending approval を owner 単位で破棄する。"""
+    normalized_owner_id = _sanitize_optional_text(owner_id)
+    candidates = [_pending_approval_key(conversation_id, normalized_owner_id)] if normalized_owner_id else [conversation_id]
+    if conversation_id not in candidates:
+        candidates.append(conversation_id)
+
+    for candidate in candidates:
+        context = _pending_approvals.pop(candidate, None)
+        if isinstance(context, dict):
+            return context
+
+    for key in list(_pending_approvals.keys()):
+        if key.endswith(f":{conversation_id}"):
+            context = _pending_approvals.pop(key)
+            if isinstance(context, dict):
+                return context
+    return None
 
 
 def _create_manager_callback_token() -> str:
@@ -271,6 +380,24 @@ def _get_conversation_metadata(conversation: dict | None) -> dict[str, object]:
     if not isinstance(metadata, dict):
         return {}
     return dict(metadata)
+
+
+def _get_conversation_owner_id(conversation: dict | None) -> str:
+    """保存済み会話の owner_id を返す。"""
+    if not isinstance(conversation, dict):
+        return ""
+    return _sanitize_optional_text(str(conversation.get("user_id", "")))
+
+
+def _get_conversation_settings(conversation: dict | None) -> ConversationSettings:
+    """保存済み metadata から conversation_settings を復元する。"""
+    return get_conversation_settings_from_metadata(_get_conversation_metadata(conversation))
+
+
+def _get_work_iq_session_from_conversation(conversation: dict | None) -> WorkIQSessionMetadata | None:
+    """保存済み metadata から sanitized Work IQ session を復元する。"""
+    metadata = _get_conversation_metadata(conversation)
+    return sanitize_work_iq_session_for_storage(metadata.get(WORK_IQ_SESSION_METADATA_KEY))
 
 
 def _get_manager_callback_token_from_conversation(conversation: dict | None) -> str:
@@ -387,19 +514,88 @@ def _format_improvement_brief_for_prompt(result: ImprovementBriefResult, origina
     return "\n".join(lines)
 
 
+def _format_work_iq_brief_for_prompt(work_iq_session: WorkIQSessionMetadata | None) -> str:
+    """保存済み Work IQ brief を agent prompt へ整形する。"""
+    if not isinstance(work_iq_session, dict):
+        return ""
+
+    brief_summary = _sanitize_optional_text(work_iq_session.get("brief_summary"))
+    if not brief_summary:
+        return ""
+
+    lines = [
+        "## Work IQ の職場コンテキスト",
+        brief_summary,
+    ]
+    raw_source_metadata = work_iq_session.get("brief_source_metadata")
+    if isinstance(raw_source_metadata, list):
+        source_lines: list[str] = []
+        for item in raw_source_metadata:
+            if not isinstance(item, dict):
+                continue
+            source = _sanitize_optional_text(item.get("source"))
+            if not source:
+                continue
+            label = _sanitize_optional_text(item.get("label")) or _WORK_IQ_SOURCE_LABELS.get(source, source)
+            count = item.get("count")
+            if isinstance(count, int) and count > 0:
+                source_lines.append(f"- {label}: {count} 件")
+            else:
+                source_lines.append(f"- {label}")
+        if source_lines:
+            lines.extend(["", "### 参照ソース", *source_lines])
+    return "\n".join(lines)
+
+
+def _build_work_iq_tool_event_data(work_iq_session: WorkIQSessionMetadata, status: str) -> dict[str, object]:
+    """Work IQ status を UI 向け tool_event payload に整形する。"""
+    payload: dict[str, object] = {
+        "tool": "generate_workplace_context_brief",
+        "status": status,
+        "agent": "marketing-plan-agent",
+        "source": "workiq",
+    }
+    source_scope = work_iq_session.get("source_scope")
+    if isinstance(source_scope, list) and source_scope:
+        payload["source_scope"] = list(source_scope)
+    return payload
+
+
 def _build_conversation_metadata_for_save(
     conversation_id: str,
     existing_conversation: dict | None,
     conversation_status: str,
     background_updates_pending: bool | None = None,
     user_messages: list[str] | None = None,
+    owner_id: str | None = None,
+    conversation_settings: ConversationSettings | None = None,
+    work_iq_session: WorkIQSessionMetadata | None = None,
 ) -> dict | None:
     """会話保存時の metadata を構築する。"""
     metadata = _get_conversation_metadata(existing_conversation)
-    pending_context = _pending_approvals.get(conversation_id)
+    resolved_owner_id = _sanitize_optional_text(owner_id) or _get_conversation_owner_id(existing_conversation)
+    pending_context = _get_pending_approval_context_from_memory(conversation_id, resolved_owner_id)
     pending_token = ""
     if pending_context is not None:
         pending_token = _sanitize_optional_text(pending_context.get("manager_callback_token"))
+
+    resolved_conversation_settings = (
+        conversation_settings
+        or (pending_context.get("conversation_settings") if pending_context else None)
+        or _get_conversation_settings(existing_conversation)
+    )
+    metadata[CONVERSATION_SETTINGS_METADATA_KEY] = resolved_conversation_settings
+
+    resolved_work_iq_session = (
+        work_iq_session
+        or (pending_context.get("work_iq_session") if pending_context else None)
+        or _get_work_iq_session_from_conversation(existing_conversation)
+    )
+    sanitized_work_iq_session = sanitize_work_iq_session_for_storage(resolved_work_iq_session)
+    if sanitized_work_iq_session is not None:
+        metadata[WORK_IQ_SESSION_METADATA_KEY] = sanitized_work_iq_session
+    else:
+        metadata.pop(WORK_IQ_SESSION_METADATA_KEY, None)
 
     if conversation_status == "awaiting_manager_approval":
         callback_token = pending_token or _get_manager_callback_token_from_conversation(existing_conversation)
@@ -444,6 +640,15 @@ def _sanitize_email_value(value: object) -> str:
     if not _EMAIL_ADDRESS_RE.fullmatch(email):
         raise ValueError("上司メールアドレスの形式が不正です")
     return email
+
+
+def _resolve_raw_user_settings(user_settings: dict | None, legacy_settings: dict | None) -> dict | None:
+    """新旧 request contract から mutable user_settings を解決する。"""
+    if isinstance(user_settings, dict):
+        return user_settings
+    if isinstance(legacy_settings, dict):
+        return legacy_settings
+    return None
 
 
 def _normalize_model_settings(raw_settings: dict | None) -> dict | None:
@@ -856,24 +1061,44 @@ def _build_content_events(agent_name: str, result_text: str) -> list[str]:
     return [format_sse(SSEEventType.TEXT, {"content": result_text, "agent": agent_name})]
 
 
-def _build_marketing_plan_prompt(user_input: str, analysis_markdown: str) -> str:
+def _build_marketing_plan_prompt(
+    user_input: str,
+    analysis_markdown: str,
+    work_iq_session: WorkIQSessionMetadata | None = None,
+) -> str:
     """Agent2 に渡す企画書生成プロンプトを組み立てる。"""
-    return (
+    prompt = (
         "以下の依頼と分析結果をもとに、旅行マーケティング企画書を作成してください。\n\n"
         f"## ユーザー依頼\n{user_input}\n\n"
         f"## Agent1 の分析結果\n{analysis_markdown}\n"
+    )
+    work_iq_brief = _format_work_iq_brief_for_prompt(work_iq_session)
+    if not work_iq_brief:
+        return prompt
+    return (
+        f"{prompt}\n"
+        f"{work_iq_brief}\n\n"
+        "上記の職場コンテキストは補助情報として扱い、確認できない内容を断定しないでください。\n"
     )
 
 
 def _build_revision_prompt(context: PendingApprovalContext, revision_text: str) -> str:
     """承認前の修正指示を Agent2 に渡すプロンプトを組み立てる。"""
-    return (
-        "以下の旅行企画書を、修正指示だけ反映して再作成してください。\n\n"
-        f"## 元の依頼\n{context['user_input']}\n\n"
-        f"## Agent1 の分析結果\n{context['analysis_markdown']}\n\n"
-        f"## 現在の企画書\n{context['plan_markdown']}\n\n"
-        f"## 修正指示\n{revision_text}\n"
+    sections = [
+        "以下の旅行企画書を、修正指示だけ反映して再作成してください。\n\n",
+        f"## 元の依頼\n{context['user_input']}\n\n",
+        f"## Agent1 の分析結果\n{context['analysis_markdown']}\n\n",
+    ]
+    work_iq_brief = _format_work_iq_brief_for_prompt(context.get("work_iq_session"))
+    if work_iq_brief:
+        sections.append(f"{work_iq_brief}\n\n")
+    sections.extend(
+        [
+            f"## 現在の企画書\n{context['plan_markdown']}\n\n",
+            f"## 修正指示\n{revision_text}\n",
+        ]
     )
+    return "".join(sections)
 
 
 def _extract_plan_title(plan_markdown: str) -> str:
@@ -1144,13 +1369,21 @@ def _extract_tool_names(result: object, agent_name: str, result_text: str) -> li
     return _merge_tool_names(tool_names)
 
 
-async def _load_pending_approval_context(conversation_id: str) -> PendingApprovalContext | None:
+async def _load_pending_approval_context(
+    conversation_id: str,
+    owner_id: str | None = None,
+) -> PendingApprovalContext | None:
     """承認待ちコンテキストをメモリまたは保存済み会話から復元する。"""
-    context = _pending_approvals.get(conversation_id)
+    normalized_owner_id = _sanitize_optional_text(owner_id)
+    context = _get_pending_approval_context_from_memory(conversation_id, normalized_owner_id)
     if context:
         return context
 
-    conversation = await get_conversation(conversation_id)
+    conversation = await get_conversation(
+        conversation_id,
+        owner_id=normalized_owner_id or None,
+        allow_cross_owner=not normalized_owner_id,
+    )
     if not conversation:
         return None
     if conversation.get("status") not in {"awaiting_approval", "awaiting_manager_approval"}:
@@ -1163,6 +1396,8 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
     workflow_settings: WorkflowSettings | None = None
     approval_scope = "manager" if conversation.get("status") == "awaiting_manager_approval" else "user"
     manager_callback_token = _get_manager_callback_token_from_conversation(conversation)
+    conversation_settings = _get_conversation_settings(conversation)
+    work_iq_session = _get_work_iq_session_from_conversation(conversation)
     for message in conversation.get("messages", []):
         event_name = message.get("event")
         data = message.get("data", {})
@@ -1198,10 +1433,13 @@ async def _load_pending_approval_context(conversation_id: str) -> PendingApprova
         "workflow_settings": workflow_settings,
         "approval_scope": approval_scope,
         "manager_callback_token": manager_callback_token or None,
+        "owner_id": _get_conversation_owner_id(conversation),
+        "conversation_settings": conversation_settings,
+        "work_iq_session": work_iq_session,
     }
     if previous_versions:
         context["previous_versions"] = previous_versions
-    _pending_approvals[conversation_id] = context
+    _store_pending_approval_context(conversation_id, context)
     return context
 
 
@@ -1532,7 +1770,9 @@ class ChatRequest(BaseModel):
 
     message: str = Field(..., min_length=1)
     conversation_id: str | None = Field(None, max_length=100)
-    settings: dict | None = Field(None, description="モデルパラメータ設定")
+    settings: dict | None = Field(None, description="旧互換 settings。user_settings / conversation_settings へ段階移行中")
+    user_settings: dict | None = Field(None, description="会話途中でも変更可能なモデル設定")
+    conversation_settings: dict | None = Field(None, description="会話単位で固定する Work IQ 設定")
     workflow_settings: dict | None = Field(None, description="承認フロー設定")
     refine_context: RefineContext | None = Field(None, description="改善リクエストの補助文脈")
 
@@ -2030,28 +2270,35 @@ async def _refine_events(
     refine_text: str,
     conversation_id: str,
     refine_context: RefineContext | None = None,
+    owner_id: str | None = None,
+    model_settings_override: dict | None = None,
 ):
     """完了後のマルチターン修正リクエストを処理する SSE イベント"""
-    pending_context = await _load_pending_approval_context(conversation_id)
+    pending_context = await _load_pending_approval_context(conversation_id, owner_id)
     if pending_context is not None:
+        effective_model_settings = model_settings_override or pending_context.get("model_settings")
         outcome = await _execute_agent(
             agent_name="marketing-plan-agent",
             agent_step=2,
             user_input=_build_revision_prompt(pending_context, refine_text),
             conversation_id=conversation_id,
-            model_settings=pending_context.get("model_settings"),
+            model_settings=effective_model_settings,
         )
         for event in outcome["events"]:
             yield event
         if not outcome["success"]:
             return
 
-        _pending_approvals[conversation_id] = {
-            **pending_context,
-            "plan_markdown": outcome["text"],
-            "approval_scope": "user",
-            "manager_callback_token": None,
-        }
+        _store_pending_approval_context(
+            conversation_id,
+            {
+                **pending_context,
+                "plan_markdown": outcome["text"],
+                "model_settings": effective_model_settings,
+                "approval_scope": "user",
+                "manager_callback_token": None,
+            },
+        )
         yield format_sse(
             SSEEventType.AGENT_PROGRESS,
             {"agent": "approval", "status": "running", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
@@ -2062,7 +2309,7 @@ async def _refine_events(
                 prompt="修正した企画書を確認してください。承認する場合は「承認」、さらに修正したい場合は修正内容を入力してください。",
                 conversation_id=conversation_id,
                 plan_markdown=outcome["text"],
-                model_settings=pending_context.get("model_settings"),
+                model_settings=effective_model_settings,
                 workflow_settings=pending_context.get("workflow_settings"),
                 approval_scope="user",
             ),
@@ -2079,25 +2326,26 @@ async def _refine_events(
     )
     if is_eval_feedback:
         # 評価フィードバック → 企画書を再生成して承認フローに再突入
-        conversation = await get_conversation(conversation_id)
+        conversation = await get_conversation(conversation_id, owner_id=owner_id)
         user_messages = _extract_user_message_history(conversation)
         user_input = user_messages[0] if user_messages else ""
         rejection_history = user_messages[1:] if len(user_messages) > 1 else []
         original_plan = _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
         analysis_markdown = _extract_latest_agent_text(conversation, {"data-search-agent"})
         regulation_summary = _extract_latest_agent_text(conversation, {"regulation-check-agent"})
+        work_iq_session = _get_work_iq_session_from_conversation(conversation)
         latest_evaluation_result = _extract_latest_evaluation_result(
             conversation,
             refine_context.artifact_version if refine_context is not None else None,
         )
-        model_settings: dict | None = None
+        model_settings: dict | None = model_settings_override
         workflow_settings: WorkflowSettings | None = None
         if conversation:
             if not user_input:
                 user_input = conversation.get("input", "")
             for msg in conversation.get("messages", []):
                 data = msg.get("data", {})
-                if msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
+                if model_settings is None and msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
                     data.get("model_settings"), dict
                 ):
                     model_settings = data["model_settings"]
@@ -2141,12 +2389,16 @@ async def _refine_events(
                 },
             )
 
-        revision_prompt = (
-            f"以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n"
-            f"## 元の依頼\n{user_input}\n\n"
-            f"## 現在の企画書\n{original_plan}\n\n"
-            f"## 改善指示\n{improvement_instructions}"
-        )
+        revision_sections = [
+            "以下の旅行企画書を、品質評価のフィードバックに基づいて改善してください。\n\n",
+            f"## 元の依頼\n{user_input}\n\n",
+            f"## 現在の企画書\n{original_plan}\n\n",
+        ]
+        work_iq_brief = _format_work_iq_brief_for_prompt(work_iq_session)
+        if work_iq_brief:
+            revision_sections.append(f"{work_iq_brief}\n\n")
+        revision_sections.append(f"## 改善指示\n{improvement_instructions}")
+        revision_prompt = "".join(revision_sections)
 
         outcome = await _execute_agent(
             agent_name="marketing-plan-agent",
@@ -2161,15 +2413,21 @@ async def _refine_events(
             return
 
         # 承認コンテキストを構築して承認フローに再突入
-        _pending_approvals[conversation_id] = {
-            "user_input": user_input,
-            "analysis_markdown": analysis_markdown,
-            "plan_markdown": outcome["text"],
-            "model_settings": model_settings,
-            "workflow_settings": workflow_settings,
-            "approval_scope": "user",
-            "manager_callback_token": None,
-        }
+        _store_pending_approval_context(
+            conversation_id,
+            {
+                "user_input": user_input,
+                "analysis_markdown": analysis_markdown,
+                "plan_markdown": outcome["text"],
+                "model_settings": model_settings,
+                "workflow_settings": workflow_settings,
+                "approval_scope": "user",
+                "manager_callback_token": None,
+                "owner_id": owner_id or _get_conversation_owner_id(conversation),
+                "conversation_settings": _get_conversation_settings(conversation),
+                "work_iq_session": _get_work_iq_session_from_conversation(conversation),
+            },
+        )
         yield format_sse(
             SSEEventType.AGENT_PROGRESS,
             {"agent": "approval", "status": "running", "step": 3, "total_steps": _PIPELINE_TOTAL_STEPS},
@@ -2255,6 +2513,7 @@ async def _post_approval_events(
     conversation_id: str,
     base_url: str | None = None,
     approval_context: PendingApprovalContext | None = None,
+    owner_id: str | None = None,
     register_background_job: Callable[[PostCompletionUpdateContext], None] | None = None,
 ):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
@@ -2265,7 +2524,7 @@ async def _post_approval_events(
             yield event
         return
 
-    context = approval_context or await _load_pending_approval_context(conversation_id)
+    context = approval_context or await _load_pending_approval_context(conversation_id, owner_id)
     if context is None:
         yield format_sse(
             SSEEventType.ERROR,
@@ -2282,6 +2541,7 @@ async def _post_approval_events(
     workflow_settings = context.get("workflow_settings")
     approval_scope = context.get("approval_scope", "user")
     manager_callback_token = context.get("manager_callback_token")
+    context_owner_id, allow_cross_owner = _resolve_context_owner_lookup(context, owner_id)
     regulation_text = ""
     revised_plan_markdown = context["plan_markdown"]
     hero_image_task = None
@@ -2398,15 +2658,25 @@ async def _post_approval_events(
                     )
                     manager_prompt = "通知 workflow の送信に失敗しました。承認ページのリンクを上司へ共有してください。"
 
-            previous_versions = _extract_committed_plan_versions(await get_conversation(conversation_id))
+            previous_versions = _extract_committed_plan_versions(
+                await get_conversation(
+                    conversation_id,
+                    owner_id=context_owner_id or None,
+                    allow_cross_owner=allow_cross_owner,
+                )
+            )
 
-            _pending_approvals[conversation_id] = {
-                **context,
-                "plan_markdown": revised_plan_markdown,
-                "approval_scope": "manager",
-                "manager_callback_token": manager_callback_token,
-                "previous_versions": previous_versions,
-            }
+            _store_pending_approval_context(
+                conversation_id,
+                {
+                    **context,
+                    "plan_markdown": revised_plan_markdown,
+                    "approval_scope": "manager",
+                    "manager_callback_token": manager_callback_token,
+                    "previous_versions": previous_versions,
+                    "owner_id": context_owner_id,
+                },
+            )
             yield format_sse(
                 SSEEventType.APPROVAL_REQUEST,
                 _build_approval_request_data(
@@ -2544,10 +2814,11 @@ async def _post_approval_events(
                 "revised_plan_markdown": revised_plan_markdown,
                 "brochure_html": brochure_html,
                 "video_job_id": video_job_id or None,
+                "owner_id": context_owner_id,
             }
         )
 
-    _pending_approvals.pop(conversation_id, None)
+    _pop_pending_approval_context(conversation_id, context_owner_id)
 
     yield format_sse(
         SSEEventType.DONE,
@@ -2568,7 +2839,12 @@ async def _append_post_completion_updates(
     update_context: PostCompletionUpdateContext,
 ) -> None:
     """完了後の動画・品質レビュー・通知をバックグラウンドで追記する。"""
-    existing_conversation = await get_conversation(conversation_id)
+    owner_id, allow_cross_owner = _resolve_context_owner_lookup(update_context)
+    existing_conversation = await get_conversation(
+        conversation_id,
+        owner_id=owner_id or None,
+        allow_cross_owner=allow_cross_owner,
+    )
     if not existing_conversation:
         logger.warning("background update 対象の会話が見つかりません: %s", conversation_id)
         return
@@ -2611,8 +2887,10 @@ async def _append_post_completion_updates(
             existing_conversation,
             conversation_status,
             background_updates_pending=False,
+            owner_id=owner_id,
         ),
         status=conversation_status,
+        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
     )
 
 
@@ -2625,7 +2903,12 @@ async def _append_post_completion_updates_safe(
         await _append_post_completion_updates(conversation_id, update_context)
     except Exception:
         logger.exception("完了後の background update に失敗: conversation_id=%s", conversation_id)
-        existing_conversation = await get_conversation(conversation_id)
+        owner_id, allow_cross_owner = _resolve_context_owner_lookup(update_context)
+        existing_conversation = await get_conversation(
+            conversation_id,
+            owner_id=owner_id or None,
+            allow_cross_owner=allow_cross_owner,
+        )
         if not existing_conversation:
             return
 
@@ -2638,8 +2921,10 @@ async def _append_post_completion_updates_safe(
                 existing_conversation,
                 str(existing_conversation.get("status", "completed")),
                 background_updates_pending=False,
+                owner_id=owner_id,
             ),
             status=str(existing_conversation.get("status", "completed")),
+            owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
         )
 
 
@@ -2738,7 +3023,12 @@ async def _continue_after_manager_approval_safe(
         await _run_manager_approval_continuation(conversation_id, approval_context)
     except Exception:
         logger.exception("上司承認後の継続処理に失敗: conversation_id=%s", conversation_id)
-        existing_conversation = await get_conversation(conversation_id)
+        owner_id, allow_cross_owner = _resolve_context_owner_lookup(approval_context)
+        existing_conversation = await get_conversation(
+            conversation_id,
+            owner_id=owner_id or None,
+            allow_cross_owner=allow_cross_owner,
+        )
         if not existing_conversation:
             return
 
@@ -2765,8 +3055,10 @@ async def _continue_after_manager_approval_safe(
                 conversation_id,
                 existing_conversation,
                 conversation_status,
+                owner_id=owner_id,
             ),
             status=conversation_status,
+            owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
         )
 
 
@@ -2775,7 +3067,12 @@ async def _run_manager_approval_continuation(
     approval_context: PendingApprovalContext | None = None,
 ) -> None:
     """上司承認後にバックグラウンドで成果物生成を再開する。"""
-    existing_conversation = await get_conversation(conversation_id)
+    owner_id, allow_cross_owner = _resolve_context_owner_lookup(approval_context)
+    existing_conversation = await get_conversation(
+        conversation_id,
+        owner_id=owner_id or None,
+        allow_cross_owner=allow_cross_owner,
+    )
     if not existing_conversation:
         logger.warning("上司承認後の会話が見つかりません: %s", conversation_id)
         return
@@ -2791,6 +3088,7 @@ async def _run_manager_approval_continuation(
         "承認",
         conversation_id,
         approval_context=approval_context,
+        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
         register_background_job=_register_background_job,
     ):
         _record_sse_event(collected_events, event, start)
@@ -2807,8 +3105,10 @@ async def _run_manager_approval_continuation(
             existing_conversation,
             conversation_status,
             background_updates_pending=bool(background_update_jobs),
+            owner_id=owner_id,
         ),
         status=conversation_status,
+        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
     )
 
     for update_job in background_update_jobs:
@@ -2823,6 +3123,11 @@ async def workflow_event_generator(
     conversation_id: str,
     model_settings: dict | None = None,
     workflow_settings: WorkflowSettings | None = None,
+    owner_id: str | None = None,
+    conversation_settings: ConversationSettings | None = None,
+    work_iq_session: WorkIQSessionMetadata | None = None,
+    work_iq_access_token: str = "",
+    user_time_zone: str = "UTC",
 ):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
     analysis_outcome = await _execute_agent(
@@ -2837,10 +3142,69 @@ async def workflow_event_generator(
     if not analysis_outcome["success"]:
         return
 
+    if work_iq_session and work_iq_session.get("enabled"):
+        existing_brief = _sanitize_optional_text(work_iq_session.get("brief_summary"))
+        initial_status = _sanitize_optional_text(work_iq_session.get("status") or work_iq_session.get("warning_code"))
+        if not existing_brief:
+            if initial_status in {"auth_required", "identity_mismatch"}:
+                work_iq_session["status"] = initial_status
+                work_iq_session["warning_code"] = initial_status
+                yield format_sse(
+                    SSEEventType.TOOL_EVENT,
+                    _build_work_iq_tool_event_data(work_iq_session, initial_status),
+                )
+            else:
+                yield format_sse(
+                    SSEEventType.TOOL_EVENT,
+                    _build_work_iq_tool_event_data(work_iq_session, "running"),
+                )
+                work_iq_result = await generate_workplace_context_brief(
+                    user_input=user_input,
+                    source_scope=list(work_iq_session.get("source_scope", [])),
+                    access_token=work_iq_access_token,
+                    user_time_zone=user_time_zone,
+                )
+                brief_summary = _sanitize_optional_text(work_iq_result.get("brief_summary"))
+                brief_status = _sanitize_optional_text(work_iq_result.get("status")) or "completed"
+                warning_code = _sanitize_optional_text(work_iq_result.get("warning_code"))
+
+                if brief_summary:
+                    shield_result = await check_tool_response(brief_summary)
+                    if shield_result.is_safe:
+                        work_iq_session["brief_summary"] = brief_summary
+                        raw_source_metadata = work_iq_result.get("brief_source_metadata")
+                        if isinstance(raw_source_metadata, list) and raw_source_metadata:
+                            work_iq_session["brief_source_metadata"] = raw_source_metadata
+                        else:
+                            work_iq_session.pop("brief_source_metadata", None)
+                        work_iq_session["status"] = "completed"
+                        work_iq_session.pop("warning_code", None)
+                    else:
+                        work_iq_session.pop("brief_summary", None)
+                        work_iq_session.pop("brief_source_metadata", None)
+                        work_iq_session["status"] = "unavailable"
+                        work_iq_session["warning_code"] = "unavailable"
+                else:
+                    work_iq_session.pop("brief_summary", None)
+                    work_iq_session.pop("brief_source_metadata", None)
+                    work_iq_session["status"] = brief_status
+                    if warning_code:
+                        work_iq_session["warning_code"] = warning_code
+                    else:
+                        work_iq_session.pop("warning_code", None)
+
+                yield format_sse(
+                    SSEEventType.TOOL_EVENT,
+                    _build_work_iq_tool_event_data(
+                        work_iq_session,
+                        _sanitize_optional_text(work_iq_session.get("status")) or "completed",
+                    ),
+                )
+
     plan_outcome = await _execute_agent(
         agent_name="marketing-plan-agent",
         agent_step=2,
-        user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"]),
+        user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session),
         conversation_id=conversation_id,
         model_settings=model_settings,
     )
@@ -2849,15 +3213,21 @@ async def workflow_event_generator(
     if not plan_outcome["success"]:
         return
 
-    _pending_approvals[conversation_id] = {
-        "user_input": user_input,
-        "analysis_markdown": analysis_outcome["text"],
-        "plan_markdown": plan_outcome["text"],
-        "model_settings": model_settings,
-        "workflow_settings": workflow_settings,
-        "approval_scope": "user",
-        "manager_callback_token": None,
-    }
+    _store_pending_approval_context(
+        conversation_id,
+        {
+            "user_input": user_input,
+            "analysis_markdown": analysis_outcome["text"],
+            "plan_markdown": plan_outcome["text"],
+            "model_settings": model_settings,
+            "workflow_settings": workflow_settings,
+            "approval_scope": "user",
+            "manager_callback_token": None,
+            "owner_id": _sanitize_optional_text(owner_id),
+            "conversation_settings": conversation_settings or {"work_iq_enabled": False, "source_scope": []},
+            "work_iq_session": work_iq_session,
+        },
+    )
 
     yield format_sse(
         SSEEventType.AGENT_PROGRESS,
@@ -2881,23 +3251,50 @@ async def workflow_event_generator(
 async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     """チャットメッセージを受け取り、SSE ストリームでパイプライン結果を返す"""
     conversation_id = body.conversation_id or str(uuid.uuid4())
+    settings = get_settings()
+    project_endpoint_available = bool(settings["project_endpoint"])
+    caller_identity = extract_request_identity(request, expected_tenant_id=settings["entra_tenant_id"])
+    authorization = _sanitize_optional_text(request.headers.get("authorization"))
+    work_iq_access_token = authorization.split(" ", 1)[1] if authorization.lower().startswith("bearer ") else ""
+    user_time_zone = _sanitize_optional_text(request.headers.get("x-user-timezone")) or "UTC"
+    raw_user_settings = _resolve_raw_user_settings(body.user_settings, body.settings)
+    explicit_conversation_settings = has_work_iq_overrides(body.conversation_settings, body.settings)
     try:
-        normalized_model_settings = _normalize_model_settings(body.settings)
+        normalized_model_settings = _normalize_model_settings(raw_user_settings)
         normalized_workflow_settings = _normalize_workflow_settings(body.settings, body.workflow_settings)
+        normalized_conversation_settings = normalize_conversation_settings(body.conversation_settings, body.settings)
         _validate_manager_approval_configuration(normalized_workflow_settings)
     except ValueError as exc:
-        return StreamingResponse(
-            iter(
-                [
-                    format_sse(
-                        SSEEventType.ERROR,
-                        {"message": str(exc), "code": "INVALID_SETTINGS"},
-                    )
-                ]
-            ),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        return _error_stream(str(exc), "INVALID_SETTINGS")
+
+    existing_conversation = (
+        await get_conversation(conversation_id, owner_id=caller_identity["user_id"])
+        if body.conversation_id
+        else None
+    )
+    stored_conversation_settings = _get_conversation_settings(existing_conversation)
+    if existing_conversation and explicit_conversation_settings and conversation_settings_conflict(
+        normalized_conversation_settings,
+        stored_conversation_settings,
+    ):
+        return _error_stream(
+            "Work IQ 設定は会話開始後に変更できません。新しい会話を開始してください。",
+            "CONVERSATION_SETTINGS_IMMUTABLE",
+            status_code=409,
         )
+
+    effective_conversation_settings = (
+        stored_conversation_settings if existing_conversation else normalized_conversation_settings
+    )
+    effective_work_iq_session = _get_work_iq_session_from_conversation(existing_conversation)
+    if effective_work_iq_session is None or not body.conversation_id:
+        effective_work_iq_session = build_work_iq_session_metadata(
+            effective_conversation_settings,
+            caller_identity,
+            existing_session=effective_work_iq_session,
+        )
+
+    project_endpoint_available = bool(settings["project_endpoint"])
 
     # 入力ガード
     shield_result = await check_prompt_shield(body.message)
@@ -2923,18 +3320,30 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
         # conversation_id が既存 = マルチターン修正
         if body.conversation_id:
-            async for event in _collect_and_yield(_refine_events(body.message, conversation_id, body.refine_context)):
+            async for event in _collect_and_yield(
+                _refine_events(
+                    body.message,
+                    conversation_id,
+                    body.refine_context,
+                    owner_id=caller_identity["user_id"],
+                    model_settings_override=normalized_model_settings,
+                )
+            ):
                 yield event
         else:
             # Azure 設定がある場合は実 Workflow、なければモック
-            settings = get_settings()
-            if settings["project_endpoint"]:
+            if project_endpoint_available:
                 async for event in _collect_and_yield(
                     workflow_event_generator(
                         body.message,
                         conversation_id,
                         normalized_model_settings,
                         normalized_workflow_settings,
+                        owner_id=caller_identity["user_id"],
+                        conversation_settings=effective_conversation_settings,
+                        work_iq_session=effective_work_iq_session,
+                        work_iq_access_token=work_iq_access_token,
+                        user_time_zone=user_time_zone,
                     )
                 ):
                     yield event
@@ -2944,22 +3353,28 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
 
         # 会話を非同期で保存（レスポンスには影響しない）
         try:
-            existing_conversation = await get_conversation(conversation_id)
-            previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
+            current_conversation = existing_conversation
+            if current_conversation is None and body.conversation_id:
+                current_conversation = await get_conversation(conversation_id, owner_id=caller_identity["user_id"])
+            previous_messages = current_conversation.get("messages", []) if current_conversation else []
             merged_messages = [*previous_messages, *collected_events] if body.conversation_id else collected_events
             conversation_status = _conversation_status_from_events(merged_messages)
-            user_messages = _append_user_message_history(existing_conversation, body.message)
+            user_messages = _append_user_message_history(current_conversation, body.message)
             await save_conversation(
                 conversation_id,
-                existing_conversation.get("input", body.message) if existing_conversation else body.message,
+                current_conversation.get("input", body.message) if current_conversation else body.message,
                 merged_messages,
                 metrics=_build_conversation_metadata_for_save(
                     conversation_id,
-                    existing_conversation,
+                    current_conversation,
                     conversation_status,
                     user_messages=user_messages,
+                    owner_id=caller_identity["user_id"],
+                    conversation_settings=effective_conversation_settings,
+                    work_iq_session=effective_work_iq_session,
                 ),
                 status=conversation_status,
+                owner_id=caller_identity["user_id"],
             )
         except (ValueError, OSError) as exc:
             logger.debug("会話保存に失敗（非致命的）: %s", exc)
@@ -2967,8 +3382,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             logger.debug("会話保存で予期しないエラー（非致命的）: %s", exc)
 
         # Agent5: 品質レビュー（バックグラウンドで実行、オプショナル）
-        settings = get_settings()
-        if settings["project_endpoint"] and not body.conversation_id and conversation_status == "completed":
+        if project_endpoint_available and not body.conversation_id and conversation_status == "completed":
             try:
                 from src.agents import create_review_agent
 
@@ -3009,6 +3423,7 @@ async def approve(
     thread_id: str, request: Request, body: ApproveRequest, background_tasks: BackgroundTasks
 ) -> StreamingResponse:
     """承認/修正レスポンスを受け取り、後続のパイプライン結果を SSE で返す"""
+    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
     # 入力ガード（承認レスポンスにも適用）
     shield_result = await check_prompt_shield(body.response)
     is_approved = _is_approval_response(body.response)
@@ -3033,7 +3448,7 @@ async def approve(
                 _record_sse_event(collected_events, event, start)
                 yield event
 
-        existing_conversation = await get_conversation(thread_id)
+        existing_conversation = await get_conversation(thread_id, owner_id=caller_identity["user_id"])
         base_url = _build_public_base_url(request)
         if is_approved:
             async for event in _collect_and_yield(
@@ -3041,12 +3456,15 @@ async def approve(
                     body.response,
                     thread_id,
                     base_url,
+                    owner_id=caller_identity["user_id"],
                     register_background_job=_register_background_job,
                 )
             ):
                 yield event
         else:
-            async for event in _collect_and_yield(_refine_events(body.response, thread_id)):
+            async for event in _collect_and_yield(
+                _refine_events(body.response, thread_id, owner_id=caller_identity["user_id"])
+            ):
                 yield event
 
         try:
@@ -3069,8 +3487,10 @@ async def approve(
                     conversation_status,
                     background_updates_pending=bool(background_update_jobs),
                     user_messages=user_messages,
+                    owner_id=caller_identity["user_id"],
                 ),
                 status=conversation_status,
+                owner_id=caller_identity["user_id"],
             )
         except (ValueError, OSError) as exc:
             logger.debug("承認系会話の保存に失敗（非致命的）: %s", exc)
@@ -3094,11 +3514,21 @@ async def approve(
 @limiter.limit("30/minute")
 async def get_manager_approval_request(thread_id: str, request: Request) -> JSONResponse:
     """上司向け承認ページで表示する承認対象データを返す。"""
+    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
     context = await _load_pending_approval_context(thread_id)
     if context is None or context.get("approval_scope") != "manager":
         return JSONResponse(status_code=404, content={"error": "manager approval context not found"})
 
-    existing_conversation = await get_conversation(thread_id)
+    context_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
+    if request_has_bearer_token(request) and context_owner_id and caller_identity["user_id"] != context_owner_id:
+        return JSONResponse(status_code=403, content={"error": "conversation owner mismatch"})
+
+    _, allow_cross_owner = _resolve_context_owner_lookup(context)
+    existing_conversation = await get_conversation(
+        thread_id,
+        owner_id=context_owner_id or None,
+        allow_cross_owner=allow_cross_owner,
+    )
     previous_versions = _extract_committed_plan_versions(existing_conversation)
     if not previous_versions:
         context_previous_versions = context.get("previous_versions")
@@ -3137,6 +3567,7 @@ async def manager_approval_callback(
     body: ManagerApprovalCallbackRequest,
 ) -> JSONResponse:
     """上司承認 workflow からの承認結果を受け取り、後続処理を再開する。"""
+    caller_identity = extract_request_identity(request, expected_tenant_id=get_settings()["entra_tenant_id"])
     if body.conversation_id and body.conversation_id != thread_id:
         return JSONResponse(status_code=400, content={"error": "conversation_id mismatch"})
 
@@ -3144,13 +3575,22 @@ async def manager_approval_callback(
     if context is None or context.get("approval_scope") != "manager":
         return JSONResponse(status_code=404, content={"error": "manager approval context not found"})
 
+    context_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
+    if request_has_bearer_token(request) and context_owner_id and caller_identity["user_id"] != context_owner_id:
+        return JSONResponse(status_code=403, content={"error": "conversation owner mismatch"})
+
     callback_token = _extract_manager_approval_token(request, body.callback_token)
     expected_token = _sanitize_optional_text(context.get("manager_callback_token"))
     if not expected_token or callback_token != expected_token:
         return JSONResponse(status_code=403, content={"error": "invalid manager approval token"})
 
+    _, allow_cross_owner = _resolve_context_owner_lookup(context)
     if body.approved:
-        existing_conversation = await get_conversation(thread_id)
+        existing_conversation = await get_conversation(
+            thread_id,
+            owner_id=context_owner_id or None,
+            allow_cross_owner=allow_cross_owner,
+        )
         if existing_conversation:
             await save_conversation(
                 conversation_id=thread_id,
@@ -3160,21 +3600,31 @@ async def manager_approval_callback(
                     thread_id,
                     existing_conversation,
                     "running",
+                    owner_id=context_owner_id,
                 ),
                 status="running",
+                owner_id=context_owner_id or _get_conversation_owner_id(existing_conversation),
             )
-        _pending_approvals.pop(thread_id, None)
+        _pop_pending_approval_context(thread_id, context_owner_id)
         background_tasks.add_task(_continue_after_manager_approval_safe, thread_id, context)
         return JSONResponse(content={"status": "accepted", "conversation_id": thread_id})
 
-    existing_conversation = await get_conversation(thread_id)
+    existing_conversation = await get_conversation(
+        thread_id,
+        owner_id=context_owner_id or None,
+        allow_cross_owner=allow_cross_owner,
+    )
     manager_comment = body.comment or "上司から差し戻しされました。内容を確認して修正してください。"
     workflow_settings = context.get("workflow_settings")
-    _pending_approvals[thread_id] = {
-        **context,
-        "approval_scope": "user",
-        "manager_callback_token": None,
-    }
+    _store_pending_approval_context(
+        thread_id,
+        {
+            **context,
+            "approval_scope": "user",
+            "manager_callback_token": None,
+            "owner_id": context_owner_id,
+        },
+    )
 
     reopened_events: list[dict] = []
     reopened_event = format_sse(
@@ -3204,8 +3654,10 @@ async def manager_approval_callback(
             thread_id,
             existing_conversation,
             conversation_status,
+            owner_id=context_owner_id,
         ),
         status=conversation_status,
+        owner_id=context_owner_id or _get_conversation_owner_id(existing_conversation),
     )
     return JSONResponse(content={"status": "reopened", "conversation_id": thread_id})
 

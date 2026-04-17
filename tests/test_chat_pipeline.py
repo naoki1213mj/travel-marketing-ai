@@ -294,6 +294,25 @@ class TestBuildMarketingPlanPrompt:
         assert "ユーザー依頼" in result
         assert "Agent1 の分析結果" in result
 
+    def test_includes_work_iq_brief_when_available(self):
+        result = chat_module._build_marketing_plan_prompt(
+            "沖縄プラン",
+            "売上データ分析",
+            {
+                "enabled": True,
+                "source_scope": ["emails"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+                "brief_summary": "メールで家族向け訴求を重視していました。",
+                "brief_source_metadata": [{"source": "emails", "label": "メール", "count": 2}],
+            },
+        )
+        assert "Work IQ の職場コンテキスト" in result
+        assert "家族向け訴求" in result
+        assert "メール: 2 件" in result
+
 
 # --- _build_revision_prompt テスト ---
 
@@ -313,6 +332,26 @@ class TestBuildRevisionPrompt:
         assert "分析結果" in result
         assert "企画書内容" in result
         assert "キャッチコピーを変更" in result
+
+    def test_includes_work_iq_brief_when_saved(self):
+        context = {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "企画書内容",
+            "model_settings": None,
+            "work_iq_session": {
+                "enabled": True,
+                "source_scope": ["teams_chats"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+                "brief_summary": "Teams で沖縄より北海道案の反応が良かったです。",
+            },
+        }
+        result = chat_module._build_revision_prompt(context, "キャッチコピーを変更")
+        assert "Work IQ の職場コンテキスト" in result
+        assert "北海道案の反応" in result
 
 
 # --- _extract_plan_title テスト ---
@@ -495,7 +534,7 @@ class TestLoadPendingApprovalContext:
             lambda cid: None,
         )
 
-        async def mock_get_conv(cid):
+        async def mock_get_conv(cid, owner_id: str | None = None, allow_cross_owner: bool = False):
             return None
 
         monkeypatch.setattr("src.api.chat.get_conversation", mock_get_conv)
@@ -507,7 +546,7 @@ class TestLoadPendingApprovalContext:
         """保存済み approval_request から model_settings を復元できる"""
         chat_module._pending_approvals.clear()
 
-        async def mock_get_conv(_cid):
+        async def mock_get_conv(_cid, owner_id: str | None = None, allow_cross_owner: bool = False):
             return {
                 "status": "awaiting_approval",
                 "input": "沖縄プラン",
@@ -541,11 +580,24 @@ class TestLoadPendingApprovalContext:
         """保存済み manager approval_request から workflow_settings を復元できる"""
         chat_module._pending_approvals.clear()
 
-        async def mock_get_conv(_cid):
+        async def mock_get_conv(_cid, owner_id: str | None = None, allow_cross_owner: bool = False):
             return {
                 "status": "awaiting_manager_approval",
                 "input": "沖縄プラン",
-                "metadata": {"manager_approval_callback_token": "token-123"},
+                "metadata": {
+                    "manager_approval_callback_token": "token-123",
+                    "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+                    "work_iq_session": {
+                        "enabled": True,
+                        "source_scope": ["emails"],
+                        "auth_mode": "delegated",
+                        "owner_oid": "oid-123",
+                        "owner_tid": "tid-123",
+                        "owner_upn": "user@example.com",
+                        "brief_summary": "要約",
+                        "raw_excerpt": "should-not-persist",
+                    },
+                },
                 "messages": [
                     {
                         "event": "text",
@@ -579,11 +631,55 @@ class TestLoadPendingApprovalContext:
             "manager_approval_enabled": True,
             "manager_email": "manager@example.com",
         }
+        assert result["conversation_settings"] == {"work_iq_enabled": True, "source_scope": ["emails"]}
+        assert result["work_iq_session"] == {
+            "enabled": True,
+            "source_scope": ["emails"],
+            "auth_mode": "delegated",
+            "owner_oid": "oid-123",
+            "owner_tid": "tid-123",
+            "owner_upn": "user@example.com",
+            "brief_summary": "要約",
+        }
+
+
+def test_build_conversation_metadata_for_save_sanitizes_work_iq_session():
+    """会話 metadata 保存時は raw Work IQ フィールドを除去する"""
+    metadata = chat_module._build_conversation_metadata_for_save(
+        "conv-workiq",
+        existing_conversation=None,
+        conversation_status="completed",
+        conversation_settings={"work_iq_enabled": True, "source_scope": ["emails"]},
+        work_iq_session={
+            "enabled": True,
+            "source_scope": ["emails"],
+            "auth_mode": "delegated",
+            "owner_oid": "oid-123",
+            "owner_tid": "tid-123",
+            "owner_upn": "user@example.com",
+            "brief_summary": "安全な要約",
+            "raw_excerpt": "should-not-persist",
+        },
+    )
+
+    assert metadata is not None
+    assert metadata["conversation_settings"] == {"work_iq_enabled": True, "source_scope": ["emails"]}
+    assert metadata["work_iq_session"] == {
+        "enabled": True,
+        "source_scope": ["emails"],
+        "auth_mode": "delegated",
+        "owner_oid": "oid-123",
+        "owner_tid": "tid-123",
+        "owner_upn": "user@example.com",
+        "brief_summary": "安全な要約",
+    }
 
 
 @pytest.mark.asyncio
 async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypatch):
     """notification workflow 未設定でも manager approval URL を返して待機する"""
+
+    lookup: dict[str, object] = {}
 
     monkeypatch.setattr(
         chat_module,
@@ -596,7 +692,7 @@ async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypat
         },
     )
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -608,6 +704,7 @@ async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypat
             },
             "approval_scope": "user",
             "manager_callback_token": None,
+            "owner_id": "",
         }
 
     async def fake_execute_agent(
@@ -634,8 +731,18 @@ async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypat
             "total_tokens": 10,
         }
 
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
+        return {"messages": []}
+
     monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending)
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
 
     events = [
         event async for event in chat_module._post_approval_events("承認", "conv-manual", "https://app.example.com")
@@ -647,6 +754,8 @@ async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypat
     assert '"manager_delivery_mode": "manual"' in approval_event
     assert "manager_conversation_id=conv-manual" in approval_event
     assert "manager_approval_token=" in approval_event
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
 
 
 # --- _extract_message_text テスト ---
@@ -895,6 +1004,155 @@ async def test_workflow_event_generator_creates_pending_approval(monkeypatch) ->
 
 
 @pytest.mark.asyncio
+async def test_workflow_event_generator_injects_work_iq_brief_and_emits_tool_event(monkeypatch) -> None:
+    """Work IQ brief を Agent2 prompt に注入し、sanitized tool_event を返す"""
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        if agent_name == "marketing-plan-agent":
+            captured["marketing_prompt"] = user_input
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": f"{agent_name} output", "agent": agent_name},
+                )
+            ],
+            "text": f"{agent_name} output",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+        }
+
+    async def fake_generate_workplace_context_brief(**kwargs):
+        captured["work_iq_args"] = kwargs
+        return {
+            "brief_summary": "メールでは家族向け訴求と春休み需要が重視されていました。",
+            "brief_source_metadata": [{"source": "emails", "label": "メール", "count": 2}],
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "沖縄プラン",
+            "conv-workiq",
+            {"temperature": 0.2},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["emails"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["emails"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="graph-token",
+            user_time_zone="Asia/Tokyo",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert "Work IQ の職場コンテキスト" in str(captured["marketing_prompt"])
+    assert "春休み需要" in str(captured["marketing_prompt"])
+    assert captured["work_iq_args"] == {
+        "user_input": "沖縄プラン",
+        "source_scope": ["emails"],
+        "access_token": "graph-token",
+        "user_time_zone": "Asia/Tokyo",
+    }
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("source") == "workiq"
+        and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+    assert chat_module._pending_approvals["conv-workiq"]["work_iq_session"]["brief_summary"] == (
+        "メールでは家族向け訴求と春休み需要が重視されていました。"
+    )
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_emits_auth_required_work_iq_status_without_fetch(monkeypatch) -> None:
+    """delegated auth がない場合は Work IQ fetch を行わず visible fail-closed する"""
+
+    captured: dict[str, object] = {"fetch_called": False}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        if agent_name == "marketing-plan-agent":
+            captured["marketing_prompt"] = user_input
+        return {
+            "events": [],
+            "text": f"{agent_name} output",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+        }
+
+    async def fake_generate_workplace_context_brief(**kwargs):
+        captured["fetch_called"] = True
+        return {
+            "brief_summary": "should not run",
+            "brief_source_metadata": [],
+            "status": "completed",
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "沖縄プラン",
+            "conv-workiq-auth",
+            {"temperature": 0.2},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["emails"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["emails"],
+                "auth_mode": "anonymous",
+                "owner_oid": "",
+                "owner_tid": "",
+                "owner_upn": "",
+                "warning_code": "auth_required",
+                "status": "auth_required",
+            },
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert captured["fetch_called"] is False
+    assert "Work IQ の職場コンテキスト" not in str(captured["marketing_prompt"])
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("source") == "workiq"
+        and payload.get("status") == "auth_required"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
 async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
     """承認待ちの修正では元の分析・企画書を含めて Agent2 を再実行する"""
     chat_module._pending_approvals.clear()
@@ -947,7 +1205,11 @@ async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
 async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch) -> None:
     """品質評価の改善では MCP ブリーフを優先利用する"""
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         return {
             "input": "沖縄向け春休みプランを作って",
             "metadata": {"user_messages": ["沖縄向け春休みプランを作って", "ファミリー訴求を強めたい"]},
@@ -1048,7 +1310,11 @@ async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch)
 async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) -> None:
     """MCP が未使用でも従来の改善フローを維持する"""
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         return {
             "input": "北海道プランを作って",
             "messages": [
@@ -1114,7 +1380,11 @@ async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) 
 async def test_refine_events_emits_failed_tool_event_when_mcp_falls_back(monkeypatch) -> None:
     """MCP が設定済みで失敗した場合は fallback を明示する"""
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         return {
             "input": "北海道プランを作って",
             "messages": [
@@ -1180,6 +1450,86 @@ async def test_refine_events_emits_failed_tool_event_when_mcp_falls_back(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_refine_events_evaluation_reuses_saved_work_iq_brief(monkeypatch) -> None:
+    """評価ベースの改善でも保存済み Work IQ brief を prompt に再利用する"""
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "input": "北海道の春プランを作って",
+            "metadata": {
+                "work_iq_session": {
+                    "enabled": True,
+                    "source_scope": ["emails"],
+                    "auth_mode": "delegated",
+                    "owner_oid": "oid-123",
+                    "owner_tid": "tid-123",
+                    "owner_upn": "user@example.com",
+                    "brief_summary": "メールでは上質感を重視し、値引き訴求は弱める方針でした。",
+                }
+            },
+            "messages": [
+                {"event": "text", "data": {"agent": "marketing-plan-agent", "content": "現在の企画書"}},
+                {"event": "text", "data": {"agent": "data-search-agent", "content": "分析結果"}},
+                {"event": "text", "data": {"agent": "regulation-check-agent", "content": "規制結果"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"temperature": 0.2},
+                        "workflow_settings": {"manager_approval_enabled": False, "manager_email": ""},
+                    },
+                },
+                {"event": "evaluation_result", "data": {"result": {"builtin": {}}}},
+            ],
+        }
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        captured["user_input"] = user_input
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    async def fake_generate_improvement_brief(**kwargs):
+        return None
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: False)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "_extract_user_message_history", lambda conversation: ["北海道の春プランを作って"])
+
+    _ = [
+        event
+        async for event in chat_module._refine_events(
+            "品質評価を踏まえて改善してください",
+            "conv-eval-workiq",
+            chat_module.RefineContext(source="evaluation"),
+        )
+    ]
+
+    assert "Work IQ の職場コンテキスト" in str(captured["user_input"])
+    assert "値引き訴求は弱める方針" in str(captured["user_input"])
+
+
+@pytest.mark.asyncio
 async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypatch) -> None:
     """承認後の品質レビューと Logic Apps 連携は修正版企画書を使う"""
 
@@ -1189,7 +1539,7 @@ async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypa
         lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
     )
 
-    async def fake_load_pending(_conversation_id):
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -1325,7 +1675,7 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
         lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
     )
 
-    async def fake_load_pending(_conversation_id):
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -1405,6 +1755,217 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
             "content_type": "text",
         },
     ) in parsed_events
+
+
+@pytest.mark.asyncio
+async def test_append_post_completion_updates_does_not_enable_cross_owner_for_empty_owner_id(monkeypatch) -> None:
+    """空の owner_id が入っていても background update で cross-owner を有効化しない"""
+
+    lookup: dict[str, object] = {}
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
+        return {
+            "input": "沖縄プラン",
+            "messages": [],
+            "status": "completed",
+            "user_id": "user-123",
+        }
+
+    async def fake_trigger_logic_app(conversation_id: str, plan_markdown: str, brochure_html: str):
+        assert conversation_id == "conv-owner"
+        assert plan_markdown == "修正版企画書"
+        assert brochure_html == "<html></html>"
+
+    async def fake_append_conversation_events(**kwargs):
+        lookup["saved_owner_id"] = kwargs["owner_id"]
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "_trigger_logic_app", fake_trigger_logic_app)
+    monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+
+    await chat_module._append_post_completion_updates(
+        "conv-owner",
+        {
+            "conversation_id": "conv-owner",
+            "review_input": "",
+            "revised_plan_markdown": "修正版企画書",
+            "brochure_html": "<html></html>",
+            "video_job_id": None,
+            "owner_id": "",
+        },
+    )
+
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
+    assert lookup["saved_owner_id"] == "user-123"
+
+
+@pytest.mark.asyncio
+async def test_append_post_completion_updates_safe_does_not_enable_cross_owner_for_empty_owner_id(monkeypatch) -> None:
+    """空の owner_id が入っていても recovery lookup で cross-owner を有効化しない"""
+
+    lookup: dict[str, object] = {}
+
+    async def fake_append_post_completion_updates(
+        conversation_id: str,
+        update_context: chat_module.PostCompletionUpdateContext,
+    ) -> None:
+        del conversation_id, update_context
+        raise RuntimeError("boom")
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
+        return {
+            "input": "沖縄プラン",
+            "messages": [],
+            "status": "completed",
+            "user_id": "user-123",
+        }
+
+    async def fake_append_conversation_events(**kwargs):
+        lookup["saved_owner_id"] = kwargs["owner_id"]
+
+    monkeypatch.setattr(chat_module, "_append_post_completion_updates", fake_append_post_completion_updates)
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+
+    await chat_module._append_post_completion_updates_safe(
+        "conv-owner",
+        {
+            "conversation_id": "conv-owner",
+            "review_input": "",
+            "revised_plan_markdown": "修正版企画書",
+            "brochure_html": "<html></html>",
+            "video_job_id": None,
+            "owner_id": "",
+        },
+    )
+
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
+    assert lookup["saved_owner_id"] == "user-123"
+
+
+@pytest.mark.asyncio
+async def test_run_manager_approval_continuation_does_not_enable_cross_owner_for_empty_owner_id(monkeypatch) -> None:
+    """空の owner_id が入っていても manager continuation で cross-owner を有効化しない"""
+
+    lookup: dict[str, object] = {}
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
+        return {
+            "input": "沖縄プラン",
+            "messages": [],
+            "status": "completed",
+            "user_id": "user-123",
+        }
+
+    async def fake_post_approval_events(
+        _response: str,
+        _conversation_id: str,
+        approval_context=None,
+        owner_id: str | None = None,
+        register_background_job=None,
+    ):
+        del approval_context, owner_id, register_background_job
+        if False:
+            yield ""
+        return
+
+    async def fake_append_conversation_events(**kwargs):
+        lookup["saved_owner_id"] = kwargs["owner_id"]
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "_post_approval_events", fake_post_approval_events)
+    monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+
+    await chat_module._run_manager_approval_continuation(
+        "conv-owner",
+        {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "修正版企画書",
+            "model_settings": {"temperature": 0.3},
+            "workflow_settings": {"manager_approval_enabled": True, "manager_email": "manager@example.com"},
+            "approval_scope": "manager",
+            "manager_callback_token": "token-123",
+            "owner_id": "",
+        },
+    )
+
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
+    assert lookup["saved_owner_id"] == "user-123"
+
+
+@pytest.mark.asyncio
+async def test_continue_after_manager_approval_safe_does_not_enable_cross_owner_for_empty_owner_id(monkeypatch) -> None:
+    """空の owner_id が入っていても manager continuation の recovery lookup で cross-owner を有効化しない"""
+
+    lookup: dict[str, object] = {}
+
+    async def fake_run_manager_approval_continuation(
+        conversation_id: str,
+        approval_context=None,
+    ) -> None:
+        del conversation_id, approval_context
+        raise RuntimeError("boom")
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
+        return {
+            "input": "沖縄プラン",
+            "messages": [],
+            "status": "completed",
+            "user_id": "user-123",
+        }
+
+    async def fake_append_conversation_events(**kwargs):
+        lookup["saved_owner_id"] = kwargs["owner_id"]
+
+    monkeypatch.setattr(chat_module, "_run_manager_approval_continuation", fake_run_manager_approval_continuation)
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+
+    await chat_module._continue_after_manager_approval_safe(
+        "conv-owner",
+        {
+            "user_input": "沖縄プラン",
+            "analysis_markdown": "分析結果",
+            "plan_markdown": "修正版企画書",
+            "model_settings": {"temperature": 0.3},
+            "workflow_settings": {"manager_approval_enabled": True, "manager_email": "manager@example.com"},
+            "approval_scope": "manager",
+            "manager_callback_token": "token-123",
+            "owner_id": "",
+        },
+    )
+
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
+    assert lookup["saved_owner_id"] == "user-123"
 
 
 # --- _get_reference_brochure_path テスト ---

@@ -96,7 +96,10 @@ def test_chat_rejects_manager_approval_without_trigger_url(monkeypatch):
 def test_get_manager_approval_request_returns_context(monkeypatch):
     """上司向け承認ページ API は token 一致時に企画書を返す"""
 
-    async def fake_load_pending(_conversation_id: str):
+    lookup: dict[str, object] = {}
+
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -108,9 +111,16 @@ def test_get_manager_approval_request_returns_context(monkeypatch):
             },
             "approval_scope": "manager",
             "manager_callback_token": "token-123",
+            "owner_id": "",
         }
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
         return {
             "messages": [
                 {"event": "text", "data": {"content": "# 初版企画書\n\n本文", "agent": "marketing-plan-agent"}},
@@ -142,12 +152,15 @@ def test_get_manager_approval_request_returns_context(monkeypatch):
             }
         ],
     }
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
 
 
 def test_get_manager_approval_request_uses_context_versions_when_storage_is_empty(monkeypatch):
     """上司向け承認ページ API は保存会話が取れなくても context 内比較情報を返す"""
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -168,7 +181,11 @@ def test_get_manager_approval_request_uses_context_versions_when_storage_is_empt
             ],
         }
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         return None
 
     monkeypatch.setattr("src.api.chat._load_pending_approval_context", fake_load_pending)
@@ -192,7 +209,8 @@ def test_get_manager_approval_request_uses_context_versions_when_storage_is_empt
 def test_get_manager_approval_request_rejects_invalid_token(monkeypatch):
     """上司向け承認ページ API は token 不一致を拒否する"""
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -268,18 +286,58 @@ def test_chat_refine_with_conversation_id():
     assert "event: text" in content or "event: approval_request" in content
 
 
+def test_chat_rejects_work_iq_setting_change_for_existing_conversation(monkeypatch):
+    """既存会話の Work IQ immutable 設定変更は 409 で拒否する"""
+
+    async def fake_get_conversation(
+        conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        assert conversation_id == "existing-conv"
+        return {
+            "input": "春の沖縄ファミリー向けプランを企画して",
+            "messages": [],
+            "metadata": {"conversation_settings": {"work_iq_enabled": False, "source_scope": []}},
+        }
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "キャッチコピーをもっとポップに",
+            "conversation_id": "existing-conv",
+            "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+        },
+    )
+
+    assert response.status_code == 409
+    assert "CONVERSATION_SETTINGS_IMMUTABLE" in response.text
+
+
 def test_chat_refine_forwards_evaluation_context(monkeypatch):
     """評価結果ベースの改善は refine_context を伴って _refine_events へ渡す"""
     captured: dict[str, object] = {}
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         return {
             "input": "春の沖縄ファミリー向けプランを企画して",
             "messages": [],
             "metadata": {"user_messages": ["春の沖縄ファミリー向けプランを企画して"]},
         }
 
-    async def fake_refine_events(_message: str, _conversation_id: str, refine_context=None):
+    async def fake_refine_events(
+        _message: str,
+        _conversation_id: str,
+        refine_context=None,
+        owner_id: str | None = None,
+        model_settings_override: dict | None = None,
+    ):
         captured["source"] = getattr(refine_context, "source", None)
         captured["artifact_version"] = getattr(refine_context, "artifact_version", None)
         yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
@@ -311,7 +369,11 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
     """既存 conversation_id での修正時も確定済み履歴を保持して保存する"""
     saved: dict[str, object] = {}
 
-    async def fake_get_conversation(conversation_id: str):
+    async def fake_get_conversation(
+        conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         assert conversation_id == "existing-conv"
         return {
             "input": "春の沖縄ファミリー向けプランを企画して",
@@ -322,7 +384,13 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
             "metadata": {"user_messages": ["春の沖縄ファミリー向けプランを企画して"]},
         }
 
-    async def fake_refine_events(_message: str, _conversation_id: str, _refine_context=None):
+    async def fake_refine_events(
+        _message: str,
+        _conversation_id: str,
+        _refine_context=None,
+        owner_id: str | None = None,
+        model_settings_override: dict | None = None,
+    ):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
 
@@ -333,6 +401,7 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
         artifacts: dict | None = None,
         metrics: dict | None = None,
         status: str = "completed",
+        owner_id: str | None = None,
     ) -> None:
         saved.update(
             {
@@ -371,7 +440,11 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
     """承認待ち画面での修正指示も user message 履歴へ追記して保存する"""
     saved: dict[str, object] = {}
 
-    async def fake_get_conversation(conversation_id: str):
+    async def fake_get_conversation(
+        conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         assert conversation_id == "test-thread"
         return {
             "input": "秋の京都シニア向けプランを企画して",
@@ -389,7 +462,13 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
             "metadata": {"user_messages": ["秋の京都シニア向けプランを企画して"]},
         }
 
-    async def fake_refine_events(_message: str, _conversation_id: str, _refine_context=None):
+    async def fake_refine_events(
+        _message: str,
+        _conversation_id: str,
+        _refine_context=None,
+        owner_id: str | None = None,
+        model_settings_override: dict | None = None,
+    ):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "再確認してください", "conversation_id": "test-thread", "plan_markdown": "# Plan v2"}\n\n'
 
@@ -400,6 +479,7 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
         artifacts: dict | None = None,
         metrics: dict | None = None,
         status: str = "completed",
+        owner_id: str | None = None,
     ) -> None:
         saved.update(
             {
@@ -433,7 +513,11 @@ def test_load_pending_approval_context_restores_previous_versions(monkeypatch):
     """保存済み会話から承認待ちコンテキストを復元する際に比較用バージョンも再構築する"""
     from src.api import chat as chat_module
 
-    async def fake_get_conversation(conversation_id: str):
+    async def fake_get_conversation(
+        conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
         assert conversation_id == "conv-manager"
         return {
             "input": "沖縄プラン",
@@ -480,8 +564,10 @@ def test_load_pending_approval_context_restores_previous_versions(monkeypatch):
 def test_manager_approval_callback_reopens_conversation(monkeypatch):
     """上司差し戻し時は担当者承認フローへ戻す"""
     saved: dict[str, object] = {}
+    lookup: dict[str, object] = {}
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -493,9 +579,16 @@ def test_manager_approval_callback_reopens_conversation(monkeypatch):
             },
             "approval_scope": "manager",
             "manager_callback_token": "token-123",
+            "owner_id": "",
         }
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
         return {"input": "沖縄プラン", "messages": [], "metadata": {"manager_approval_callback_token": "token-123"}}
 
     async def fake_save_conversation(**kwargs):
@@ -519,13 +612,16 @@ def test_manager_approval_callback_reopens_conversation(monkeypatch):
     assert response.json()["status"] == "reopened"
     assert saved["status"] == "awaiting_approval"
     assert saved["events"][-1]["data"]["manager_comment"] == "価格表現をもう少し抑えてください"
-    assert saved["metrics"] is None
+    assert saved["metrics"] == {"conversation_settings": {"work_iq_enabled": False, "source_scope": []}}
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
 
 
 def test_manager_approval_callback_approved_marks_running_and_starts_background_task(monkeypatch):
     """上司承認時は running に更新して継続処理を起動する"""
     saved_calls: list[dict[str, object]] = []
     captured: dict[str, object] = {}
+    lookup: dict[str, object] = {}
 
     context = {
         "user_input": "沖縄プラン",
@@ -538,12 +634,20 @@ def test_manager_approval_callback_approved_marks_running_and_starts_background_
         },
         "approval_scope": "manager",
         "manager_callback_token": "token-123",
+        "owner_id": "",
     }
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return context
 
-    async def fake_get_conversation(_conversation_id: str):
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        lookup["owner_id"] = owner_id
+        lookup["allow_cross_owner"] = allow_cross_owner
         return {
             "input": "沖縄プラン",
             "messages": [{"event": "approval_request", "data": {"approval_scope": "manager"}}],
@@ -578,12 +682,15 @@ def test_manager_approval_callback_approved_marks_running_and_starts_background_
         "conversation_id": "conv-manager",
         "approval_context": context,
     }
+    assert lookup["owner_id"] is None
+    assert lookup["allow_cross_owner"] is False
 
 
 def test_manager_approval_callback_rejects_invalid_token(monkeypatch):
     """callback token が一致しない場合は拒否する"""
 
-    async def fake_load_pending(_conversation_id: str):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",

@@ -9,6 +9,13 @@ from fastapi import APIRouter, Query, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
 
 from src.conversations import get_conversation, get_replay_data, list_conversations
+from src.request_identity import extract_request_identity
+from src.work_iq_session import (
+    CONVERSATION_SETTINGS_METADATA_KEY,
+    WORK_IQ_SESSION_METADATA_KEY,
+    sanitize_conversation_settings,
+    sanitize_work_iq_session_for_response,
+)
 
 router = APIRouter(prefix="/api", tags=["conversations"])
 logger = logging.getLogger(__name__)
@@ -52,17 +59,31 @@ def _if_none_match_matches(header_value: str | None, etag: str) -> bool:
 
 def _sanitize_conversation_document(doc: dict) -> dict:
     """フロントエンドへ返す会話ドキュメントから機密 metadata を除去する。"""
-    sanitized = dict(doc)
+    sanitized = {key: value for key, value in doc.items() if key != "user_id"}
     metadata = sanitized.get("metadata")
     if isinstance(metadata, dict):
-        sanitized["metadata"] = {key: value for key, value in metadata.items() if key not in _SENSITIVE_METADATA_KEYS}
+        safe_metadata: dict[str, object] = {}
+        for key, value in metadata.items():
+            if key in _SENSITIVE_METADATA_KEYS:
+                continue
+            if key == CONVERSATION_SETTINGS_METADATA_KEY:
+                safe_metadata[key] = sanitize_conversation_settings(value)
+                continue
+            if key == WORK_IQ_SESSION_METADATA_KEY:
+                session = sanitize_work_iq_session_for_response(value)
+                if session is not None:
+                    safe_metadata[key] = session
+                continue
+            safe_metadata[key] = value
+        sanitized["metadata"] = safe_metadata
     return sanitized
 
 
 @router.get("/conversations")
 async def conversations_list(request: Request, limit: int = 20) -> Response:
     """会話一覧を取得する。"""
-    items = await list_conversations(limit=limit)
+    identity = extract_request_identity(request)
+    items = await list_conversations(owner_id=identity["user_id"], limit=limit)
     etag = _build_conversations_list_etag(items)
     cache_headers = {
         "Cache-Control": "no-store, no-cache, must-revalidate",
@@ -80,7 +101,8 @@ async def conversations_list(request: Request, limit: int = 20) -> Response:
 @router.get("/conversations/{conversation_id}")
 async def conversation_detail(conversation_id: str, request: Request) -> Response:
     """会話詳細を取得する。"""
-    doc = await get_conversation(conversation_id)
+    identity = extract_request_identity(request)
+    doc = await get_conversation(conversation_id, owner_id=identity["user_id"])
     if not doc:
         return JSONResponse(status_code=404, content={"error": "conversation not found"})
     etag = _build_conversation_etag(doc)
@@ -98,14 +120,15 @@ async def conversation_detail(conversation_id: str, request: Request) -> Respons
 
 
 @router.get("/replay/{conversation_id}")
-async def replay(conversation_id: str, speed: float = Query(5.0, gt=0.0)) -> StreamingResponse:
+async def replay(request: Request, conversation_id: str, speed: float = Query(5.0, gt=0.0)) -> StreamingResponse:
     """録画済み SSE イベントを高速リプレイする。
 
     Args:
         conversation_id: リプレイする会話のID
         speed: リプレイ速度の倍率（デフォルト 5倍速）
     """
-    events = await get_replay_data(conversation_id)
+    identity = extract_request_identity(request)
+    events = await get_replay_data(conversation_id, owner_id=identity["user_id"])
 
     if not events:
         # デモ用フォールバック: JSON ファイルがなければ空レスポンス

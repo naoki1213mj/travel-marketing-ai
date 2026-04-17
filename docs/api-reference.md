@@ -75,7 +75,7 @@ REST API と SSE イベントの仕様です。
 {
   "message": "沖縄のファミリー向け春キャンペーンを企画してください",
   "conversation_id": null,
-  "settings": {
+  "user_settings": {
     "model": "gpt-5-4-mini",
     "temperature": 0.2,
     "max_tokens": 1200,
@@ -89,6 +89,10 @@ REST API と SSE イベントの仕様です。
       "image_height": 1024
     }
   },
+  "conversation_settings": {
+    "work_iq_enabled": true,
+    "source_scope": ["emails", "teams_chats"]
+  },
   "workflow_settings": {
     "manager_approval_enabled": true,
     "manager_email": "manager@example.com"
@@ -100,9 +104,18 @@ REST API と SSE イベントの仕様です。
 | --- | --- | --- | --- |
 | `message` | `string` | 必須 | 1 文字以上 |
 | `conversation_id` | `string \| null` | 任意 | 既存会話 ID を指定すると修正モード |
-| `settings` | `object \| null` | 任意 | フロントエンド設定パネルの内容。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
-| `settings.image_settings` | `object \| null` | 任意 | 画像生成設定。`image_model`（`gpt-image-1.5` / `MAI-Image-2`）、`image_quality`（`low`/`medium`/`high`、GPT のみ）、`image_width`/`image_height`（MAI のみ、最小 768、w×h ≤ 1,048,576） |
+| `user_settings` | `object \| null` | 任意 | 会話途中でも変更可能なモデル設定。`model`（`gpt-5-4-mini`、`gpt-5.4`、`gpt-4-1-mini`、`gpt-4.1`）、`temperature`、`max_tokens`、`top_p`、`iq_search_results`、`iq_score_threshold`、`image_settings` を送信できる |
+| `user_settings.image_settings` | `object \| null` | 任意 | 画像生成設定。`image_model`（`gpt-image-1.5` / `MAI-Image-2`）、`image_quality`（`low`/`medium`/`high`、GPT のみ）、`image_width`/`image_height`（MAI のみ、最小 768、w×h ≤ 1,048,576） |
+| `conversation_settings` | `object \| null` | 任意 | 新規会話時だけ受理する固定設定。現状は `work_iq_enabled` と `source_scope` を含む |
+| `settings` | `object \| null` | 任意 | 旧互換。`user_settings` / `conversation_settings` へ段階移行中 |
 | `workflow_settings` | `object \| null` | 任意 | 承認フロー設定。`manager_approval_enabled=true` の場合は `manager_email` が必須。`MANAGER_APPROVAL_TRIGGER_URL` は通知 workflow を使う場合だけ設定します |
+
+### `/api/chat` 追加ヘッダ
+
+| ヘッダ | 必須 | 用途 |
+| --- | --- | --- |
+| `Authorization: Bearer <Graph token>` | Work IQ を有効化した会話で必須 | Microsoft Graph Copilot Chat API を per-user delegated で呼ぶための本人トークン |
+| `X-User-Timezone` | 任意 | Work IQ brief 取得時の `locationHint.timeZone` に使用 |
 
 ### `/api/chat` 現行挙動
 
@@ -117,10 +130,12 @@ REST API と SSE イベントの仕様です。
 ### `/api/chat` 注意
 
 - Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
+- `conversation_settings.work_iq_enabled=true` の新規会話では、Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得し、Agent2 prompt にだけ注入します。
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。
 - manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
 - `IMPROVEMENT_MCP_ENDPOINT` が設定されている場合、評価フィードバックでは保存済み評価結果・規制要約・差し戻し履歴をまとめて APIM 配下の MCP `generate_improvement_brief` に渡し、成功時は `tool_event` を 1 件返します。
+- Work IQ の raw context は SSE や会話履歴には保存されず、`tool_event.source="workiq"` の status と brief summary / source metadata だけが保存されます。
 - フロントエンドは各 `done` イベントのたびに成果物スナップショットを保持し、v1 / v2 / ... を切り替えます。
 - 2 回目以降の上司承認待ちでは、`GET /api/conversations/{id}` のイベント列から未確定ラウンドを復元し、直前の確定版を `pendingVersion` として保持します。
 
@@ -240,6 +255,8 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 
 会話一覧を返します。Cosmos DB が未設定ならインメモリから返します。
 
+- Work IQ 会話を含めて一覧取得したい場合は、フロントエンドが保持している delegated Bearer token を同じく付与します。トークンがない場合は匿名会話だけが見えることがあります。
+
 クエリ:
 
 | パラメータ | 型 | デフォルト | 説明 |
@@ -270,7 +287,6 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 ```json
 {
   "id": "550e8400-e29b-41d4-a716-446655440000",
-  "user_id": "demo-user",
   "created_at": "2026-03-20T10:30:00+00:00",
   "updated_at": "2026-03-20T10:31:10+00:00",
   "status": "completed",
@@ -278,13 +294,21 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
   "messages": [],
   "artifacts": {},
   "metadata": {
-    "background_updates_pending": false
+    "background_updates_pending": false,
+    "work_iq_session": {
+      "enabled": true,
+      "source_scope": ["emails"],
+      "auth_mode": "delegated",
+      "brief_summary": "営業メールでは家族向け訴求が重視されていました。",
+      "status": "completed"
+    }
   }
 }
 ```
 
 - `metadata.background_updates_pending=true` の場合、ユーザー向けの `done` 後も動画 URL や品質レビューが後続で追記される可能性があります。
 - `manager_approval_callback_token` のような機密 metadata はこの API では自動的に除去されます。
+- `metadata.work_iq_session` には raw workplace context は含まれず、brief summary / source metadata / status だけが返ります。
 
 未存在時:
 
@@ -295,6 +319,8 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 ### `GET /api/replay/{conversation_id}`
 
 保存済み SSE を `speed` 倍速でリプレイします。
+
+- Work IQ 会話でも replay には raw workplace context は含まれません。
 
 | パラメータ | 型 | デフォルト | 説明 |
 | --- | --- | --- | --- |
@@ -316,6 +342,7 @@ Teams 対応の上司承認 workflow から承認結果を受け取る JSON API 
 - レート制限: 5 リクエスト / 分
 - フロントエンドでは専用の Evaluation タブから呼ばれます
 - `AZURE_AI_PROJECT_ENDPOINT` が未設定でも呼び出せますが、Built-in 評価と prompt-based 評価はエラー / 低機能モードになります
+- Work IQ を有効化した会話の評価保存では、同じ delegated Bearer token を付与して owner-bound conversation に紐づけます
 
 ### フロントエンドでの表示ルール
 

@@ -10,18 +10,38 @@ logger = logging.getLogger(__name__)
 # インメモリストア（Cosmos DB 未設定時のフォールバック）
 _memory_store: dict[str, dict] = {}
 _conversation_locks: dict[str, asyncio.Lock] = {}
+_DEFAULT_OWNER_ID = "anonymous"
 
 # Cosmos DB クライアントのシングルトン（接続プーリングを再利用するため）
 _cosmos_client = None
 _cosmos_initialized = False
 
 
-def _get_conversation_lock(conversation_id: str) -> asyncio.Lock:
+def _normalize_owner_id(owner_id: str | None) -> str:
+    """未指定 owner を安全な既定値へ正規化する。"""
+    normalized = str(owner_id).strip() if owner_id is not None else ""
+    return normalized or _DEFAULT_OWNER_ID
+
+
+def _build_memory_key(owner_id: str, document_id: str) -> str:
+    """インメモリ保存用の複合キーを返す。"""
+    return f"{owner_id}:{document_id}"
+
+
+def _get_owner_id_from_document(doc: dict | None) -> str:
+    """保存済み会話ドキュメントから owner_id を取得する。"""
+    if not isinstance(doc, dict):
+        return _DEFAULT_OWNER_ID
+    return _normalize_owner_id(str(doc.get("user_id", "")))
+
+
+def _get_conversation_lock(conversation_id: str, owner_id: str) -> asyncio.Lock:
     """会話ごとの保存処理を直列化するロックを返す。"""
-    lock = _conversation_locks.get(conversation_id)
+    lock_key = _build_memory_key(owner_id, conversation_id)
+    lock = _conversation_locks.get(lock_key)
     if lock is None:
         lock = asyncio.Lock()
-        _conversation_locks[conversation_id] = lock
+        _conversation_locks[lock_key] = lock
     return lock
 
 
@@ -84,10 +104,13 @@ async def save_conversation(
     artifacts: dict | None = None,
     metrics: dict | None = None,
     status: str = "completed",
+    owner_id: str | None = None,
 ) -> None:
     """会話をストアに保存する。"""
-    async with _get_conversation_lock(conversation_id):
-        existing = await get_conversation(conversation_id)
+    resolved_owner_id = _normalize_owner_id(owner_id)
+    async with _get_conversation_lock(conversation_id, resolved_owner_id):
+        existing = await get_conversation(conversation_id, owner_id=resolved_owner_id, allow_cross_owner=owner_id is None)
+        document_owner_id = _get_owner_id_from_document(existing) if existing else resolved_owner_id
         doc = _build_conversation_doc(
             conversation_id=conversation_id,
             existing=existing,
@@ -96,6 +119,7 @@ async def save_conversation(
             artifacts=artifacts,
             metrics=metrics,
             status=status,
+            owner_id=document_owner_id,
         )
         await _persist_conversation_doc(doc)
 
@@ -107,10 +131,12 @@ async def append_conversation_events(
     artifacts: dict | None = None,
     metrics: dict | None = None,
     status: str | None = None,
+    owner_id: str | None = None,
 ) -> dict | None:
     """既存会話へイベントを追記しつつ保存する。"""
-    async with _get_conversation_lock(conversation_id):
-        existing = await get_conversation(conversation_id)
+    resolved_owner_id = _normalize_owner_id(owner_id)
+    async with _get_conversation_lock(conversation_id, resolved_owner_id):
+        existing = await get_conversation(conversation_id, owner_id=resolved_owner_id, allow_cross_owner=owner_id is None)
         existing_messages = existing.get("messages", []) if existing else []
         if not isinstance(existing_messages, list):
             existing_messages = []
@@ -128,6 +154,7 @@ async def append_conversation_events(
             artifacts=artifacts,
             metrics=metrics,
             status=resolved_status,
+            owner_id=_get_owner_id_from_document(existing) if existing else resolved_owner_id,
         )
         await _persist_conversation_doc(doc)
         return doc
@@ -141,6 +168,7 @@ def _build_conversation_doc(
     artifacts: dict | None,
     metrics: dict | None,
     status: str,
+    owner_id: str,
 ) -> dict:
     """保存用の会話ドキュメントを構築する。"""
     now = datetime.now(timezone.utc).isoformat()
@@ -164,7 +192,7 @@ def _build_conversation_doc(
 
     return {
         "id": conversation_id,
-        "user_id": "demo-user",
+        "user_id": _normalize_owner_id(owner_id),
         "created_at": existing.get("created_at", now) if existing else now,
         "updated_at": now,
         "status": status,
@@ -178,6 +206,7 @@ def _build_conversation_doc(
 async def _persist_conversation_doc(doc: dict) -> None:
     """会話ドキュメントを実ストアへ保存する。"""
     conversation_id = str(doc.get("id", ""))
+    owner_id = _get_owner_id_from_document(doc)
     container = _get_container()
     if container:
         try:
@@ -189,16 +218,40 @@ async def _persist_conversation_doc(doc: dict) -> None:
         except Exception as exc:
             logger.exception("Cosmos DB への保存で予期しないエラー、インメモリにフォールバック: %s", exc)
 
-    _memory_store[conversation_id] = doc
+    _memory_store[_build_memory_key(owner_id, conversation_id)] = doc
     logger.info("会話 %s をインメモリに保存", conversation_id)
 
 
-async def get_conversation(conversation_id: str) -> dict | None:
+async def get_conversation(
+    conversation_id: str,
+    owner_id: str | None = None,
+    *,
+    allow_cross_owner: bool = False,
+) -> dict | None:
     """会話を取得する。"""
+    resolved_owner_id = _normalize_owner_id(owner_id)
     container = _get_container()
     if container:
         try:
-            result = await asyncio.to_thread(container.read_item, item=conversation_id, partition_key="demo-user")
+            if allow_cross_owner and owner_id is None:
+                items = await asyncio.to_thread(
+                    list,
+                    container.query_items(
+                        query="SELECT * FROM c WHERE c.id = @id",
+                        parameters=[{"name": "@id", "value": conversation_id}],
+                        enable_cross_partition_query=True,
+                    ),
+                )
+                for item in items:
+                    if isinstance(item, dict):
+                        return item
+                return None
+
+            result = await asyncio.to_thread(
+                container.read_item,
+                item=conversation_id,
+                partition_key=resolved_owner_id,
+            )
             return result if isinstance(result, dict) else None
         except (ValueError, OSError) as exc:
             logger.debug("Cosmos DB から会話 %s が見つからない: %s", conversation_id, exc)
@@ -207,11 +260,21 @@ async def get_conversation(conversation_id: str) -> dict | None:
             logger.debug("Cosmos DB から会話 %s の取得で予期しないエラー: %s", conversation_id, exc)
             return None
 
-    return _memory_store.get(conversation_id)
+    if allow_cross_owner and owner_id is None:
+        for doc in _memory_store.values():
+            if isinstance(doc, dict) and str(doc.get("id", "")) == conversation_id and doc.get("type") != "replay":
+                return doc
+        return None
+
+    doc = _memory_store.get(_build_memory_key(resolved_owner_id, conversation_id))
+    if isinstance(doc, dict) and doc.get("type") != "replay":
+        return doc
+    return None
 
 
-async def list_conversations(limit: int = 20) -> list[dict]:
+async def list_conversations(owner_id: str | None = None, limit: int = 20) -> list[dict]:
     """会話一覧を取得する。"""
+    resolved_owner_id = _normalize_owner_id(owner_id)
     container = _get_container()
     if container:
         try:
@@ -221,7 +284,9 @@ async def list_conversations(limit: int = 20) -> list[dict]:
             items = await asyncio.to_thread(
                 list,
                 container.query_items(
-                    query=query, parameters=[{"name": "@limit", "value": limit}], partition_key="demo-user"
+                    query=query,
+                    parameters=[{"name": "@limit", "value": limit}],
+                    partition_key=resolved_owner_id,
                 ),
             )
             return items
@@ -232,15 +297,25 @@ async def list_conversations(limit: int = 20) -> list[dict]:
             logger.exception("Cosmos DB からの一覧取得で予期しないエラー: %s", exc)
             return []
 
-    return sorted(_memory_store.values(), key=lambda x: x.get("created_at", ""), reverse=True)[:limit]
+    filtered_items = [
+        doc
+        for doc in _memory_store.values()
+        if isinstance(doc, dict) and doc.get("type") != "replay" and _get_owner_id_from_document(doc) == resolved_owner_id
+    ]
+    return sorted(filtered_items, key=lambda x: x.get("created_at", ""), reverse=True)[:limit]
 
 
-async def save_replay_data(conversation_id: str, events_with_timing: list[dict]) -> None:
+async def save_replay_data(
+    conversation_id: str,
+    events_with_timing: list[dict],
+    owner_id: str | None = None,
+) -> None:
     """リプレイ用の SSE イベントデータをタイムスタンプ付きで保存する。"""
+    resolved_owner_id = _normalize_owner_id(owner_id)
     container = _get_container()
     replay_doc = {
         "id": f"replay-{conversation_id}",
-        "user_id": "demo-user",
+        "user_id": resolved_owner_id,
         "type": "replay",
         "conversation_id": conversation_id,
         "events": events_with_timing,
@@ -256,26 +331,55 @@ async def save_replay_data(conversation_id: str, events_with_timing: list[dict])
         except Exception as exc:
             logger.exception("Cosmos DB へのリプレイデータ保存で予期しないエラー: %s", exc)
 
-    _memory_store[f"replay-{conversation_id}"] = replay_doc
+    _memory_store[_build_memory_key(resolved_owner_id, f"replay-{conversation_id}")] = replay_doc
 
 
-async def get_replay_data(conversation_id: str) -> list[dict] | None:
+async def get_replay_data(
+    conversation_id: str,
+    owner_id: str | None = None,
+    *,
+    allow_cross_owner: bool = False,
+) -> list[dict] | None:
     """リプレイ用の SSE イベントデータを取得する。"""
+    resolved_owner_id = _normalize_owner_id(owner_id)
     container = _get_container()
     if container:
         try:
-            doc = await asyncio.to_thread(
-                container.read_item,
-                item=f"replay-{conversation_id}",
-                partition_key="demo-user",
-            )
-            return doc.get("events", [])
+            if allow_cross_owner and owner_id is None:
+                items = await asyncio.to_thread(
+                    list,
+                    container.query_items(
+                        query="SELECT * FROM c WHERE c.id = @id",
+                        parameters=[{"name": "@id", "value": f"replay-{conversation_id}"}],
+                        enable_cross_partition_query=True,
+                    ),
+                )
+                doc = next((item for item in items if isinstance(item, dict)), None)
+            else:
+                doc = await asyncio.to_thread(
+                    container.read_item,
+                    item=f"replay-{conversation_id}",
+                    partition_key=resolved_owner_id,
+                )
+            if isinstance(doc, dict):
+                return doc.get("events", [])
+            return None
         except (ValueError, OSError) as exc:
             logger.debug("Cosmos DB からリプレイデータ取得失敗: %s", exc)
         except Exception as exc:
             logger.debug("Cosmos DB からリプレイデータ取得で予期しないエラー: %s", exc)
 
-    doc = _memory_store.get(f"replay-{conversation_id}")
+    if allow_cross_owner and owner_id is None:
+        doc = next(
+            (
+                value
+                for value in _memory_store.values()
+                if isinstance(value, dict) and str(value.get("id", "")) == f"replay-{conversation_id}"
+            ),
+            None,
+        )
+    else:
+        doc = _memory_store.get(_build_memory_key(resolved_owner_id, f"replay-{conversation_id}"))
     if doc:
         return doc.get("events", [])
 

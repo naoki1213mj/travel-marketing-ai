@@ -43,7 +43,18 @@ const AGENT_STEP_KEY: Record<string, string> = {
 }
 
 function App() {
-  const { state, sendMessage, approve, reset, startNewConversation, restoreVersion, updateSettings, restoreConversation, saveEvaluation } = useSSE()
+  const {
+    state,
+    sendMessage,
+    approve,
+    reset,
+    startNewConversation,
+    restoreVersion,
+    updateSettings,
+    updateConversationSettings,
+    restoreConversation,
+    saveEvaluation,
+  } = useSSE()
   const { theme, setTheme } = useTheme()
   const { locale, setLocale, t } = useI18n()
   const [managerPortalRequest] = useState(() => {
@@ -215,6 +226,7 @@ function App() {
     || Boolean(state.conversationId)
     || state.userMessages.length > 0
     || state.versions.length > 0
+  const workIqLocked = hasActiveConversation
   const requiresNewConversationConfirmation = state.status === 'running'
     || state.status === 'approval'
     || state.managerApprovalPolling
@@ -461,7 +473,15 @@ function App() {
                 <p className="mt-1 text-xs text-[var(--text-muted)]">{t('panel.composer.subtitle')}</p>
               </div>
             </div>
-            <SettingsPanel settings={state.settings} onChange={updateSettings} t={t} />
+            <SettingsPanel
+              settings={state.settings}
+              conversationSettings={state.conversationSettings}
+              workIqStatus={state.workIq.status}
+              onChange={updateSettings}
+              onConversationSettingsChange={updateConversationSettings}
+              workIqLocked={workIqLocked}
+              t={t}
+            />
             {state.status === 'approval' ? (
               <div className="rounded-[20px] border border-[var(--warning-border)] bg-[var(--warning-surface)] px-4 py-3 text-sm text-[var(--warning-text)]">
                 {isManagerApproval
@@ -613,6 +633,7 @@ function App() {
                       versions={state.versions}
                       evaluations={evaluationSnapshot?.evaluations ?? currentSnapshot?.evaluations ?? []}
                       isLatestVersion={Boolean(evaluationVersion) && evaluationVersion === latestCommittedVersion}
+                      useDelegatedAuth={state.workIq.workIqEnabled}
                       onEvaluationRecorded={saveEvaluation}
                       t={t}
                       onRefine={state.status !== 'approval'

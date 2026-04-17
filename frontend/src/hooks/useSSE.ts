@@ -3,8 +3,16 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DEFAULT_SETTINGS, type ModelSettings } from '../components/SettingsPanel'
+import {
+  DEFAULT_CONVERSATION_SETTINGS,
+  DEFAULT_SETTINGS,
+  type ConversationSettings,
+  type ModelSettings,
+  type WorkIqSourceScope,
+  type WorkIqUiStatus,
+} from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
+import { getDelegatedApiHeaders } from '../lib/api-auth'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
 
@@ -27,6 +35,7 @@ export interface ToolEvent {
   source?: string
   fallback?: string
   version?: number
+  source_scope?: WorkIqSourceScope[]
 }
 
 export interface TextContent {
@@ -103,6 +112,11 @@ export interface ConversationDocument {
   metadata?: Record<string, unknown>
 }
 
+export interface WorkIqState extends ConversationSettings {
+  status: WorkIqUiStatus
+  rawStatus?: string
+}
+
 export interface PipelineState {
   status: PipelineStatus
   conversationId: string | null
@@ -120,6 +134,9 @@ export interface PipelineState {
   currentVersion: number
   pendingVersion: PendingVersion | null
   settings: ModelSettings
+  conversationSettings: ConversationSettings
+  draftConversationSettings: ConversationSettings
+  workIq: WorkIqState
   userMessages: string[]
 }
 
@@ -146,6 +163,13 @@ const initialState: PipelineState = {
   currentVersion: 0,
   pendingVersion: null,
   settings: { ...DEFAULT_SETTINGS },
+  conversationSettings: { ...DEFAULT_CONVERSATION_SETTINGS, workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope] },
+  draftConversationSettings: { ...DEFAULT_CONVERSATION_SETTINGS, workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope] },
+  workIq: {
+    ...DEFAULT_CONVERSATION_SETTINGS,
+    workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+    status: 'off',
+  },
   userMessages: [],
 }
 
@@ -158,7 +182,178 @@ function cloneImages(images: ImageContent[]): ImageContent[] {
 }
 
 function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
-  return toolEvents.map(item => ({ ...item }))
+  return toolEvents.map(item => ({
+    ...item,
+    source_scope: item.source_scope ? [...item.source_scope] : undefined,
+  }))
+}
+
+function cloneConversationSettings(settings: ConversationSettings): ConversationSettings {
+  return {
+    workIqEnabled: settings.workIqEnabled,
+    workIqSourceScope: [...settings.workIqSourceScope],
+  }
+}
+
+function createWorkIqState(
+  settings: ConversationSettings,
+  status: WorkIqUiStatus = settings.workIqEnabled ? 'ready' : 'off',
+  rawStatus?: string,
+): WorkIqState {
+  return {
+    ...cloneConversationSettings(settings),
+    status,
+    rawStatus,
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function toBoolean(value: unknown): boolean | null {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (normalized === 'true') return true
+    if (normalized === 'false') return false
+  }
+  return null
+}
+
+function normalizeWorkIqSource(value: unknown): WorkIqSourceScope | null {
+  const normalized = String(value || '').trim().toLowerCase().replace(/[\s/-]+/g, '_')
+  switch (normalized) {
+    case 'meeting_notes':
+    case 'meetings':
+    case 'meeting':
+      return 'meeting_notes'
+    case 'emails':
+    case 'email':
+      return 'emails'
+    case 'teams_chats':
+    case 'teams_chat':
+    case 'teams':
+    case 'chats':
+      return 'teams_chats'
+    case 'documents_notes':
+    case 'documents':
+    case 'docs':
+    case 'notes':
+    case 'documents_and_notes':
+      return 'documents_notes'
+    default:
+      return null
+  }
+}
+
+function parseWorkIqSourceScope(raw: unknown): WorkIqSourceScope[] {
+  const sourceList = Array.isArray(raw)
+    ? raw
+    : isRecord(raw) && Array.isArray(raw.source_scope)
+      ? raw.source_scope
+      : []
+  const normalized = sourceList
+    .map(normalizeWorkIqSource)
+    .filter((value): value is WorkIqSourceScope => value !== null)
+
+  if (normalized.length === 0) {
+    return [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope]
+  }
+
+  return [...new Set(normalized)]
+}
+
+function normalizeWorkIqStatus(
+  rawStatus: unknown,
+  enabled: boolean,
+  fallback: WorkIqUiStatus = enabled ? 'ready' : 'off',
+): WorkIqUiStatus {
+  const normalized = String(rawStatus || '').trim().toLowerCase()
+  switch (normalized) {
+    case 'completed':
+    case 'ok':
+    case 'enabled':
+      return 'enabled'
+    case 'auth_required':
+    case 'sign_in_required':
+      return 'sign_in_required'
+    case 'consent_required':
+      return 'consent_required'
+    case 'unavailable':
+    case 'timeout':
+    case 'identity_mismatch':
+    case 'failed':
+    case 'error':
+      return 'unavailable'
+    case 'ready':
+      return enabled ? 'ready' : 'off'
+    default:
+      return fallback
+  }
+}
+
+function getWorkIqStateFromMetadata(metadata: Record<string, unknown>): WorkIqState {
+  const conversationSettings = isRecord(metadata.conversation_settings) ? metadata.conversation_settings : null
+  const nestedWorkIq = conversationSettings && isRecord(conversationSettings.work_iq) ? conversationSettings.work_iq : null
+  const workIqSession = isRecord(metadata.work_iq_session) ? metadata.work_iq_session : null
+  const briefSourceMetadata = workIqSession && isRecord(workIqSession.brief_source_metadata)
+    ? workIqSession.brief_source_metadata
+    : null
+  const enabled = (
+    toBoolean(workIqSession?.enabled)
+    ?? toBoolean(nestedWorkIq?.enabled)
+    ?? toBoolean(conversationSettings?.work_iq_enabled)
+    ?? toBoolean(metadata.work_iq_enabled)
+    ?? false
+  )
+  const sourceScope = parseWorkIqSourceScope(
+    workIqSession?.source_scope
+    ?? nestedWorkIq?.source_scope
+    ?? conversationSettings?.source_scope
+    ?? conversationSettings?.work_iq_source_scope
+    ?? metadata.work_iq_source_scope
+    ?? briefSourceMetadata?.source_scope
+    ?? briefSourceMetadata?.sources,
+  )
+  const rawStatus = String(
+    workIqSession?.status
+    ?? workIqSession?.status_code
+    ?? workIqSession?.warning_code
+    ?? nestedWorkIq?.status
+    ?? conversationSettings?.work_iq_status
+    ?? metadata.work_iq_status
+    ?? '',
+  ).trim()
+
+  return createWorkIqState(
+    {
+      workIqEnabled: enabled,
+      workIqSourceScope: sourceScope,
+    },
+    normalizeWorkIqStatus(rawStatus, enabled),
+    rawStatus || undefined,
+  )
+}
+
+function applyWorkIqToolEvent(current: WorkIqState, event: ToolEvent): WorkIqState {
+  if (event.source !== 'workiq') {
+    return current
+  }
+
+  const nextSettings: ConversationSettings = {
+    workIqEnabled: true,
+    workIqSourceScope: event.source_scope && event.source_scope.length > 0
+      ? [...event.source_scope]
+      : current.workIqSourceScope,
+  }
+  const rawStatus = String(event.status || '').trim()
+  const fallbackStatus = current.workIqEnabled ? current.status : 'ready'
+  const nextStatus = rawStatus.toLowerCase() === 'running'
+    ? fallbackStatus
+    : normalizeWorkIqStatus(rawStatus, true, fallbackStatus)
+
+  return createWorkIqState(nextSettings, nextStatus, rawStatus || current.rawStatus)
 }
 
 function resolveToolEventVersion(state: PipelineState): number {
@@ -360,6 +555,7 @@ export function buildRestoredPipelineState(
   const pendingEvaluations = new Map<number, EvaluationRecord[]>()
   const metadata = doc.metadata && typeof doc.metadata === 'object' ? doc.metadata : {}
   const backgroundUpdatesPending = metadata.background_updates_pending === true
+  let workIq = getWorkIqStateFromMetadata(metadata)
   let activeVersion = 1
 
   for (const event of doc.messages ?? []) {
@@ -422,8 +618,10 @@ export function buildRestoredPipelineState(
             source: data.source ? String(data.source) : undefined,
             fallback: data.fallback ? String(data.fallback) : undefined,
             version: resolvedVersion,
+            source_scope: Array.isArray(data.source_scope) ? parseWorkIqSourceScope(data.source_scope) : undefined,
           },
         ].slice(-MAX_TOOL_EVENTS)
+        workIq = applyWorkIqToolEvent(workIq, toolEvents[toolEvents.length - 1])
         if (isBackgroundUpdate(data) && versions.length > 0) {
           versions[versions.length - 1] = createArtifactSnapshot({
             textContents,
@@ -591,6 +789,11 @@ export function buildRestoredPipelineState(
     currentVersion: versions.length,
     pendingVersion,
     settings: { ...settings },
+    conversationSettings: cloneConversationSettings({
+      workIqEnabled: workIq.workIqEnabled,
+      workIqSourceScope: workIq.workIqSourceScope,
+    }),
+    workIq,
     userMessages: getRestoredUserMessages(doc),
   }
 }
@@ -744,14 +947,26 @@ export function useSSE() {
         const requestedVersion = Number((data as ToolEvent).version || 0)
         const toolEvent = {
           ...(data as ToolEvent),
+          source_scope: Array.isArray((data as { source_scope?: unknown[] }).source_scope)
+            ? parseWorkIqSourceScope((data as { source_scope?: unknown[] }).source_scope)
+            : undefined,
           version: Number.isFinite(requestedVersion) && requestedVersion > 0
             ? requestedVersion
             : resolveToolEventVersion(prev),
         }
         const toolEvents = [...prev.toolEvents, toolEvent].slice(-MAX_TOOL_EVENTS)
+        const workIq = applyWorkIqToolEvent(prev.workIq, toolEvent)
+        const conversationSettings = workIq.workIqEnabled
+          ? {
+              workIqEnabled: workIq.workIqEnabled,
+              workIqSourceScope: [...workIq.workIqSourceScope],
+            }
+          : prev.conversationSettings
         return {
           ...prev,
           toolEvents,
+          conversationSettings,
+          workIq,
           versions: syncLatestCompletedSnapshot(prev, {
             textContents: prev.textContents,
             images: prev.images,
@@ -875,6 +1090,18 @@ export function useSSE() {
     activeRequestIdRef.current = requestId
     activeRestoreRequestIdRef.current += 1
     const existingConversationId = conversationIdRef.current
+    const currentSettings = stateRef.current.settings
+    const currentDraftConversationSettings = stateRef.current.draftConversationSettings
+    const nextConversationSettings = existingConversationId
+      ? stateRef.current.conversationSettings
+      : currentDraftConversationSettings
+    const nextWorkIq = existingConversationId
+      ? createWorkIqState(
+          stateRef.current.conversationSettings,
+          stateRef.current.workIq.status,
+          stateRef.current.workIq.rawStatus,
+        )
+      : createWorkIqState(nextConversationSettings)
     setState(prev => ({
       ...(() => {
         const synced = ensureDraftSnapshot(syncToLatestSnapshot(prev))
@@ -887,6 +1114,8 @@ export function useSSE() {
           error: null,
           approvalRequest: null,
           agentProgress: null,
+          conversationSettings: cloneConversationSettings(nextConversationSettings),
+          workIq: nextWorkIq,
           pendingVersion: synced.versions.length > 0
             ? {
                 version: synced.versions.length + 1,
@@ -900,7 +1129,6 @@ export function useSSE() {
       })(),
     }))
     const handlers = createHandlers(requestId)
-    const currentSettings = stateRef.current.settings
     try {
       await connectSSE(
         message,
@@ -908,6 +1136,7 @@ export function useSSE() {
         existingConversationId || undefined,
         controller.signal,
         currentSettings,
+        nextConversationSettings,
         options,
       )
     } finally {
@@ -942,7 +1171,13 @@ export function useSSE() {
     }))
     const handlers = createHandlers(requestId)
     try {
-      await sendApproval(threadId, normalizedResponse, handlers, controller.signal)
+      await sendApproval(
+        threadId,
+        normalizedResponse,
+        handlers,
+        controller.signal,
+        stateRef.current.workIq.workIqEnabled,
+      )
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
@@ -955,7 +1190,13 @@ export function useSSE() {
     abortControllerRef.current = null
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
-    setState(initialState)
+    setState({
+      ...initialState,
+      settings: { ...DEFAULT_SETTINGS },
+      conversationSettings: cloneConversationSettings(DEFAULT_CONVERSATION_SETTINGS),
+      draftConversationSettings: cloneConversationSettings(DEFAULT_CONVERSATION_SETTINGS),
+      workIq: createWorkIqState(DEFAULT_CONVERSATION_SETTINGS, 'off'),
+    })
     conversationIdRef.current = null
     conversationEtagsRef.current = {}
     delete localEvaluationCacheRef.current[DRAFT_EVALUATION_CACHE_KEY]
@@ -967,9 +1208,13 @@ export function useSSE() {
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
     const preservedSettings = { ...stateRef.current.settings }
+    const preservedConversationSettings = cloneConversationSettings(stateRef.current.draftConversationSettings)
     setState({
       ...initialState,
       settings: preservedSettings,
+      conversationSettings: cloneConversationSettings(preservedConversationSettings),
+      draftConversationSettings: cloneConversationSettings(preservedConversationSettings),
+      workIq: createWorkIqState(preservedConversationSettings),
     })
     conversationIdRef.current = null
     conversationEtagsRef.current = {}
@@ -997,6 +1242,26 @@ export function useSSE() {
 
   const updateSettings = useCallback((settings: ModelSettings) => {
     setState(prev => ({ ...prev, settings }))
+  }, [])
+
+  const updateConversationSettings = useCallback((conversationSettings: ConversationSettings) => {
+    setState(prev => {
+      const isLocked = prev.status !== 'idle'
+        || Boolean(prev.conversationId)
+        || prev.userMessages.length > 0
+        || prev.versions.length > 0
+
+      if (isLocked) {
+        return prev
+      }
+
+      return {
+        ...prev,
+        conversationSettings: cloneConversationSettings(conversationSettings),
+        draftConversationSettings: cloneConversationSettings(conversationSettings),
+        workIq: createWorkIqState(conversationSettings),
+      }
+    })
   }, [])
 
   const saveEvaluation = useCallback((record: EvaluationRecord) => {
@@ -1029,6 +1294,9 @@ export function useSSE() {
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
       }
+      if (previousState.workIq.workIqEnabled) {
+        Object.assign(headers, await getDelegatedApiHeaders())
+      }
       const knownEtag = isCurrentConversation ? conversationEtagsRef.current[conversationId] : undefined
       if (knownEtag) {
         headers['If-None-Match'] = knownEtag
@@ -1060,7 +1328,12 @@ export function useSSE() {
         getCachedEvaluationRecords(conversationId),
       )
 
-      setState(preserveViewedCommittedVersion(previousState, restoredState, passive))
+      const nextState = preserveViewedCommittedVersion(previousState, {
+        ...restoredState,
+        draftConversationSettings: cloneConversationSettings(previousState.draftConversationSettings),
+      }, passive)
+
+      setState(nextState)
 
       conversationIdRef.current = conversationId
     } catch (err) {
@@ -1068,5 +1341,16 @@ export function useSSE() {
     }
   }, [getCachedEvaluationRecords])
 
-  return { state, sendMessage, approve, reset, startNewConversation, restoreVersion, updateSettings, restoreConversation, saveEvaluation }
+  return {
+    state,
+    sendMessage,
+    approve,
+    reset,
+    startNewConversation,
+    restoreVersion,
+    updateSettings,
+    updateConversationSettings,
+    restoreConversation,
+    saveEvaluation,
+  }
 }

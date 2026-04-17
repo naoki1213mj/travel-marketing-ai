@@ -1,5 +1,8 @@
 """scripts.postprovision のテスト。"""
 
+import json
+import subprocess
+
 from scripts import postprovision as postprovision_module
 
 
@@ -231,3 +234,179 @@ def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:
         "readiness_delay_seconds": postprovision_module._IMPROVEMENT_MCP_READY_DELAY_SECONDS,
         "token": "prefetched-token",
     }
+
+
+def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_identity(monkeypatch) -> None:
+    """Function App の storage 認証を system assigned managed identity へ切り替える"""
+    commands: list[list[str]] = []
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+
+        if command[:4] == ["az", "functionapp", "identity", "assign"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"principalId": "principal-1"}), stderr="")
+        if command[:4] == ["az", "storage", "account", "show"] and "--query" in command:
+            return subprocess.CompletedProcess(command, 0, stdout="/storage/id", stderr="")
+        if command[:4] == ["az", "role", "assignment", "list"]:
+            return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+        if command[:4] == ["az", "role", "assignment", "create"]:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"id": "role-id"}), stderr="")
+        if command[:4] == ["az", "functionapp", "deployment", "config"] and "show" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=json.dumps(
+                    {
+                        "storage": {
+                            "value": "https://storage.blob.core.windows.net/app-package-funcmcpabc123-1234567"
+                        }
+                    }
+                ),
+                stderr="",
+            )
+        if command[:4] == ["az", "functionapp", "config", "appsettings"]:
+            return subprocess.CompletedProcess(command, 0, stdout="[]", stderr="")
+        if command[:4] == ["az", "functionapp", "deployment", "config"] and "set" in command:
+            return subprocess.CompletedProcess(command, 0, stdout=json.dumps({"ok": True}), stderr="")
+
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+    monkeypatch.setattr(postprovision_module.time, "sleep", lambda _seconds: None)
+
+    result = postprovision_module.ensure_improvement_mcp_managed_identity_storage(
+        resource_group="rg-dev",
+        function_app_name="func-mcp-abc123",
+        storage_account_name="stfnabc123",
+    )
+
+    assert result is True
+    assert any(
+        command[:4] == ["az", "functionapp", "identity", "assign"] and "--name" in command and "func-mcp-abc123" in command
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["az", "role", "assignment", "create"] and postprovision_module._STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE in command
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["az", "functionapp", "deployment", "config"] and "set" in command and "SystemAssignedIdentity" in command
+        for command in commands
+    )
+    assert any(
+        command[:4] == ["az", "functionapp", "config", "appsettings"] and "AzureWebJobsStorage__accountName=stfnabc123" in command
+        for command in commands
+    )
+
+
+def test_create_voice_agent_creates_agent_when_missing(monkeypatch) -> None:
+    """Voice Agent が未作成なら SDK で create_version を呼ぶ"""
+
+    class FakeNotFoundError(Exception):
+        """ResourceNotFoundError の代替。"""
+
+    class _FakeAgents:
+        def __init__(self) -> None:
+            self.create_calls: list[dict[str, object]] = []
+
+        def get(self, *, agent_name: str):
+            assert agent_name == "travel-voice-orchestrator"
+            raise FakeNotFoundError("missing")
+
+        def create_version(self, *, agent_name: str, definition: dict[str, str], metadata: dict[str, str]):
+            self.create_calls.append(
+                {
+                    "agent_name": agent_name,
+                    "definition": definition,
+                    "metadata": metadata,
+                }
+            )
+            return {"name": agent_name, "version": "1"}
+
+    class _FakeProjectClient:
+        def __init__(self) -> None:
+            self.agents = _FakeAgents()
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    fake_client = _FakeProjectClient()
+
+    monkeypatch.setattr(postprovision_module, "ResourceNotFoundError", FakeNotFoundError)
+    monkeypatch.setattr(postprovision_module, "AIProjectClient", lambda endpoint, credential: fake_client)
+    monkeypatch.setattr(postprovision_module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(
+        postprovision_module,
+        "PromptAgentDefinition",
+        lambda model, instructions: {"model": model, "instructions": instructions},
+    )
+    monkeypatch.delenv("VOICE_AGENT_NAME", raising=False)
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+
+    result = postprovision_module.create_voice_agent(
+        project_endpoint="https://example.services.ai.azure.com/api/projects/demo",
+        subscription_id="sub-id",
+        rg="rg-dev",
+    )
+
+    assert result is True
+    assert fake_client.closed is True
+    assert fake_client.agents.create_calls == [
+        {
+            "agent_name": "travel-voice-orchestrator",
+            "definition": {
+                "model": "gpt-5-4-mini",
+                "instructions": (
+                    "あなたは旅行マーケティングのアシスタントです。\n"
+                    "ユーザーの音声指示を聞き取り、旅行プランの企画を支援します。\n"
+                    "ユーザーが旅行プランの企画を依頼したら、具体的な旅行先・季節・ターゲット・予算を確認し、\n"
+                    "企画の方向性を提案してください。\n"
+                    "日本語で応答してください。"
+                ),
+            },
+            "metadata": fake_client.agents.create_calls[0]["metadata"],
+        }
+    ]
+    metadata = fake_client.agents.create_calls[0]["metadata"]
+    assert metadata["microsoft.voice-live.configuration"]
+    assert "semantic_detection_v1_multilingual" in "".join(metadata.values())
+
+
+def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:
+    """既存 Voice Agent があれば新規作成しない"""
+
+    class _FakeAgents:
+        def __init__(self) -> None:
+            self.create_called = False
+
+        def get(self, *, agent_name: str):
+            assert agent_name == "travel-voice-orchestrator"
+            return {"name": agent_name}
+
+        def create_version(self, **kwargs):
+            del kwargs
+            self.create_called = True
+            raise AssertionError("create_version should not be called")
+
+    class _FakeProjectClient:
+        def __init__(self) -> None:
+            self.agents = _FakeAgents()
+
+        def close(self) -> None:
+            return None
+
+    fake_client = _FakeProjectClient()
+
+    monkeypatch.setattr(postprovision_module, "AIProjectClient", lambda endpoint, credential: fake_client)
+    monkeypatch.setattr(postprovision_module, "DefaultAzureCredential", lambda: object())
+
+    result = postprovision_module.create_voice_agent(
+        project_endpoint="https://example.services.ai.azure.com/api/projects/demo",
+        subscription_id="sub-id",
+        rg="rg-dev",
+    )
+
+    assert result is True
+    assert fake_client.agents.create_called is False
