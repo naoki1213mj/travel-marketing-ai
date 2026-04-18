@@ -107,37 +107,37 @@ jobs:
             -o json)
 
           PATCH_BODY=$(CURRENT_SECRETS="$CURRENT_SECRETS" CALLBACK_URL="$CALLBACK_URL" python - <<'PY'
-            import json
-            import os
+          import json
+          import os
 
-            raw_secrets = os.environ.get("CURRENT_SECRETS", "")
-            callback_url = os.environ["CALLBACK_URL"]
-            secrets = json.loads(raw_secrets) if raw_secrets else []
-            updated_secrets: list[dict[str, str]] = []
-            manager_secret_updated = False
+          raw_secrets = os.environ.get("CURRENT_SECRETS", "")
+          callback_url = os.environ["CALLBACK_URL"]
+          secrets = json.loads(raw_secrets) if raw_secrets else []
+          updated_secrets: list[dict[str, str]] = []
+          manager_secret_updated = False
 
-            for secret in secrets:
-                name = secret.get("name", "")
-                if not name:
-                    continue
-                if name == "manager-approval-trigger-url":
-                    updated_secrets.append({"name": name, "value": callback_url})
-                    manager_secret_updated = True
-                    continue
-                copied_secret = {"name": name}
-                if "value" in secret:
-                    copied_secret["value"] = secret["value"]
-                if "keyVaultUrl" in secret:
-                    copied_secret["keyVaultUrl"] = secret["keyVaultUrl"]
-                if "identity" in secret:
-                    copied_secret["identity"] = secret["identity"]
-                updated_secrets.append(copied_secret)
+          for secret in secrets:
+              name = secret.get("name", "")
+              if not name:
+                  continue
+              if name == "manager-approval-trigger-url":
+                  updated_secrets.append({"name": name, "value": callback_url})
+                  manager_secret_updated = True
+                  continue
+              copied_secret = {"name": name}
+              if "value" in secret:
+                  copied_secret["value"] = secret["value"]
+              if "keyVaultUrl" in secret:
+                  copied_secret["keyVaultUrl"] = secret["keyVaultUrl"]
+              if "identity" in secret:
+                  copied_secret["identity"] = secret["identity"]
+              updated_secrets.append(copied_secret)
 
-            if not manager_secret_updated:
-                updated_secrets.append({"name": "manager-approval-trigger-url", "value": callback_url})
+          if not manager_secret_updated:
+              updated_secrets.append({"name": "manager-approval-trigger-url", "value": callback_url})
 
-            print(json.dumps({"properties": {"configuration": {"secrets": updated_secrets}}}))
-            PY
+          print(json.dumps({"properties": {"configuration": {"secrets": updated_secrets}}}))
+          PY
           )
 
           CONTAINER_APP_ID=$(az containerapp show \
