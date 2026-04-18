@@ -97,20 +97,21 @@ azd deploy
 
 ### postprovision 後の手動作業
 
-- 現在の rebuilt `workiq-dev` tenant では **Search/KB**, **Work IQ admin consent**, **gpt-4.1 / gpt-5.4 deployments**, **別 East US MAI endpoint** までは完了済みです
+- 現在の rebuilt `workiq-dev` tenant では **Search/KB**, **Work IQ admin consent**, **gpt-4.1 / gpt-5.4 deployments**, **別 East US MAI endpoint**, **Fabric rebuild**, **manager approval workflow**, **post-approval Teams channel notification** までは完了済みです
 - 新しい tenant を一から立ち上げる場合は、以下の項目が引き続き手動です
 - Azure AI Search の作成と `regulations-index` の投入
 - Foundry → AI Search 接続の追加
 - `FABRIC_DATA_AGENT_URL` / `SPEECH_SERVICE_ENDPOINT` 等の設定
 - Work IQ 用 SPA app registration の Graph delegated permissions 追加 + admin consent
 - Fabric Lakehouse / SQL endpoint / Fabric Data Agent の新テナント側再作成
-- Logic Apps の Teams / SharePoint connector を新テナントで再接続
+- SharePoint 保存経路の復旧（preferred: site permission grant to Logic App MI、fallback: SharePoint connector 再認証）
+- Logic Apps の Teams / SharePoint connector や trigger URL が変わる場合の再接続 / 再設定
 
 Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Graph Copilot Chat API** を per-user delegated token で呼び出します。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
 
-### Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-17)
+### Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-18)
 
 | Area | State |
 | --- | --- |
@@ -118,7 +119,9 @@ Work IQ ランタイム連携は専用 MCP endpoint ではなく **Microsoft Gra
 | Work IQ | SPA redirect URIs, Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
 | Text models | `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` exist on the main East US 2 Foundry account |
 | MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
-| Remaining manual work | Fabric capacity / Lakehouse / SQL endpoint rebuild, plus Teams / SharePoint connections and the manager-approval workflow |
+| Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored, and both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` are wired into the Container App |
+| Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel |
+| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback |
 
 ### Improvement MCP の追加デプロイ
 
@@ -147,12 +150,14 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `IMAGE_PROJECT_ENDPOINT_MAI` | 任意 | 別の MAI 対応 AI Services endpoint |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
-| `LOGIC_APP_CALLBACK_URL` | 任意 | 承認後アクション |
-| `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認通知 workflow |
+| `LOGIC_APP_CALLBACK_URL` | 任意 | 承認後アクション workflow。signed URL なので secret として扱う |
+| `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認通知 workflow。signed URL なので secret として扱う |
 | `SERVE_STATIC` | 任意 | コンテナ内フロントエンド配信 (`true`) |
 | `API_KEY` | 任意 | API エンドポイント保護 |
 
 全項目は [.env.example](../.env.example) を参照してください。
+
+> Logic App の signed trigger URL は `&sp=...&sv=...&sig=...` を含みます。Container App secret や `azd env` へ反映するときは **URL 全体を 1 つの値として引用**し、途中で切れないようにしてください。
 
 ## 7. デプロイ後の確認
 
@@ -190,4 +195,6 @@ Trivy, Gitleaks, npm audit, pip-audit
 | 画像が透明 PNG | `IMAGE_PROJECT_ENDPOINT_MAI` と別 East US MAI account の RBAC を確認。`MAI-Image-2` quota が無い subscription では `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認 |
 | 上司承認通知が飛ばない | `MANAGER_APPROVAL_TRIGGER_URL` を確認。未設定でも承認ページ自体は動作 |
+| 承認後 Teams 通知が飛ばない | `LOGIC_APP_CALLBACK_URL`、`logic-wmbvhdhcsuyb2` の run history、Teams connection `teams-1`、対象 Team / channel を確認 |
+| SharePoint に保存されない | target site への permission grant か `sharepointonline` connector の認証状態を確認 |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |

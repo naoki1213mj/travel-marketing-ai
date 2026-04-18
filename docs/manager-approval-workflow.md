@@ -6,7 +6,7 @@
 
 現在の組み込み上司承認ページは、今回承認対象の企画書と、直前までの確定済み企画書を横並びで比較表示できます。通知 workflow 側は `manager_approval_url` を上司へ届ければ十分で、比較 UI 自体はアプリ側が担当します。
 
-2026-04-03 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。
+2026-04-18 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。rebuilt `workiq-dev` tenant では `teams-1` が Connected で、`logic-manager-approval-wmbvhdhcsuyb2` が live です。
 
 ## 1. FastAPI から workflow へ送る request
 
@@ -173,9 +173,9 @@ azd env set MANAGER_APPROVAL_TRIGGER_URL https://<teams-enabled-manager-approval
 
 GitHub Actions から本番へ流す場合は、同じ値を repository または environment secret の `MANAGER_APPROVAL_TRIGGER_URL` に登録してください。
 
-## 7.3 いまユーザー側でやってほしいこと
+## 7.3 新しい tenant で Teams 接続を作り直す場合
 
-`Microsoft.Web/connections/teams` が未接続の環境では、ここだけは tenant 側の対話認証が必要です。最短で必要なのは次の作業です。
+rebuilt `workiq-dev` tenant では `teams-1` がすでに Connected なので、この節の作業は不要です。別 tenant を作り直す場合や、Teams connection が切れた場合だけ tenant 側の対話認証が必要です。最短で必要なのは次の作業です。
 
 1. Teams 管理者または利用可能なアカウントで、Workflows アプリが Teams で許可されていることを確認する。
 2. Logic Apps Standard または Power Automate の designer で、Microsoft Teams connector のアクションを 1 つ追加する。

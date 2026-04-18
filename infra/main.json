@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "5572760674031436582"
+      "templateHash": "7703486287818194448"
     }
   },
   "parameters": {
@@ -44,6 +44,34 @@
       "defaultValue": "",
       "metadata": {
         "description": "上司承認 workflow の HTTP trigger URL（Teams 対応 workflow を手動構成して設定）"
+      }
+    },
+    "postApprovalTeamsConnectionName": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "承認後通知に使う Microsoft Teams connection resource 名（例: teams-1）。空なら Teams チャネル通知は無効"
+      }
+    },
+    "postApprovalTeamsTeamId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "承認後通知先の Team ID。空なら Teams チャネル通知は無効"
+      }
+    },
+    "postApprovalTeamsChannelId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "承認後通知先の Channel ID。空なら Teams チャネル通知は無効"
+      }
+    },
+    "postApprovalSharePointSiteId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "承認後に成果物を保存する SharePoint site ID。空なら SharePoint 保存は無効"
       }
     },
     "imageProjectEndpointMai": {
@@ -1678,6 +1706,18 @@
           "location": {
             "value": "[parameters('location')]"
           },
+          "teamsConnectionName": {
+            "value": "[parameters('postApprovalTeamsConnectionName')]"
+          },
+          "teamsTargetTeamId": {
+            "value": "[parameters('postApprovalTeamsTeamId')]"
+          },
+          "teamsTargetChannelId": {
+            "value": "[parameters('postApprovalTeamsChannelId')]"
+          },
+          "sharePointSiteId": {
+            "value": "[parameters('postApprovalSharePointSiteId')]"
+          },
           "tags": {
             "value": "[variables('tags')]"
           }
@@ -1690,7 +1730,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.41.2.15936",
-              "templateHash": "18326266279728776534"
+              "templateHash": "13748695699157978655"
             }
           },
           "parameters": {
@@ -1700,9 +1740,491 @@
             "location": {
               "type": "string"
             },
+            "teamsConnectionName": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "承認後通知に使う Microsoft Teams connection resource 名。空なら Teams 通知は無効"
+              }
+            },
+            "teamsTargetTeamId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "承認後通知先の Team ID。空なら Teams 通知は無効"
+              }
+            },
+            "teamsTargetChannelId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "承認後通知先の Channel ID。空なら Teams 通知は無効"
+              }
+            },
+            "sharePointSiteId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "成果物保存先 SharePoint site ID。空なら SharePoint 保存は無効"
+              }
+            },
             "tags": {
               "type": "object",
               "defaultValue": {}
+            }
+          },
+          "variables": {
+            "teamsEnabled": "[and(and(not(empty(parameters('teamsConnectionName'))), not(empty(parameters('teamsTargetTeamId')))), not(empty(parameters('teamsTargetChannelId'))))]",
+            "sharePointEnabled": "[not(empty(parameters('sharePointSiteId')))]",
+            "teamsConnectionId": "[if(variables('teamsEnabled'), resourceId('Microsoft.Web/connections', parameters('teamsConnectionName')), '')]",
+            "teamsManagedApiId": "[if(variables('teamsEnabled'), subscriptionResourceId('Microsoft.Web/locations/managedApis', parameters('location'), 'teams'), '')]",
+            "requestSchema": {
+              "type": "object",
+              "properties": {
+                "request_type": {
+                  "type": "string"
+                },
+                "plan_title": {
+                  "type": "string"
+                },
+                "plan_markdown": {
+                  "type": "string"
+                },
+                "brochure_html": {
+                  "type": "string"
+                },
+                "conversation_id": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "request_type",
+                "conversation_id"
+              ]
+            },
+            "planFileNameExpression": "@{concat('travel-marketing-ai-', formatDateTime(utcNow(),'yyyyMMdd-HHmmss'), '-', triggerBody()?['conversation_id'], '-plan.md')}",
+            "brochureFileNameExpression": "@{concat('travel-marketing-ai-', formatDateTime(utcNow(),'yyyyMMdd-HHmmss'), '-', triggerBody()?['conversation_id'], '-brochure.html')}",
+            "planUploadUriTemplate": "https://graph.microsoft.com/v1.0/sites/__SITE_ID__/drive/root:/@{outputs('Compose_plan_file_name')}:/content",
+            "brochureUploadUriTemplate": "https://graph.microsoft.com/v1.0/sites/__SITE_ID__/drive/root:/@{outputs('Compose_brochure_file_name')}:/content",
+            "teamsChannelMessagePath": "/beta/teams/conversation/message/poster/User/location/Channel",
+            "teamsConnectionReferenceTemplate": "@parameters('$connections')['__CONNECTION_NAME__']['connectionId']",
+            "planUploadUri": "[replace(variables('planUploadUriTemplate'), '__SITE_ID__', parameters('sharePointSiteId'))]",
+            "brochureUploadUri": "[replace(variables('brochureUploadUriTemplate'), '__SITE_ID__', parameters('sharePointSiteId'))]",
+            "teamsConnectionReference": "[replace(variables('teamsConnectionReferenceTemplate'), '__CONNECTION_NAME__', parameters('teamsConnectionName'))]",
+            "stubDefinition": {
+              "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+              "contentVersion": "1.0.0.0",
+              "triggers": {
+                "manual": {
+                  "type": "Request",
+                  "kind": "Http",
+                  "inputs": {
+                    "schema": "[variables('requestSchema')]"
+                  }
+                }
+              },
+              "actions": {
+                "Response": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "inputs": {
+                    "statusCode": 202,
+                    "body": {
+                      "status": "accepted",
+                      "message": "Logic Apps workflow accepted the request"
+                    }
+                  }
+                }
+              }
+            },
+            "sharePointOnlyDefinition": {
+              "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+              "contentVersion": "1.0.0.0",
+              "triggers": {
+                "manual": {
+                  "type": "Request",
+                  "kind": "Http",
+                  "inputs": {
+                    "schema": "[variables('requestSchema')]"
+                  }
+                }
+              },
+              "actions": {
+                "Compose_plan_file_name": {
+                  "type": "Compose",
+                  "inputs": "[variables('planFileNameExpression')]",
+                  "runAfter": {}
+                },
+                "Compose_brochure_file_name": {
+                  "type": "Compose",
+                  "inputs": "[variables('brochureFileNameExpression')]",
+                  "runAfter": {}
+                },
+                "Upload_plan_markdown": {
+                  "type": "Http",
+                  "runAfter": {
+                    "Compose_plan_file_name": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "method": "PUT",
+                    "uri": "[variables('planUploadUri')]",
+                    "headers": {
+                      "Content-Type": "text/markdown; charset=utf-8"
+                    },
+                    "body": "@{triggerBody()?['plan_markdown']}",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://graph.microsoft.com"
+                    }
+                  }
+                },
+                "Upload_brochure_html": {
+                  "type": "Http",
+                  "runAfter": {
+                    "Compose_brochure_file_name": [
+                      "Succeeded"
+                    ],
+                    "Upload_plan_markdown": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "method": "PUT",
+                    "uri": "[variables('brochureUploadUri')]",
+                    "headers": {
+                      "Content-Type": "text/html; charset=utf-8"
+                    },
+                    "body": "@{triggerBody()?['brochure_html']}",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://graph.microsoft.com"
+                    }
+                  }
+                },
+                "Response_succeeded": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Upload_brochure_html": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 202,
+                    "body": {
+                      "status": "accepted",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}",
+                      "plan_file_url": "@{body('Upload_plan_markdown')?['webUrl']}",
+                      "brochure_file_url": "@{body('Upload_brochure_html')?['webUrl']}"
+                    }
+                  }
+                },
+                "Response_failed_upload_plan": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Upload_plan_markdown": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "upload_plan_markdown",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                },
+                "Response_failed_upload_brochure": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Upload_brochure_html": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "upload_brochure_html",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                }
+              }
+            },
+            "teamsOnlyDefinition": {
+              "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {
+                "$connections": {
+                  "type": "Object",
+                  "defaultValue": {}
+                }
+              },
+              "triggers": {
+                "manual": {
+                  "type": "Request",
+                  "kind": "Http",
+                  "inputs": {
+                    "schema": "[variables('requestSchema')]"
+                  }
+                }
+              },
+              "actions": {
+                "Compose_channel_message": {
+                  "type": "Compose",
+                  "inputs": "@{concat('<p>旅行プランの承認後処理が完了しました。<br />タイトル: ', triggerBody()?['plan_title'], '<br />Conversation ID: ', triggerBody()?['conversation_id'], '</p>')}",
+                  "runAfter": {}
+                },
+                "Post_channel_message": {
+                  "type": "ApiConnection",
+                  "runAfter": {
+                    "Compose_channel_message": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "[variables('teamsConnectionReference')]"
+                      }
+                    },
+                    "method": "post",
+                    "path": "[variables('teamsChannelMessagePath')]",
+                    "body": {
+                      "recipient": {
+                        "groupId": "[parameters('teamsTargetTeamId')]",
+                        "channelId": "[parameters('teamsTargetChannelId')]"
+                      },
+                      "messageBody": "@{outputs('Compose_channel_message')}"
+                    }
+                  }
+                },
+                "Response_succeeded": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Post_channel_message": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 202,
+                    "body": {
+                      "status": "accepted",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}",
+                      "target_team_id": "[parameters('teamsTargetTeamId')]",
+                      "target_channel_id": "[parameters('teamsTargetChannelId')]"
+                    }
+                  }
+                },
+                "Response_failed_post_message": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Post_channel_message": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "post_channel_message",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                }
+              }
+            },
+            "sharePointAndTeamsDefinition": {
+              "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {
+                "$connections": {
+                  "type": "Object",
+                  "defaultValue": {}
+                }
+              },
+              "triggers": {
+                "manual": {
+                  "type": "Request",
+                  "kind": "Http",
+                  "inputs": {
+                    "schema": "[variables('requestSchema')]"
+                  }
+                }
+              },
+              "actions": {
+                "Compose_plan_file_name": {
+                  "type": "Compose",
+                  "inputs": "[variables('planFileNameExpression')]",
+                  "runAfter": {}
+                },
+                "Compose_brochure_file_name": {
+                  "type": "Compose",
+                  "inputs": "[variables('brochureFileNameExpression')]",
+                  "runAfter": {}
+                },
+                "Upload_plan_markdown": {
+                  "type": "Http",
+                  "runAfter": {
+                    "Compose_plan_file_name": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "method": "PUT",
+                    "uri": "[variables('planUploadUri')]",
+                    "headers": {
+                      "Content-Type": "text/markdown; charset=utf-8"
+                    },
+                    "body": "@{triggerBody()?['plan_markdown']}",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://graph.microsoft.com"
+                    }
+                  }
+                },
+                "Upload_brochure_html": {
+                  "type": "Http",
+                  "runAfter": {
+                    "Compose_brochure_file_name": [
+                      "Succeeded"
+                    ],
+                    "Upload_plan_markdown": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "method": "PUT",
+                    "uri": "[variables('brochureUploadUri')]",
+                    "headers": {
+                      "Content-Type": "text/html; charset=utf-8"
+                    },
+                    "body": "@{triggerBody()?['brochure_html']}",
+                    "authentication": {
+                      "type": "ManagedServiceIdentity",
+                      "audience": "https://graph.microsoft.com"
+                    }
+                  }
+                },
+                "Compose_channel_message": {
+                  "type": "Compose",
+                  "runAfter": {
+                    "Upload_brochure_html": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": "@{concat('<p>旅行プランの承認後処理が完了しました。<br />タイトル: ', triggerBody()?['plan_title'], '<br />Conversation ID: ', triggerBody()?['conversation_id'], '<br />企画書: ', body('Upload_plan_markdown')?['webUrl'], '<br />ブローシャ: ', body('Upload_brochure_html')?['webUrl'], '</p>')}"
+                },
+                "Post_channel_message": {
+                  "type": "ApiConnection",
+                  "runAfter": {
+                    "Compose_channel_message": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "host": {
+                      "connection": {
+                        "name": "[variables('teamsConnectionReference')]"
+                      }
+                    },
+                    "method": "post",
+                    "path": "[variables('teamsChannelMessagePath')]",
+                    "body": {
+                      "recipient": {
+                        "groupId": "[parameters('teamsTargetTeamId')]",
+                        "channelId": "[parameters('teamsTargetChannelId')]"
+                      },
+                      "messageBody": "@{outputs('Compose_channel_message')}"
+                    }
+                  }
+                },
+                "Response_succeeded": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Post_channel_message": [
+                      "Succeeded"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 202,
+                    "body": {
+                      "status": "accepted",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}",
+                      "plan_file_url": "@{body('Upload_plan_markdown')?['webUrl']}",
+                      "brochure_file_url": "@{body('Upload_brochure_html')?['webUrl']}",
+                      "target_team_id": "[parameters('teamsTargetTeamId')]",
+                      "target_channel_id": "[parameters('teamsTargetChannelId')]"
+                    }
+                  }
+                },
+                "Response_failed_upload_plan": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Upload_plan_markdown": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "upload_plan_markdown",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                },
+                "Response_failed_upload_brochure": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Upload_brochure_html": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "upload_brochure_html",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                },
+                "Response_failed_post_message": {
+                  "type": "Response",
+                  "kind": "Http",
+                  "runAfter": {
+                    "Post_channel_message": [
+                      "Failed",
+                      "TimedOut"
+                    ]
+                  },
+                  "inputs": {
+                    "statusCode": 502,
+                    "body": {
+                      "status": "failed",
+                      "stage": "post_channel_message",
+                      "conversation_id": "@{triggerBody()?['conversation_id']}"
+                    }
+                  }
+                }
+              }
             }
           },
           "resources": {
@@ -1717,55 +2239,8 @@
               },
               "properties": {
                 "state": "Enabled",
-                "definition": {
-                  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
-                  "contentVersion": "1.0.0.0",
-                  "triggers": {
-                    "manual": {
-                      "type": "Request",
-                      "kind": "Http",
-                      "inputs": {
-                        "schema": {
-                          "type": "object",
-                          "properties": {
-                            "request_type": {
-                              "type": "string"
-                            },
-                            "plan_title": {
-                              "type": "string"
-                            },
-                            "plan_markdown": {
-                              "type": "string"
-                            },
-                            "brochure_html": {
-                              "type": "string"
-                            },
-                            "conversation_id": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "request_type",
-                            "conversation_id"
-                          ]
-                        }
-                      }
-                    }
-                  },
-                  "actions": {
-                    "Response": {
-                      "type": "Response",
-                      "kind": "Http",
-                      "inputs": {
-                        "statusCode": 202,
-                        "body": {
-                          "status": "accepted",
-                          "message": "Logic Apps workflow accepted the request"
-                        }
-                      }
-                    }
-                  }
-                }
+                "definition": "[if(and(variables('sharePointEnabled'), variables('teamsEnabled')), variables('sharePointAndTeamsDefinition'), if(variables('sharePointEnabled'), variables('sharePointOnlyDefinition'), if(variables('teamsEnabled'), variables('teamsOnlyDefinition'), variables('stubDefinition'))))]",
+                "parameters": "[if(variables('teamsEnabled'), createObject('$connections', createObject('value', createObject(format('{0}', parameters('teamsConnectionName')), createObject('connectionId', variables('teamsConnectionId'), 'connectionName', parameters('teamsConnectionName'), 'id', variables('teamsManagedApiId'))))), createObject())]"
               }
             },
             "manualTrigger": {

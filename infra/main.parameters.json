@@ -13,6 +13,18 @@
     },
     "managerApprovalTriggerUrl": {
       "value": "${MANAGER_APPROVAL_TRIGGER_URL=}"
+    },
+    "postApprovalTeamsConnectionName": {
+      "value": "${POST_APPROVAL_TEAMS_CONNECTION_NAME=}"
+    },
+    "postApprovalTeamsTeamId": {
+      "value": "${POST_APPROVAL_TEAMS_TEAM_ID=}"
+    },
+    "postApprovalTeamsChannelId": {
+      "value": "${POST_APPROVAL_TEAMS_CHANNEL_ID=}"
+    },
+    "postApprovalSharePointSiteId": {
+      "value": "${POST_APPROVAL_SHAREPOINT_SITE_ID=}"
     }
   }
 }

@@ -22,6 +22,18 @@ param voiceSpaClientId string = ''
 @description('上司承認 workflow の HTTP trigger URL（Teams 対応 workflow を手動構成して設定）')
 param managerApprovalTriggerUrl string = ''
 
+@description('承認後通知に使う Microsoft Teams connection resource 名（例: teams-1）。空なら Teams チャネル通知は無効')
+param postApprovalTeamsConnectionName string = ''
+
+@description('承認後通知先の Team ID。空なら Teams チャネル通知は無効')
+param postApprovalTeamsTeamId string = ''
+
+@description('承認後通知先の Channel ID。空なら Teams チャネル通知は無効')
+param postApprovalTeamsChannelId string = ''
+
+@description('承認後に成果物を保存する SharePoint site ID。空なら SharePoint 保存は無効')
+param postApprovalSharePointSiteId string = ''
+
 @description('MAI-Image-2 用の別 Azure AI / Foundry アカウント endpoint（任意）')
 param imageProjectEndpointMai string = ''
 
@@ -225,6 +237,10 @@ module logicApp 'modules/logic-app.bicep' = {
   params: {
     name: '${abbrs.logicApp}${resourceToken}'
     location: location
+    teamsConnectionName: postApprovalTeamsConnectionName
+    teamsTargetTeamId: postApprovalTeamsTeamId
+    teamsTargetChannelId: postApprovalTeamsChannelId
+    sharePointSiteId: postApprovalSharePointSiteId
     tags: tags
   }
 }
