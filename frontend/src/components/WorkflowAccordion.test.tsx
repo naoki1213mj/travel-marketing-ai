@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type { TextContent, ToolEvent } from '../hooks/useSSE'
+import type { ImageContent, TextContent, ToolEvent } from '../hooks/useSSE'
 import { WorkflowAccordion } from './WorkflowAccordion'
 
 const t = (key: string) => ({
@@ -22,7 +22,10 @@ const t = (key: string) => ({
   'round.initial': '初回実行',
   'round.improvement': '改善',
   'section.analysis': 'データ分析結果',
+  'section.images': '画像',
   'section.regulation': 'レギュレーションチェック',
+  'export.image': '画像をダウンロード',
+  'preview.unavailable': 'プレビューを利用できません。',
   'tool.search_sales_history': '販売履歴検索',
   'tool.web_search': 'Web 検索',
   'tool.check_ng_expressions': 'NG 表現チェック',
@@ -61,6 +64,14 @@ const toolEvents: ToolEvent[] = [
   { tool: 'generate_banner_image', status: 'completed', agent: 'brochure-gen-agent', version: 2 },
 ]
 
+const images: ImageContent[] = [
+  {
+    agent: 'data-search-agent',
+    alt: 'データ分析グラフ（Code Interpreter）',
+    url: 'data:image/png;base64,analysischart',
+  },
+]
+
 describe('WorkflowAccordion', () => {
   it('clears manual section toggles when the conversation changes', () => {
     const singleRoundContents: TextContent[] = textContents.slice(0, 4)
@@ -70,6 +81,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={singleRoundContents}
+        images={images}
         toolEvents={singleRoundToolEvents}
         metrics={null}
         error={null}
@@ -88,6 +100,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={singleRoundContents}
+        images={images}
         toolEvents={singleRoundToolEvents}
         metrics={null}
         error={null}
@@ -106,6 +119,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents}
+        images={images}
         toolEvents={toolEvents}
         metrics={null}
         error={null}
@@ -126,6 +140,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents}
+        images={images}
         toolEvents={toolEvents}
         metrics={null}
         error={null}
@@ -151,6 +166,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents}
+        images={images}
         toolEvents={mcpToolEvents}
         metrics={null}
         error={null}
@@ -174,6 +190,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents}
+        images={images}
         toolEvents={toolEvents}
         metrics={null}
         error={null}
@@ -192,6 +209,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents}
+        images={images}
         toolEvents={[]}
         metrics={null}
         error={null}
@@ -219,6 +237,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={contentsWithVideoTimeout}
+        images={images}
         toolEvents={toolEvents}
         metrics={null}
         error={null}
@@ -246,6 +265,7 @@ describe('WorkflowAccordion', () => {
       <WorkflowAccordion
         agentProgress={null}
         textContents={textContents.slice(0, 4)}
+        images={images}
         toolEvents={duplicatedToolEvents}
         metrics={null}
         error={null}
@@ -262,5 +282,34 @@ describe('WorkflowAccordion', () => {
     expect(container.querySelectorAll('[data-tool-name="check_travel_law_compliance"]')).toHaveLength(1)
     expect(container.querySelector('[data-tool-name="check_ng_expressions"][data-tool-status="completed"]')).not.toBeNull()
     expect(container.querySelector('[data-tool-name="check_travel_law_compliance"][data-tool-status="completed"]')).not.toBeNull()
+  })
+
+  it('renders actual analysis images and strips broken markdown image markup', () => {
+    const contentsWithBrokenImage: TextContent[] = [
+      {
+        agent: 'data-search-agent',
+        content: '分析本文です。\n\n![売上・評価の可視化](broken-chart.png)',
+      },
+      ...textContents.slice(1, 4),
+    ]
+
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={contentsWithBrokenImage}
+        images={images}
+        toolEvents={toolEvents.filter(event => event.version === 1)}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /データ分析/ }))
+
+    expect(container.querySelector('img[src="broken-chart.png"]')).toBeNull()
+    expect(container.querySelector('img[src^="data:image/png;base64,"]')).not.toBeNull()
   })
 })

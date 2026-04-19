@@ -142,6 +142,9 @@ function App() {
   const workflowTextContents = previewSnapshot
     ? previewSnapshot.textContents
     : state.textContents
+  const workflowImages = previewSnapshot
+    ? previewSnapshot.images
+    : state.images
   const workflowToolEvents = previewSnapshot
     ? previewSnapshot.toolEvents
     : state.toolEvents
@@ -447,6 +450,7 @@ function App() {
             <WorkflowAccordion
               agentProgress={workflowAgentProgress}
               textContents={workflowTextContents}
+              images={workflowImages}
               toolEvents={workflowToolEvents}
               metrics={workflowMetrics}
               error={workflowError}

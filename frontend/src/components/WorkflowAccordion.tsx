@@ -1,6 +1,6 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
+import type { AgentProgress, ErrorData, ImageContent, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
 import { collapseToolEvents, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
@@ -90,6 +90,7 @@ function isMcpToolEvent(event: ToolEvent): boolean {
 interface Props {
   agentProgress: AgentProgress | null
   textContents: TextContent[]
+  images?: ImageContent[]
   toolEvents: ToolEvent[]
   metrics: PipelineMetrics | null
   error: ErrorData | null
@@ -102,6 +103,7 @@ interface Props {
 export function WorkflowAccordion({
   agentProgress,
   textContents,
+  images = [],
   toolEvents,
   metrics,
   error,
@@ -295,12 +297,12 @@ export function WorkflowAccordion({
             {stepTools.length === 0 && content && (
               <p className="py-2 text-xs text-[var(--text-muted)]">{t('workflow.tool_none')}</p>
             )}
-            {content ? (
-              step.key === 'data-search-agent' ? (
-                <AnalysisView contents={roundContents} t={t} />
-              ) : step.key === 'regulation-check-agent' ? (
-                <RegulationResults contents={roundContents} t={t} />
-              ) : step.key === 'brochure-gen-agent' ? (
+              {content ? (
+                step.key === 'data-search-agent' ? (
+                  <AnalysisView contents={roundContents} images={images} t={t} />
+                ) : step.key === 'regulation-check-agent' ? (
+                  <RegulationResults contents={roundContents} t={t} />
+                ) : step.key === 'brochure-gen-agent' ? (
                 <div className="py-3 space-y-2">
                   <p className="text-sm text-[var(--text-secondary)]">{t('workflow.brochure.ready')}</p>
                   <p className="text-xs text-[var(--text-muted)]">{t('workflow.brochure.preview_hint')}</p>
