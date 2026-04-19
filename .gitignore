@@ -13,3 +13,4 @@ data/*.csv
 .coverage
 images/
 docs/presentation.md
+.vscode
