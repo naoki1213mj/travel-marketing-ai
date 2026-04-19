@@ -103,17 +103,24 @@ async def test_generate_workplace_context_brief_returns_summary_and_sources(monk
     client = _MockClient(
         [
             _MockResponse({"id": "conv-123"}),
-            _MockStreamResponse(
-                [
-                    (
-                        "data: {\"messages\":[{\"text\":\""
-                        "{\\\"brief_summary\\\":\\\"営業メールでは春休みの家族旅行需要を重視していました。\\\"}\","
-                        "\"attributions\":[{\"seeMoreWebUrl\":\"https://outlook.office.com/mail/inbox\","
-                        "\"providerDisplayName\":\"Mail\"},{\"seeMoreWebUrl\":"
-                        "\"https://contoso.sharepoint.com/sites/team/briefing.pdf\","
-                        "\"providerDisplayName\":\"SharePoint\"}]}]}\n\n"
-                    )
-                ]
+            _MockResponse(
+                {
+                    "messages": [
+                        {
+                            "text": '{"brief_summary":"営業メールでは春休みの家族旅行需要を重視していました。"}',
+                            "attributions": [
+                                {
+                                    "seeMoreWebUrl": "https://outlook.office.com/mail/inbox",
+                                    "providerDisplayName": "Mail",
+                                },
+                                {
+                                    "seeMoreWebUrl": "https://contoso.sharepoint.com/sites/team/briefing.pdf",
+                                    "providerDisplayName": "SharePoint",
+                                },
+                            ],
+                        }
+                    ]
+                }
             ),
         ]
     )
@@ -136,7 +143,8 @@ async def test_generate_workplace_context_brief_returns_summary_and_sources(monk
         "status": "completed",
     }
     assert client.calls[0]["json"] == {}
-    assert client.calls[1]["method"] == "stream"
+    assert client.calls[1]["method"] == "post"
+    assert str(client.calls[1]["url"]).endswith("/chat")
     assert client.calls[1]["headers"]["Authorization"] == "Bearer graph-token"
     assert client.calls[1]["json"]["contextualResources"]["webContext"]["isWebEnabled"] is False
     assert client.calls[1]["json"]["locationHint"]["timeZone"] == "Asia/Tokyo"
@@ -147,7 +155,7 @@ async def test_generate_workplace_context_brief_maps_consent_errors(monkeypatch)
     client = _MockClient(
         [
             _MockResponse({"id": "conv-123"}),
-            _MockStreamResponse([], status_code=403, text="Admin consent required for this request"),
+            _MockResponse({}, status_code=403, text="Admin consent required for this request"),
         ]
     )
     monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
@@ -206,25 +214,20 @@ async def test_generate_workplace_context_brief_maps_timeout(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_generate_workplace_context_brief_falls_back_to_sync_when_stream_is_unavailable(monkeypatch) -> None:
+async def test_generate_workplace_context_brief_falls_back_to_stream_when_sync_is_unavailable(monkeypatch) -> None:
     client = _MockClient(
         [
             _MockResponse({"id": "conv-123"}),
-            _MockStreamResponse([], status_code=405, text="Method not allowed"),
-            _MockResponse(
-                {
-                    "messages": [
-                        {
-                            "text": '{"brief_summary":"会議メモでは価格訴求より春の家族体験を重視していました。"}',
-                            "attributions": [
-                                {
-                                    "seeMoreWebUrl": "https://teams.microsoft.com/l/chat/0/0",
-                                    "providerDisplayName": "Chat",
-                                }
-                            ],
-                        }
-                    ]
-                }
+            _MockResponse({}, status_code=405, text="Method not allowed"),
+            _MockStreamResponse(
+                [
+                    (
+                        "data: {\"messages\":[{\"text\":\""
+                        "{\\\"brief_summary\\\":\\\"会議メモでは価格訴求より春の家族体験を重視していました。\\\"}\","
+                        "\"attributions\":[{\"seeMoreWebUrl\":\"https://teams.microsoft.com/l/chat/0/0\","
+                        "\"providerDisplayName\":\"Chat\"}]}]}\n\n"
+                    )
+                ]
             ),
         ]
     )
@@ -243,6 +246,7 @@ async def test_generate_workplace_context_brief_falls_back_to_sync_when_stream_i
         ],
         "status": "completed",
     }
-    assert client.calls[1]["method"] == "stream"
-    assert client.calls[2]["method"] == "post"
-    assert client.calls[2]["url"].endswith("/chat")
+    assert client.calls[1]["method"] == "post"
+    assert str(client.calls[1]["url"]).endswith("/chat")
+    assert client.calls[2]["method"] == "stream"
+    assert str(client.calls[2]["url"]).endswith("/chatOverStream")

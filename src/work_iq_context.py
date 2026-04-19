@@ -20,6 +20,7 @@ _GRAPH_STREAM_SUFFIX = "chatOverStream"
 _GRAPH_SYNC_SUFFIX = "chat"
 _DEFAULT_TIMEOUT_SECONDS = 120.0
 _MAX_BRIEF_CHARS = 1200
+_SYNC_FALLBACK_STATUS_CODES = {404, 405, 406, 415, 501}
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
 _HTML_TAG_PATTERN = re.compile(r"</?[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"[ \t]+")
@@ -350,19 +351,19 @@ async def generate_workplace_context_brief(
         if not conversation_id:
             raise ValueError("graph conversation id was missing")
 
-        stage = "chat_stream"
+        stage = "chat"
         try:
-            assistant_message = await _chat_over_stream(
+            assistant_message = await _chat_synchronously(
                 conversation_id=conversation_id,
                 payload=chat_payload,
                 headers=headers,
                 timeout_seconds=timeout_seconds,
             )
         except httpx.HTTPStatusError as exc:
-            if exc.response.status_code in {404, 405, 406, 415, 501}:
-                logger.info("work iq stream endpoint unavailable; falling back to synchronous chat")
-                stage = "chat"
-                assistant_message = await _chat_synchronously(
+            if exc.response.status_code in _SYNC_FALLBACK_STATUS_CODES:
+                logger.info("work iq sync endpoint unavailable; falling back to streaming chat")
+                stage = "chat_stream"
+                assistant_message = await _chat_over_stream(
                     conversation_id=conversation_id,
                     payload=chat_payload,
                     headers=headers,
