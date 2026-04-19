@@ -1100,14 +1100,14 @@ describe('buildRestoredPipelineState', () => {
       await result.current.sendMessage('沖縄プランを企画して')
     })
 
-    expect(result.current.state.toolEvents).toEqual([
-      {
-        tool: 'search_sales_history',
-        status: 'completed',
-        agent: 'data-search-agent',
-        version: 1,
-      },
-    ])
+    expect(result.current.state.toolEvents).toHaveLength(1)
+    expect(result.current.state.toolEvents[0]).toMatchObject({
+      tool: 'search_sales_history',
+      status: 'completed',
+      agent: 'data-search-agent',
+      version: 1,
+      step_key: 'data-search-agent',
+    })
   })
 
   it('assigns the pending version number to live tool events during a refinement run', async () => {
@@ -1144,11 +1144,12 @@ describe('buildRestoredPipelineState', () => {
       imageOffset: 0,
       toolEventOffset: 0,
     })
-    expect(result.current.state.toolEvents.at(-1)).toEqual({
+    expect(result.current.state.toolEvents.at(-1)).toMatchObject({
       tool: 'web_search',
       status: 'completed',
       agent: 'marketing-plan-agent',
       version: 2,
+      step_key: 'marketing-plan-agent',
     })
   })
 
@@ -1169,14 +1170,15 @@ describe('buildRestoredPipelineState', () => {
       await result.current.restoreConversation('conv-mcp-restore')
     })
 
-    expect(result.current.state.toolEvents).toContainEqual({
+    expect(result.current.state.toolEvents).toContainEqual(expect.objectContaining({
       tool: 'generate_improvement_brief',
       status: 'failed',
       agent: 'improvement-mcp',
       source: 'mcp',
       fallback: 'legacy_prompt',
       version: 2,
-    })
+      step_key: 'marketing-plan-agent',
+    }))
   })
 
   it('keeps a locally evaluated draft after approval request and restore polling', async () => {

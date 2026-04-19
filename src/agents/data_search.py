@@ -13,6 +13,7 @@ from azure.identity import CredentialUnavailableError, DefaultAzureCredential
 from pydantic import BaseModel
 
 from src.config import get_settings
+from src.tool_telemetry import trace_tool_invocation
 
 try:
     import pyodbc
@@ -420,19 +421,20 @@ async def query_data_agent(question: str) -> str:
     Args:
         question: データに関する質問（例: 「沖縄プランの季節別売上推移は？」）
     """
-    result = await _query_data_agent(question)
-    if result:
+    async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
+        result = await _query_data_agent(question)
+        if result:
+            return json.dumps(
+                {"source": "Fabric Data Agent", "answer": result},
+                ensure_ascii=False,
+            )
         return json.dumps(
-            {"source": "Fabric Data Agent", "answer": result},
+            {
+                "source": "fallback",
+                "message": "Fabric Data Agent は現在利用できません。search_sales_history / search_customer_reviews をお使いください。",
+            },
             ensure_ascii=False,
         )
-    return json.dumps(
-        {
-            "source": "fallback",
-            "message": "Fabric Data Agent は現在利用できません。search_sales_history / search_customer_reviews をお使いください。",
-        },
-        ensure_ascii=False,
-    )
 
 
 @tool
@@ -448,19 +450,20 @@ async def search_sales_history(
         season: 季節フィルタ（spring/summer/autumn/winter）
         region: 地域フィルタ（例: 「沖縄」「北海道」）
     """
-    # Fabric SQL を優先し、取得できなければ CSV にフォールバック
-    results = _get_sales_data_from_fabric(season=season, region=region)
-    if results:
-        logger.info("Fabric SQL から販売データ %d 件取得", len(results))
-        return json.dumps(results, ensure_ascii=False, default=str)
+    async with trace_tool_invocation("search_sales_history", agent_name="data-search-agent"):
+        # Fabric SQL を優先し、取得できなければ CSV にフォールバック
+        results = _get_sales_data_from_fabric(season=season, region=region)
+        if results:
+            logger.info("Fabric SQL から販売データ %d 件取得", len(results))
+            return json.dumps(results, ensure_ascii=False, default=str)
 
-    logger.info("CSV フォールバックで販売データを取得")
-    results = _get_sales_data()
-    if season:
-        results = [r for r in results if r["season"] == season]
-    if region:
-        results = [r for r in results if region in r["destination"]]
-    return json.dumps(results, ensure_ascii=False)
+        logger.info("CSV フォールバックで販売データを取得")
+        results = _get_sales_data()
+        if season:
+            results = [r for r in results if r["season"] == season]
+        if region:
+            results = [r for r in results if region in r["destination"]]
+        return json.dumps(results, ensure_ascii=False)
 
 
 @tool
@@ -474,19 +477,20 @@ async def search_customer_reviews(
         plan_name: プラン名でフィルタ
         min_rating: 最低評価でフィルタ（1〜5）
     """
-    # Fabric SQL を優先し、取得できなければ CSV にフォールバック
-    results = _get_reviews_from_fabric(plan_name=plan_name, min_rating=min_rating)
-    if results:
-        logger.info("Fabric SQL からレビュー %d 件取得", len(results))
-        return json.dumps(results, ensure_ascii=False, default=str)
+    async with trace_tool_invocation("search_customer_reviews", agent_name="data-search-agent"):
+        # Fabric SQL を優先し、取得できなければ CSV にフォールバック
+        results = _get_reviews_from_fabric(plan_name=plan_name, min_rating=min_rating)
+        if results:
+            logger.info("Fabric SQL からレビュー %d 件取得", len(results))
+            return json.dumps(results, ensure_ascii=False, default=str)
 
-    logger.info("CSV フォールバックでレビューデータを取得")
-    results = _get_reviews()
-    if plan_name:
-        results = [r for r in results if plan_name in r["plan_name"]]
-    if min_rating is not None:
-        results = [r for r in results if r["rating"] >= min_rating]
-    return json.dumps(results, ensure_ascii=False)
+        logger.info("CSV フォールバックでレビューデータを取得")
+        results = _get_reviews()
+        if plan_name:
+            results = [r for r in results if plan_name in r["plan_name"]]
+        if min_rating is not None:
+            results = [r for r in results if r["rating"] >= min_rating]
+        return json.dumps(results, ensure_ascii=False)
 
 
 # --- エージェント作成 ---

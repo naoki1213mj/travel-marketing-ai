@@ -10,6 +10,7 @@ import logging
 from agent_framework import tool
 
 from src.config import get_settings
+from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -21,21 +22,22 @@ async def review_plan_quality(plan_markdown: str) -> str:
     Args:
         plan_markdown: レビュー対象の企画書（Markdown）
     """
-    required_sections = [
-        ("タイトル", ["#", "プラン"]),
-        ("キャッチコピー", ["キャッチ", "コピー"]),
-        ("ターゲット", ["ターゲット", "ペルソナ"]),
-        ("プラン概要", ["概要", "日数", "ルート"]),
-        ("KPI", ["KPI", "目標"]),
-    ]
+    async with trace_tool_invocation("review_plan_quality", agent_name="quality-review-agent"):
+        required_sections = [
+            ("タイトル", ["#", "プラン"]),
+            ("キャッチコピー", ["キャッチ", "コピー"]),
+            ("ターゲット", ["ターゲット", "ペルソナ"]),
+            ("プラン概要", ["概要", "日数", "ルート"]),
+            ("KPI", ["KPI", "目標"]),
+        ]
 
-    results = []
-    for section_name, keywords in required_sections:
-        found = any(kw in plan_markdown for kw in keywords)
-        status = "✅" if found else "❌ 不足"
-        results.append(f"- {section_name}: {status}")
+        results = []
+        for section_name, keywords in required_sections:
+            found = any(kw in plan_markdown for kw in keywords)
+            status = "✅" if found else "❌ 不足"
+            results.append(f"- {section_name}: {status}")
 
-    return "## 企画書構成チェック\n" + "\n".join(results)
+        return "## 企画書構成チェック\n" + "\n".join(results)
 
 
 @tool
@@ -45,27 +47,28 @@ async def review_brochure_accessibility(html_content: str) -> str:
     Args:
         html_content: レビュー対象の HTML
     """
-    checks = []
+    async with trace_tool_invocation("review_brochure_accessibility", agent_name="quality-review-agent"):
+        checks = []
 
-    if "<img" in html_content and 'alt="' not in html_content:
-        checks.append("❌ img タグに alt 属性がありません")
-    else:
-        checks.append("✅ 画像の alt 属性")
+        if "<img" in html_content and 'alt="' not in html_content:
+            checks.append("❌ img タグに alt 属性がありません")
+        else:
+            checks.append("✅ 画像の alt 属性")
 
-    if "lang=" in html_content:
-        checks.append("✅ lang 属性あり")
-    else:
-        checks.append("⚠️ html に lang 属性を追加してください")
+        if "lang=" in html_content:
+            checks.append("✅ lang 属性あり")
+        else:
+            checks.append("⚠️ html に lang 属性を追加してください")
 
-    if "<footer" in html_content or "登録" in html_content:
-        checks.append("✅ フッター/登録番号あり")
-    else:
-        checks.append("❌ 旅行業者登録番号がありません")
+        if "<footer" in html_content or "登録" in html_content:
+            checks.append("✅ フッター/登録番号あり")
+        else:
+            checks.append("❌ 旅行業者登録番号がありません")
 
-    if "font-size" in html_content:
-        checks.append("✅ フォントサイズ指定あり")
+        if "font-size" in html_content:
+            checks.append("✅ フォントサイズ指定あり")
 
-    return "## ブローシャアクセシビリティ\n" + "\n".join(checks)
+        return "## ブローシャアクセシビリティ\n" + "\n".join(checks)
 
 
 INSTRUCTIONS = """\

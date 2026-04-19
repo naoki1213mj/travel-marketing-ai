@@ -20,6 +20,7 @@ from agent_framework import tool
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
+from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -373,97 +374,99 @@ async def generate_promo_video(
         summary_text: 動画で読み上げるテキスト（企画書サマリ）
         avatar_style: アバタースタイル（concierge/guide/presenter）
     """
-    settings = get_settings()
-    speech_endpoint = settings["speech_service_endpoint"]
-    speech_region = settings["speech_service_region"]
+    async with trace_tool_invocation("generate_promo_video", agent_name="video-gen-agent"):
+        settings = get_settings()
+        speech_endpoint = settings["speech_service_endpoint"]
+        speech_region = settings["speech_service_region"]
 
-    if not speech_endpoint or not speech_region:
-        return json.dumps(
-            {
-                "status": "unavailable",
-                "message": (
-                    "⚠️ 動画生成は現在利用できません。"
-                    "SPEECH_SERVICE_ENDPOINT と SPEECH_SERVICE_REGION 環境変数を設定してください。"
-                ),
-            },
-            ensure_ascii=False,
-        )
-
-    configured_character = os.environ.get("VIDEO_GEN_AVATAR_CHARACTER", "").strip()
-    configured_style = os.environ.get("VIDEO_GEN_AVATAR_STYLE", "").strip()
-    configured_voice = os.environ.get("VIDEO_GEN_VOICE", _DEFAULT_PROMO_VOICE).strip()
-    background_color = os.environ.get("VIDEO_GEN_BACKGROUND_COLOR", _DEFAULT_BACKGROUND_COLOR).strip()
-    bitrate_kbps = _read_positive_int_env("VIDEO_GEN_BITRATE_KBPS", _DEFAULT_BITRATE_KBPS)
-
-    character, avatar_pose = _resolve_avatar_profile(avatar_style, configured_character, configured_style)
-    voice_name = configured_voice or _DEFAULT_PROMO_VOICE
-    gesture_sequence = _select_avatar_gestures(character, avatar_pose)
-    ssml_content = _build_avatar_ssml(summary_text, voice_name, gesture_sequence)
-
-    try:
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
-
-        # バッチ合成ジョブを作成する
-        job_id = f"promo-{int(time.time())}"
-        batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
-        payload = json.dumps(
-            {
-                "inputKind": "SSML",
-                "inputs": [{"content": ssml_content}],
-                "avatarConfig": {
-                    "talkingAvatarCharacter": character,
-                    "talkingAvatarStyle": avatar_pose,
-                    "videoFormat": "Mp4",
-                    "videoCodec": "h264",
-                    "subtitleType": "soft_embedded",
-                    "backgroundColor": background_color,
-                    "bitrateKbps": bitrate_kbps,
+        if not speech_endpoint or not speech_region:
+            return json.dumps(
+                {
+                    "status": "unavailable",
+                    "message": (
+                        "⚠️ 動画生成は現在利用できません。"
+                        "SPEECH_SERVICE_ENDPOINT と SPEECH_SERVICE_REGION 環境変数を設定してください。"
+                    ),
                 },
-            },
-            ensure_ascii=False,
-        ).encode("utf-8")
+                ensure_ascii=False,
+            )
 
-        request = urllib.request.Request(
-            batch_url,
-            data=payload,
-            headers={
-                "Authorization": f"Bearer {token.token}",
-                "Content-Type": "application/json",
-            },
-            method="PUT",
-        )
+        configured_character = os.environ.get("VIDEO_GEN_AVATAR_CHARACTER", "").strip()
+        configured_style = os.environ.get("VIDEO_GEN_AVATAR_STYLE", "").strip()
+        configured_voice = os.environ.get("VIDEO_GEN_VOICE", _DEFAULT_PROMO_VOICE).strip()
+        background_color = os.environ.get("VIDEO_GEN_BACKGROUND_COLOR", _DEFAULT_BACKGROUND_COLOR).strip()
+        bitrate_kbps = _read_positive_int_env("VIDEO_GEN_BITRATE_KBPS", _DEFAULT_BITRATE_KBPS)
 
-        with urllib.request.urlopen(request, timeout=30) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+        character, avatar_pose = _resolve_avatar_profile(avatar_style, configured_character, configured_style)
+        voice_name = configured_voice or _DEFAULT_PROMO_VOICE
+        gesture_sequence = _select_avatar_gestures(character, avatar_pose)
+        ssml_content = _build_avatar_ssml(summary_text, voice_name, gesture_sequence)
 
-        # Side-channel にジョブ情報を保存（スレッドセーフ）
-        actual_job_id = result.get("id", job_id)
-        store_pending_video_job({"job_id": actual_job_id, "status": "submitted"})
+        try:
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-        return json.dumps(
-            {
-                "status": "submitted",
-                "job_id": actual_job_id,
-                "message": (
-                    f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。アバター: {character}, スタイル: {avatar_pose}, 音声: {voice_name}"
-                ),
-            },
-            ensure_ascii=False,
-        )
+            # バッチ合成ジョブを作成する
+            job_id = f"promo-{int(time.time())}"
+            batch_url = f"{speech_endpoint.rstrip('/')}/avatar/batchsyntheses/{job_id}?api-version=2024-08-01"
+            payload = json.dumps(
+                {
+                    "inputKind": "SSML",
+                    "inputs": [{"content": ssml_content}],
+                    "avatarConfig": {
+                        "talkingAvatarCharacter": character,
+                        "talkingAvatarStyle": avatar_pose,
+                        "videoFormat": "Mp4",
+                        "videoCodec": "h264",
+                        "subtitleType": "soft_embedded",
+                        "backgroundColor": background_color,
+                        "bitrateKbps": bitrate_kbps,
+                    },
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
 
-    except urllib.error.URLError as exc:
-        logger.exception("Photo Avatar API 呼び出しに失敗しました")
-        return json.dumps(
-            {"status": "error", "message": f"❌ 動画生成 API エラー: {exc}"},
-            ensure_ascii=False,
-        )
-    except Exception as exc:
-        logger.exception("動画生成中に予期しないエラーが発生しました")
-        return json.dumps(
-            {"status": "error", "message": f"❌ 動画生成エラー: {exc}"},
-            ensure_ascii=False,
-        )
+            request = urllib.request.Request(
+                batch_url,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {token.token}",
+                    "Content-Type": "application/json",
+                },
+                method="PUT",
+            )
+
+            with urllib.request.urlopen(request, timeout=30) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
+
+            # Side-channel にジョブ情報を保存（スレッドセーフ）
+            actual_job_id = result.get("id", job_id)
+            store_pending_video_job({"job_id": actual_job_id, "status": "submitted"})
+
+            return json.dumps(
+                {
+                    "status": "submitted",
+                    "job_id": actual_job_id,
+                    "message": (
+                        f"🎬 動画生成ジョブを送信しました（ID: {job_id}）。"
+                        f"アバター: {character}, スタイル: {avatar_pose}, 音声: {voice_name}"
+                    ),
+                },
+                ensure_ascii=False,
+            )
+
+        except urllib.error.URLError as exc:
+            logger.exception("Photo Avatar API 呼び出しに失敗しました")
+            return json.dumps(
+                {"status": "error", "message": f"❌ 動画生成 API エラー: {exc}"},
+                ensure_ascii=False,
+            )
+        except Exception as exc:
+            logger.exception("動画生成中に予期しないエラーが発生しました")
+            return json.dumps(
+                {"status": "error", "message": f"❌ 動画生成エラー: {exc}"},
+                ensure_ascii=False,
+            )
 
 
 INSTRUCTIONS = """\

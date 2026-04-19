@@ -15,6 +15,9 @@ import { isApprovalResponseText } from '../lib/approval-flow'
 import { getDelegatedApiHeaders } from '../lib/api-auth'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
+import { normalizeToolEventData, type ToolEvent } from '../lib/tool-events'
+
+export type { ToolEvent } from '../lib/tool-events'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50
@@ -26,16 +29,6 @@ export interface AgentProgress {
   status: 'running' | 'completed'
   step: number
   total_steps: number
-}
-
-export interface ToolEvent {
-  tool: string
-  status: string
-  agent: string
-  source?: string
-  fallback?: string
-  version?: number
-  source_scope?: WorkIqSourceScope[]
 }
 
 export interface TextContent {
@@ -611,15 +604,10 @@ export function buildRestoredPipelineState(
             : activeVersion
         toolEvents = [
           ...toolEvents,
-          {
-            tool: String(data.tool || ''),
-            status: String(data.status || ''),
-            agent: String(data.agent || ''),
-            source: data.source ? String(data.source) : undefined,
-            fallback: data.fallback ? String(data.fallback) : undefined,
-            version: resolvedVersion,
-            source_scope: Array.isArray(data.source_scope) ? parseWorkIqSourceScope(data.source_scope) : undefined,
-          },
+          normalizeToolEventData(data, {
+            fallbackVersion: resolvedVersion,
+            parseSourceScope: (raw) => (raw === undefined ? undefined : parseWorkIqSourceScope(raw)),
+          }),
         ].slice(-MAX_TOOL_EVENTS)
         workIq = applyWorkIqToolEvent(workIq, toolEvents[toolEvents.length - 1])
         if (isBackgroundUpdate(data) && versions.length > 0) {
@@ -945,15 +933,12 @@ export function useSSE() {
       if (requestId !== activeRequestIdRef.current) return
       setState(prev => {
         const requestedVersion = Number((data as ToolEvent).version || 0)
-        const toolEvent = {
-          ...(data as ToolEvent),
-          source_scope: Array.isArray((data as { source_scope?: unknown[] }).source_scope)
-            ? parseWorkIqSourceScope((data as { source_scope?: unknown[] }).source_scope)
-            : undefined,
-          version: Number.isFinite(requestedVersion) && requestedVersion > 0
+        const toolEvent = normalizeToolEventData(data as Record<string, unknown>, {
+          fallbackVersion: Number.isFinite(requestedVersion) && requestedVersion > 0
             ? requestedVersion
             : resolveToolEventVersion(prev),
-        }
+          parseSourceScope: (raw) => (raw === undefined ? undefined : parseWorkIqSourceScope(raw)),
+        })
         const toolEvents = [...prev.toolEvents, toolEvent].slice(-MAX_TOOL_EVENTS)
         const workIq = applyWorkIqToolEvent(prev.workIq, toolEvent)
         const conversationSettings = workIq.workIqEnabled

@@ -33,6 +33,13 @@ from src.conversations import (
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
 from src.request_identity import extract_request_identity, request_has_bearer_token
+from src.tool_telemetry import (
+    ToolEventPayload,
+    build_tool_event_data,
+    normalize_tool_name,
+    resolve_step_key,
+    tool_event_context,
+)
 from src.work_iq_context import generate_workplace_context_brief
 from src.work_iq_session import (
     CONVERSATION_SETTINGS_METADATA_KEY,
@@ -213,7 +220,7 @@ _pending_approvals: dict[str, PendingApprovalContext] = {}
 _TOOL_EVENT_HINTS: dict[str, list[str]] = {
     "data-search-agent": ["query_data_agent", "search_sales_history", "search_customer_reviews", "code_interpreter"],
     "marketing-plan-agent": ["web_search"],
-    "regulation-check-agent": ["search_knowledge_base", "check_ng_expressions", "check_travel_law_compliance"],
+    "regulation-check-agent": ["foundry_iq_search", "check_ng_expressions", "check_travel_law_compliance"],
     "plan-revision-agent": [],
     "brochure-gen-agent": [
         "generate_hero_image",
@@ -228,6 +235,73 @@ _WORK_IQ_SOURCE_LABELS = {
     "teams_chats": "Teams チャット",
     "documents_notes": "文書 / ノート",
 }
+
+
+def _format_tool_event_sse(payload: ToolEventPayload) -> str:
+    """Canonical tool_event payload を SSE へ変換する。"""
+    return format_sse(SSEEventType.TOOL_EVENT, payload)
+
+
+def _build_agent_tool_event(
+    tool_name: str,
+    status: str,
+    *,
+    agent_name: str,
+    step: int,
+    source: str | None = None,
+    provider: str | None = None,
+    version: int | None = None,
+    round_number: int | None = None,
+    fallback: str | None = None,
+    inferred: bool = False,
+    background_update: bool = False,
+    started_at: str | None = None,
+    finished_at: str | None = None,
+    duration_ms: int | None = None,
+    error_code: str | None = None,
+    error_message: str | None = None,
+    source_scope: list[str] | None = None,
+) -> ToolEventPayload:
+    """agent 実行由来の canonical tool_event payload を構築する。"""
+    return build_tool_event_data(
+        tool_name,
+        status,
+        agent_name=agent_name,
+        step=step,
+        step_key=resolve_step_key(agent_name),
+        source=source,
+        provider=provider,
+        version=version,
+        round_number=round_number,
+        fallback=fallback,
+        inferred=inferred,
+        background_update=background_update,
+        started_at=started_at,
+        finished_at=finished_at,
+        duration_ms=duration_ms,
+        error_code=error_code,
+        error_message=error_message,
+        source_scope=source_scope,
+    )
+
+
+def _dedupe_tool_event_payloads(events: list[ToolEventPayload]) -> list[ToolEventPayload]:
+    """同一 tool/status/source の重複イベントを順序を保って除外する。"""
+    deduped: list[ToolEventPayload] = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for event in events:
+        key = (
+            str(event.get("tool", "")),
+            str(event.get("status", "")),
+            str(event.get("agent", "")),
+            str(event.get("step_key", "")),
+            str(event.get("source", "")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(event)
+    return deduped
 
 
 class _InlineImageExtractor(HTMLParser):
@@ -554,12 +628,15 @@ def _format_work_iq_brief_for_prompt(work_iq_session: WorkIQSessionMetadata | No
 
 def _build_work_iq_tool_event_data(work_iq_session: WorkIQSessionMetadata, status: str) -> dict[str, object]:
     """Work IQ status を UI 向け tool_event payload に整形する。"""
-    payload: dict[str, object] = {
-        "tool": "generate_workplace_context_brief",
-        "status": status,
-        "agent": "marketing-plan-agent",
-        "source": "workiq",
-    }
+    payload: dict[str, object] = _build_agent_tool_event(
+        "generate_workplace_context_brief",
+        status,
+        agent_name="marketing-plan-agent",
+        step=2,
+        source="workiq",
+        provider="workiq",
+        source_scope=None,
+    )
     source_scope = work_iq_session.get("source_scope")
     if isinstance(source_scope, list) and source_scope:
         payload["source_scope"] = list(source_scope)
@@ -1216,9 +1293,13 @@ async def _build_brochure_fallback_outcome(
 
     for tool_name in ["generate_hero_image", "generate_banner_image"]:
         events.append(
-            format_sse(
-                SSEEventType.TOOL_EVENT,
-                {"tool": tool_name, "status": "completed", "agent": "brochure-gen-agent"},
+            _format_tool_event_sse(
+                _build_agent_tool_event(
+                    tool_name,
+                    "completed",
+                    agent_name="brochure-gen-agent",
+                    step=step,
+                )
             )
         )
     events.append(
@@ -1361,15 +1442,15 @@ def _extract_tool_names(result: object, agent_name: str, result_text: str) -> li
                 function_obj = getattr(output, "function", None)
                 name = getattr(function_obj, "name", None)
             if isinstance(name, str) and name:
-                tool_names.append(name)
+                tool_names.append(normalize_tool_name(name))
             continue
 
         mapped = _TOOL_CALL_TYPE_MAP.get(output_type)
         if mapped:
-            tool_names.append(mapped)
+            tool_names.append(normalize_tool_name(mapped))
 
     if agent_name == "video-gen-agent" and result_text.strip():
-        tool_names.append("generate_promo_video")
+        tool_names.append(normalize_tool_name("generate_promo_video"))
 
     return _merge_tool_names(tool_names)
 
@@ -1541,6 +1622,7 @@ async def _execute_agent(
     }
     create_fn, default_step = agent_map.get(agent_name, (create_marketing_plan_agent, 2))
     step = agent_step or default_step
+    collected_tool_events: list[ToolEventPayload] = []
     events = [
         format_sse(
             SSEEventType.AGENT_PROGRESS,
@@ -1552,9 +1634,17 @@ async def _execute_agent(
     delay_seconds = 5.0
     max_attempts = 5
     for attempt in range(1, max_attempts + 1):
+        attempt_tool_events: list[ToolEventPayload] = []
         try:
             agent = create_fn(model_settings)
-            result = await agent.run(user_input)
+            with tool_event_context(
+                attempt_tool_events.append,
+                agent_name=agent_name,
+                step=step,
+                step_key=resolve_step_key(agent_name),
+            ):
+                result = await agent.run(user_input)
+            collected_tool_events = attempt_tool_events
             break
         except Exception as exc:
             # Code Interpreter 404: 無効化してリトライ（リトライ回数を消費しない）
@@ -1591,6 +1681,8 @@ async def _execute_agent(
                         {"message": error_msg, "code": "AGENT_RUNTIME_ERROR"},
                     )
                 )
+                for payload in _dedupe_tool_event_payloads(attempt_tool_events):
+                    events.append(_format_tool_event_sse(payload))
                 return {
                     "events": events,
                     "text": "",
@@ -1612,6 +1704,11 @@ async def _execute_agent(
     result_text = _extract_result_text(result)
     total_tokens = _extract_total_tokens(result)
     tool_names = _extract_tool_names(result, agent_name, result_text)
+    explicit_completed_tools = {
+        str(payload.get("tool", ""))
+        for payload in collected_tool_events
+        if payload.get("status") == "completed"
+    }
 
     tool_shield = await check_tool_response(result_text)
     if not tool_shield.is_safe:
@@ -1687,13 +1784,25 @@ async def _execute_agent(
                 )
             )
 
+    inferred_tool_events: list[ToolEventPayload] = []
     for tool_name in tool_names:
-        events.append(
-            format_sse(
-                SSEEventType.TOOL_EVENT,
-                {"tool": tool_name, "status": "completed", "agent": agent_name},
+        if tool_name in explicit_completed_tools:
+            continue
+        inferred_tool_events.append(
+            _build_agent_tool_event(
+                tool_name,
+                "completed",
+                agent_name=agent_name,
+                step=step,
+                source="foundry",
+                provider="foundry",
+                inferred=True,
             )
         )
+
+    all_tool_events = _dedupe_tool_event_payloads([*collected_tool_events, *inferred_tool_events])
+    for payload in all_tool_events:
+        events.append(_format_tool_event_sse(payload))
 
     events.append(
         format_sse(
@@ -1703,7 +1812,7 @@ async def _execute_agent(
     )
 
     elapsed = round(time.monotonic() - start_time, 1)
-    tool_calls = len(tool_names)
+    tool_calls = sum(1 for payload in all_tool_events if payload.get("status") == "completed")
 
     # OpenTelemetry スパンに結果を記録
     if span:
@@ -2375,23 +2484,27 @@ async def _refine_events(
             improvement_instructions = _format_improvement_brief_for_prompt(improvement_brief, refine_text)
             yield format_sse(
                 SSEEventType.TOOL_EVENT,
-                {
-                    "tool": "generate_improvement_brief",
-                    "status": "completed",
-                    "agent": "improvement-mcp",
-                    "source": "mcp",
-                },
+                _build_agent_tool_event(
+                    "generate_improvement_brief",
+                    "completed",
+                    agent_name="improvement-mcp",
+                    step=2,
+                    source="mcp",
+                    provider="mcp",
+                ),
             )
         elif mcp_configured:
             yield format_sse(
                 SSEEventType.TOOL_EVENT,
-                {
-                    "tool": "generate_improvement_brief",
-                    "status": "failed",
-                    "agent": "improvement-mcp",
-                    "source": "mcp",
-                    "fallback": "legacy_prompt",
-                },
+                _build_agent_tool_event(
+                    "generate_improvement_brief",
+                    "failed",
+                    agent_name="improvement-mcp",
+                    step=2,
+                    source="mcp",
+                    provider="mcp",
+                    fallback="legacy_prompt",
+                ),
             )
 
         revision_sections = [

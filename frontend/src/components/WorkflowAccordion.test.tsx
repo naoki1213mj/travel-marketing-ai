@@ -8,14 +8,17 @@ const t = (key: string) => ({
   'step.marketing_plan': '施策生成',
   'step.regulation': '規制チェック',
   'step.brochure': '販促物生成',
+  'step.video': '動画生成',
   'status.running': '実行中',
   'workflow.brochure.ready': 'ブローシャと画像の生成が完了しました。',
   'workflow.brochure.preview_hint': '右側のタブで確認できます。',
   'workflow.video.ready': 'アバター動画の生成が完了しました。',
+  'workflow.video.pending': '動画生成イベントを待機中です。',
   'workflow.video.running': 'アバター動画を生成中…',
   'workflow.round': 'ラウンド {n}',
   'workflow.tool_count': 'ツール {n}件',
   'workflow.tool_none': 'このステップではツール呼び出しログを取得できませんでした。モデル推論のみで完了している可能性があります。',
+  'workflow.tool_additional': '追加のツールアクティビティ',
   'round.initial': '初回実行',
   'round.improvement': '改善',
   'section.analysis': 'データ分析結果',
@@ -28,6 +31,8 @@ const t = (key: string) => ({
   'tool.generate_hero_image': 'ヒーロー画像生成',
   'tool.generate_banner_image': 'バナー画像生成',
   'tool.source.mcp': 'Azure Functions MCP',
+  'tool.source.foundry': 'Microsoft Foundry',
+  'tool.meta.inferred': '推定',
   'tool.fallback.legacy_prompt': '従来経路へフォールバック',
   'error.retry': '再試行',
 }[key] ?? key)
@@ -139,7 +144,7 @@ describe('WorkflowAccordion', () => {
   it('shows improvement MCP usage inside the latest refinement step', () => {
     const mcpToolEvents: ToolEvent[] = [
       ...toolEvents,
-      { tool: 'generate_improvement_brief', status: 'completed', agent: 'improvement-mcp', source: 'mcp', version: 2 },
+      { tool: 'generate_improvement_brief', status: 'completed', agent: 'improvement-mcp', source: 'mcp', version: 2, step_key: 'marketing-plan-agent' },
     ]
 
     const { container } = render(
@@ -223,7 +228,7 @@ describe('WorkflowAccordion', () => {
       />,
     )
 
-    fireEvent.click(screen.getAllByRole('button', { name: /販促物生成/ }).at(-1) as HTMLButtonElement)
+    fireEvent.click(screen.getAllByRole('button', { name: /動画生成/ }).at(-1) as HTMLButtonElement)
 
     expect(screen.getByText('⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。')).toBeInTheDocument()
     expect(screen.queryByText('アバター動画を生成中…')).toBeNull()

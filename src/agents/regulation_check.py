@@ -10,6 +10,7 @@ from agent_framework import tool
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
+from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -128,81 +129,87 @@ async def search_knowledge_base(query: str) -> str:
     Args:
         query: 検索クエリ（例: 「景品表示法 有利誤認」「旅行業法 広告規制」）
     """
-    search_endpoint, api_key = _get_search_credentials()
-    if not search_endpoint:
-        logger.info("Search endpoint 未設定、フォールバック使用")
-        return _get_fallback_regulations(query)
-
-    try:
-        # Agentic Retrieval API で Knowledge Base にクエリを送信
-        url = f"{search_endpoint}/knowledgebases/{_KB_NAME}/retrieve?api-version={_KB_API_VERSION}"
-        request_body = {
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [{"type": "text", "text": query}],
-                }
-            ],
-            "retrievalReasoningEffort": {"kind": _iq_reasoning_effort},
-            "includeActivity": True,
-        }
-
-        body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        if api_key:
-            headers["api-key"] = api_key
-        else:
-            credential = DefaultAzureCredential()
-            token = credential.get_token("https://search.azure.com/.default")
-            headers["Authorization"] = f"Bearer {token.token}"
-
-        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-        response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=30)
-        data = json.loads(response.read().decode())
-
-        # Agentic Retrieval レスポンスからテキストを抽出
-        responses = data.get("response", [])
-        results = []
-        for resp_item in responses:
-            for content_item in resp_item.get("content", []):
-                if content_item.get("type") == "text":
-                    text = content_item.get("text", "")
-                    if text.strip():
-                        results.append({"content": text[:2000], "source": "Foundry IQ Agentic Retrieval"})
-
-        # 参照情報を追加（IQ パラメータでフィルタリング）
-        references = data.get("references", [])
-        ref_summaries = []
-        for ref in references[:_iq_top_k]:
-            title = ref.get("title", "")
-            score = ref.get("rerankerScore", 0)
-            if title and score >= _iq_score_threshold:
-                ref_summaries.append({"title": title, "score": score})
-
-        if not results:
-            logger.info("Foundry IQ KB 検索結果なし、フォールバック使用")
+    async with trace_tool_invocation(
+        "foundry_iq_search",
+        agent_name="regulation-check-agent",
+        source="foundry",
+        provider="foundry",
+    ):
+        search_endpoint, api_key = _get_search_credentials()
+        if not search_endpoint:
+            logger.info("Search endpoint 未設定、フォールバック使用")
             return _get_fallback_regulations(query)
 
-        return json.dumps(
-            {
-                "source": "Foundry IQ Agentic Retrieval",
-                "knowledge_base": _KB_NAME,
-                "query": query,
-                "results": results,
-                "references": ref_summaries,
-            },
-            ensure_ascii=False,
-        )
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8", errors="replace")[:500]
-        logger.warning("Foundry IQ KB 検索失敗 (HTTP %d): %s", e.code, error_body)
-        # KB が未作成 (404) の場合は直接 Index 検索にフォールバック
-        if e.code == 404:
-            return await _fallback_index_search(query, search_endpoint, api_key)
-        return _get_fallback_regulations(query)
-    except Exception as e:
-        logger.warning("Foundry IQ KB 検索失敗: %s", e)
-        return _get_fallback_regulations(query)
+        try:
+            # Agentic Retrieval API で Knowledge Base にクエリを送信
+            url = f"{search_endpoint}/knowledgebases/{_KB_NAME}/retrieve?api-version={_KB_API_VERSION}"
+            request_body = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": query}],
+                    }
+                ],
+                "retrievalReasoningEffort": {"kind": _iq_reasoning_effort},
+                "includeActivity": True,
+            }
+
+            body = json.dumps(request_body, ensure_ascii=False).encode("utf-8")
+            headers: dict[str, str] = {"Content-Type": "application/json"}
+            if api_key:
+                headers["api-key"] = api_key
+            else:
+                credential = DefaultAzureCredential()
+                token = credential.get_token("https://search.azure.com/.default")
+                headers["Authorization"] = f"Bearer {token.token}"
+
+            req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+            response = await asyncio.to_thread(urllib.request.urlopen, req, timeout=30)
+            data = json.loads(response.read().decode())
+
+            # Agentic Retrieval レスポンスからテキストを抽出
+            responses = data.get("response", [])
+            results = []
+            for resp_item in responses:
+                for content_item in resp_item.get("content", []):
+                    if content_item.get("type") == "text":
+                        text = content_item.get("text", "")
+                        if text.strip():
+                            results.append({"content": text[:2000], "source": "Foundry IQ Agentic Retrieval"})
+
+            # 参照情報を追加（IQ パラメータでフィルタリング）
+            references = data.get("references", [])
+            ref_summaries = []
+            for ref in references[:_iq_top_k]:
+                title = ref.get("title", "")
+                score = ref.get("rerankerScore", 0)
+                if title and score >= _iq_score_threshold:
+                    ref_summaries.append({"title": title, "score": score})
+
+            if not results:
+                logger.info("Foundry IQ KB 検索結果なし、フォールバック使用")
+                return _get_fallback_regulations(query)
+
+            return json.dumps(
+                {
+                    "source": "Foundry IQ Agentic Retrieval",
+                    "knowledge_base": _KB_NAME,
+                    "query": query,
+                    "results": results,
+                    "references": ref_summaries,
+                },
+                ensure_ascii=False,
+            )
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8", errors="replace")[:500]
+            logger.warning("Foundry IQ KB 検索失敗 (HTTP %d): %s", e.code, error_body)
+            # KB が未作成 (404) の場合は直接 Index 検索にフォールバック
+            if e.code == 404:
+                return await _fallback_index_search(query, search_endpoint, api_key)
+            return _get_fallback_regulations(query)
+        except Exception as e:
+            logger.warning("Foundry IQ KB 検索失敗: %s", e)
+            return _get_fallback_regulations(query)
 
 
 async def _fallback_index_search(query: str, search_endpoint: str, api_key: str) -> str:
@@ -236,11 +243,12 @@ async def check_ng_expressions(text: str) -> str:
     Args:
         text: チェック対象のテキスト
     """
-    found = []
-    for ng in NG_EXPRESSIONS:
-        if ng["expression"] in text:
-            found.append(ng)
-    return json.dumps(found, ensure_ascii=False) if found else "NG 表現は検出されませんでした。"
+    async with trace_tool_invocation("check_ng_expressions", agent_name="regulation-check-agent"):
+        found = []
+        for ng in NG_EXPRESSIONS:
+            if ng["expression"] in text:
+                found.append(ng)
+        return json.dumps(found, ensure_ascii=False) if found else "NG 表現は検出されませんでした。"
 
 
 @tool
@@ -250,13 +258,14 @@ async def check_travel_law_compliance(document: str) -> str:
     Args:
         document: チェック対象の企画書テキスト
     """
-    results = []
-    for item in TRAVEL_LAW_CHECKLIST:
-        keyword = item.split(":")[0].strip()
-        found = keyword in document or any(w in document for w in keyword.split("・"))
-        status = "✅ 適合" if found else "⚠️ 要確認"
-        results.append({"check_item": item, "status": status})
-    return json.dumps(results, ensure_ascii=False)
+    async with trace_tool_invocation("check_travel_law_compliance", agent_name="regulation-check-agent"):
+        results = []
+        for item in TRAVEL_LAW_CHECKLIST:
+            keyword = item.split(":")[0].strip()
+            found = keyword in document or any(w in document for w in keyword.split("・"))
+            status = "✅ 適合" if found else "⚠️ 要確認"
+            results.append({"check_item": item, "status": status})
+        return json.dumps(results, ensure_ascii=False)
 
 
 INSTRUCTIONS = """\

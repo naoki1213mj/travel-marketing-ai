@@ -1,6 +1,7 @@
-import { BarChart3, Check, ChevronDown, FileText, Palette, Scale } from 'lucide-react'
+import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
+import { resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
 import { ErrorRetry } from './ErrorRetry'
@@ -14,14 +15,16 @@ const STEP_ICONS: Record<string, React.ReactNode> = {
   'marketing-plan-agent': <FileText className="h-4 w-4" />,
   'regulation-check-agent': <Scale className="h-4 w-4" />,
   'brochure-gen-agent': <Palette className="h-4 w-4" />,
+  'video-gen-agent': <Video className="h-4 w-4" />,
 }
 
-/** 全 4 ステップ（Round 1 用） */
+/** 全ステップ（Round 1 用） */
 const ALL_STEPS = [
   { key: 'data-search-agent', labelKey: 'step.data_search', step: 1 },
   { key: 'marketing-plan-agent', labelKey: 'step.marketing_plan', step: 2 },
   { key: 'regulation-check-agent', labelKey: 'step.regulation', step: 4 },
   { key: 'brochure-gen-agent', labelKey: 'step.brochure', step: 5 },
+  { key: 'video-gen-agent', labelKey: 'step.video', step: 5 },
 ]
 
 /** Round 2+ 用（データ分析は Round 1 を継承） */
@@ -34,6 +37,11 @@ interface Round {
 
 function getCollapsedSummary(stepKey: string, content: TextContent | undefined, t: (key: string) => string): string {
   if (!content) return ''
+  if (stepKey === 'video-gen-agent') {
+    const videoStatusMessage = extractVideoStatusMessage([content])
+    if (videoStatusMessage) return videoStatusMessage
+    if (extractVideoUrl([content])) return t('workflow.video.ready')
+  }
   if (stepKey === 'brochure-gen-agent' || content.content_type === 'html') {
     return t('workflow.brochure.ready')
   }
@@ -72,15 +80,11 @@ function isStepToolEvent(event: ToolEvent, agentKey: string, roundNumber: number
   if (event.version !== roundNumber) {
     return false
   }
-  if (event.agent === agentKey) {
-    return true
-  }
-
-  return roundNumber > 1 && agentKey === 'marketing-plan-agent' && event.agent === 'improvement-mcp'
+  return resolveToolStepKey(event.agent, event.step_key) === agentKey
 }
 
 function isMcpToolEvent(event: ToolEvent): boolean {
-  return (event.source || (event.agent === 'improvement-mcp' ? 'mcp' : undefined)) === 'mcp'
+  return resolveToolProvider(event) === 'mcp'
 }
 
 interface Props {
@@ -112,9 +116,7 @@ export function WorkflowAccordion({
   const currentAgent = agentProgress?.agent ?? ''
   const activeStepKey = currentAgent === 'plan-revision-agent'
     ? 'regulation-check-agent'
-    : currentAgent === 'video-gen-agent'
-      ? 'brochure-gen-agent'
-      : currentAgent
+    : currentAgent
 
   const rounds = useMemo(() => splitIntoRounds(textContents), [textContents])
   const totalRounds = rounds.length || 1
@@ -193,12 +195,6 @@ export function WorkflowAccordion({
     if (isPastRound) return 'completed'
     if (!agentProgress) return 'pending'
     const hasContent = roundContents.some(c => c.agent === stepKey)
-
-    // brochure-gen と video-gen は同じ step 5 を共有。
-    // video-gen が running のときは brochure セクションも「実行中」扱い
-    if (stepKey === 'brochure-gen-agent' && agentProgress.agent === 'video-gen-agent') {
-      return agentProgress.status === 'running' ? 'active' : 'completed'
-    }
 
     if (stepKey === 'regulation-check-agent' && agentProgress.agent === 'plan-revision-agent') {
       return agentProgress.status === 'running' ? 'active' : 'completed'
@@ -308,6 +304,9 @@ export function WorkflowAccordion({
                 <div className="py-3 space-y-2">
                   <p className="text-sm text-[var(--text-secondary)]">{t('workflow.brochure.ready')}</p>
                   <p className="text-xs text-[var(--text-muted)]">{t('workflow.brochure.preview_hint')}</p>
+                </div>
+              ) : step.key === 'video-gen-agent' ? (
+                <div className="py-3 space-y-2">
                   {(() => {
                     const videoContent = extractVideoUrl(roundContents)
                     const videoStatusMessage = extractVideoStatusMessage(roundContents)
@@ -318,7 +317,7 @@ export function WorkflowAccordion({
                       const isIssueMessage = videoStatusMessage.startsWith('⚠️') || videoStatusMessage.startsWith('❌')
                       return <p className={`text-sm ${isIssueMessage ? 'text-[var(--warning-text)]' : 'text-[var(--text-muted)]'}`}>{videoStatusMessage}</p>
                     }
-                    return null
+                    return <p className="text-sm text-[var(--text-muted)]">{t('workflow.video.pending')}</p>
                   })()}
                 </div>
               ) : (
@@ -402,6 +401,26 @@ export function WorkflowAccordion({
           </div>
         )
       })}
+
+      {(() => {
+        const renderedStepKeys = new Set(ALL_STEPS.map(step => step.key))
+        const extraToolEvents = toolEvents.filter(
+          event => !renderedStepKeys.has(resolveToolStepKey(event.agent, event.step_key)),
+        )
+        if (extraToolEvents.length === 0) return null
+
+        return (
+          <div className="rounded-2xl border border-[var(--panel-border)] bg-[var(--surface)] px-4 py-3">
+            <div className="mb-2 flex items-center justify-between gap-3">
+              <span className="text-sm font-medium">{t('workflow.tool_additional')}</span>
+              <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
+                {t('workflow.tool_count').replace('{n}', String(extraToolEvents.length))}
+              </span>
+            </div>
+            <ToolEventBadges events={extraToolEvents} t={t} />
+          </div>
+        )
+      })()}
 
       {/* エラー表示 */}
       {error && <ErrorRetry error={error} onRetry={onRetry} retryLabel={t('error.retry')} t={t} />}

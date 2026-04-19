@@ -14,6 +14,7 @@ from agent_framework import tool
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
 from src.config import get_settings
+from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
 
@@ -390,14 +391,15 @@ async def generate_hero_image(
         destination: 旅行先の地名
         style: 画像スタイル（photorealistic/illustration/watercolor）
     """
-    full_prompt = f"{style} travel photo of {destination}. {prompt}"
-    data_uri = await _generate_image(full_prompt, "1536x1024")
-    conversation_id = _get_current_conversation_id()
-    with _images_lock:
-        _pending_images.setdefault(conversation_id, {})["hero"] = data_uri
-    return json.dumps(
-        {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
-    )
+    async with trace_tool_invocation("generate_hero_image", agent_name="brochure-gen-agent"):
+        full_prompt = f"{style} travel photo of {destination}. {prompt}"
+        data_uri = await _generate_image(full_prompt, "1536x1024")
+        conversation_id = _get_current_conversation_id()
+        with _images_lock:
+            _pending_images.setdefault(conversation_id, {})["hero"] = data_uri
+        return json.dumps(
+            {"status": "generated", "type": "hero", "size": "1536x1024", "message": "ヒーロー画像を生成しました。"}
+        )
 
 
 @tool
@@ -411,22 +413,23 @@ async def generate_banner_image(
         prompt: 画像生成プロンプト（英語推奨）
         platform: SNS プラットフォーム（instagram/twitter/facebook）
     """
-    spec = _get_banner_platform_spec(platform)
-    full_prompt = f"{prompt}. {spec['prompt_suffix']}"
-    data_uri = await _generate_image(full_prompt, spec["size"])
-    conversation_id = _get_current_conversation_id()
-    with _images_lock:
-        _pending_images.setdefault(conversation_id, {})[f"banner_{spec['platform']}"] = data_uri
-    return json.dumps(
-        {
-            "status": "generated",
-            "type": "banner",
-            "platform": spec["platform"],
-            "size": spec["size"],
-            "display_aspect_ratio": spec["display_aspect_ratio"],
-            "message": f"{spec['label']} 用バナーを生成しました。",
-        }
-    )
+    async with trace_tool_invocation("generate_banner_image", agent_name="brochure-gen-agent"):
+        spec = _get_banner_platform_spec(platform)
+        full_prompt = f"{prompt}. {spec['prompt_suffix']}"
+        data_uri = await _generate_image(full_prompt, spec["size"])
+        conversation_id = _get_current_conversation_id()
+        with _images_lock:
+            _pending_images.setdefault(conversation_id, {})[f"banner_{spec['platform']}"] = data_uri
+        return json.dumps(
+            {
+                "status": "generated",
+                "type": "banner",
+                "platform": spec["platform"],
+                "size": spec["size"],
+                "display_aspect_ratio": spec["display_aspect_ratio"],
+                "message": f"{spec['label']} 用バナーを生成しました。",
+            }
+        )
 
 
 @tool
@@ -439,79 +442,80 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
     Args:
         pdf_path: 解析対象の PDF ファイルパス
     """
-    # パストラバーサル防止: data/ ディレクトリ内のみアクセスを許可
-    allowed_dir = Path(__file__).resolve().parent.parent.parent / "data"
-    resolved = Path(pdf_path).resolve()
-    if not str(resolved).startswith(str(allowed_dir)):
-        return json.dumps({"error": "指定されたパスはアクセスが許可されていません"}, ensure_ascii=False)
-    if not resolved.exists():
-        return json.dumps({"error": f"ファイルが見つかりません: {pdf_path}"}, ensure_ascii=False)
+    async with trace_tool_invocation("analyze_existing_brochure", agent_name="brochure-gen-agent"):
+        # パストラバーサル防止: data/ ディレクトリ内のみアクセスを許可
+        allowed_dir = Path(__file__).resolve().parent.parent.parent / "data"
+        resolved = Path(pdf_path).resolve()
+        if not str(resolved).startswith(str(allowed_dir)):
+            return json.dumps({"error": "指定されたパスはアクセスが許可されていません"}, ensure_ascii=False)
+        if not resolved.exists():
+            return json.dumps({"error": f"ファイルが見つかりません: {pdf_path}"}, ensure_ascii=False)
 
-    settings = get_settings()
-    endpoint = settings.get("content_understanding_endpoint", "")
-    if not endpoint:
-        return "⚠️ PDF 解析は現在利用できません。CONTENT_UNDERSTANDING_ENDPOINT 環境変数を設定してください。"
+        settings = get_settings()
+        endpoint = settings.get("content_understanding_endpoint", "")
+        if not endpoint:
+            return "⚠️ PDF 解析は現在利用できません。CONTENT_UNDERSTANDING_ENDPOINT 環境変数を設定してください。"
 
-    # PDF ファイルを読み込む
-    try:
-        with open(resolved, "rb") as f:
-            pdf_bytes = f.read()
-    except FileNotFoundError:
-        return f"❌ ファイルが見つかりません: {pdf_path}"
-    except OSError as exc:
-        return f"❌ ファイル読み込みエラー: {exc}"
+        # PDF ファイルを読み込む
+        try:
+            with open(resolved, "rb") as f:
+                pdf_bytes = f.read()
+        except FileNotFoundError:
+            return f"❌ ファイルが見つかりません: {pdf_path}"
+        except OSError as exc:
+            return f"❌ ファイル読み込みエラー: {exc}"
 
-    # Content Understanding API でドキュメント解析
-    try:
-        credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        # Content Understanding API でドキュメント解析
+        try:
+            credential = DefaultAzureCredential()
+            token = credential.get_token("https://cognitiveservices.azure.com/.default")
 
-        analyze_url = (
-            f"{endpoint.rstrip('/')}/contentunderstanding/analyzers/"
-            f"prebuilt-document-rag:analyze?api-version=2025-05-01-preview"
-        )
+            analyze_url = (
+                f"{endpoint.rstrip('/')}/contentunderstanding/analyzers/"
+                f"prebuilt-document-rag:analyze?api-version=2025-05-01-preview"
+            )
 
-        request = urllib.request.Request(
-            analyze_url,
-            data=pdf_bytes,
-            headers={
-                "Authorization": f"Bearer {token.token}",
-                "Content-Type": "application/pdf",
-            },
-            method="POST",
-        )
+            request = urllib.request.Request(
+                analyze_url,
+                data=pdf_bytes,
+                headers={
+                    "Authorization": f"Bearer {token.token}",
+                    "Content-Type": "application/pdf",
+                },
+                method="POST",
+            )
 
-        with urllib.request.urlopen(request, timeout=60) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+            with urllib.request.urlopen(request, timeout=60) as resp:
+                result = json.loads(resp.read().decode("utf-8"))
 
-        # 解析結果からレイアウト・テキスト情報を構造化して返す
-        pages = result.get("pages", [])
-        paragraphs = result.get("paragraphs", [])
+            # 解析結果からレイアウト・テキスト情報を構造化して返す
+            pages = result.get("pages", [])
+            paragraphs = result.get("paragraphs", [])
 
-        summary_parts: list[str] = [
-            f"📄 PDF 解析結果: {pdf_path}",
-            f"  ページ数: {len(pages)}",
-            "",
-            "--- 抽出テキスト ---",
-        ]
+            summary_parts: list[str] = [
+                f"📄 PDF 解析結果: {pdf_path}",
+                f"  ページ数: {len(pages)}",
+                "",
+                "--- 抽出テキスト ---",
+            ]
 
-        for i, para in enumerate(paragraphs[:30]):
-            role = para.get("role", "text")
-            content = para.get("content", "").strip()
-            if content:
-                summary_parts.append(f"[{role}] {content}")
+            for i, para in enumerate(paragraphs[:30]):
+                role = para.get("role", "text")
+                content = para.get("content", "").strip()
+                if content:
+                    summary_parts.append(f"[{role}] {content}")
 
-        if len(paragraphs) > 30:
-            summary_parts.append(f"... 他 {len(paragraphs) - 30} 段落省略")
+            if len(paragraphs) > 30:
+                summary_parts.append(f"... 他 {len(paragraphs) - 30} 段落省略")
 
-        return "\n".join(summary_parts)
+            return "\n".join(summary_parts)
 
-    except urllib.error.URLError as exc:
-        logger.exception("Content Understanding API 呼び出しに失敗しました")
-        return f"❌ PDF 解析 API エラー: {exc}"
-    except Exception as exc:
-        logger.exception("PDF 解析中に予期しないエラーが発生しました")
-        return f"❌ PDF 解析エラー: {exc}"
+        except urllib.error.URLError as exc:
+            logger.exception("Content Understanding API 呼び出しに失敗しました")
+            return f"❌ PDF 解析 API エラー: {exc}"
+        except Exception as exc:
+            logger.exception("PDF 解析中に予期しないエラーが発生しました")
+            return f"❌ PDF 解析エラー: {exc}"
 
 
 INSTRUCTIONS = """\

@@ -4,7 +4,9 @@ import type { ToolEvent } from '../hooks/useSSE'
 import { ToolEventBadges } from './ToolEventBadges'
 
 const t = (key: string) => ({
+  'tool.source.foundry': 'Microsoft Foundry',
   'tool.source.workiq': 'Work IQ',
+  'tool.meta.inferred': 'Inferred',
   'tool.status.auth_required': 'Sign-in required',
   'tool.status.consent_required': 'Consent required',
   'tool.status.unavailable': 'Unavailable',
