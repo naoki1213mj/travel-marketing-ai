@@ -35,6 +35,8 @@ class AppSettings(TypedDict):
     manager_approval_trigger_url: str
     fabric_data_agent_url: str
     image_project_endpoint_mai: str
+    marketing_plan_runtime: str
+    marketing_plan_prompt_agent_name: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -59,6 +61,8 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "manager_approval_trigger_url": ("MANAGER_APPROVAL_TRIGGER_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
+    "marketing_plan_runtime": ("MARKETING_PLAN_RUNTIME",),
+    "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -68,6 +72,8 @@ _DEFAULTS: dict[str, str] = {
     "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "allowed_origins": "http://localhost:5173",
+    "marketing_plan_runtime": "foundry_prompt",
+    "marketing_plan_prompt_agent_name": "travel-marketing-plan",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

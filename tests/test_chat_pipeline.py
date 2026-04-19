@@ -138,6 +138,45 @@ class TestExtractPlanSummary:
         assert result.startswith("春の北海道絶景ツアー。雪景色と温泉を満喫")
 
 
+class TestMarketingPlanRuntimeSettings:
+    """marketing-plan-agent runtime selector のテスト"""
+
+    def test_resolve_runtime_defaults_to_foundry_prompt(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        assert chat_module._resolve_marketing_plan_runtime(None) == "foundry_prompt"
+
+    def test_resolve_runtime_request_override_wins(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        assert (
+            chat_module._resolve_marketing_plan_runtime({"marketing_plan_runtime": "legacy"})
+            == "legacy"
+        )
+
+    def test_build_effective_workflow_settings_includes_runtime(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"marketing_plan_runtime": "foundry_prompt"})
+        assert chat_module._build_effective_workflow_settings(
+            {
+                "manager_approval_enabled": True,
+                "manager_email": "manager@example.com",
+            }
+        ) == {
+            "manager_approval_enabled": True,
+            "manager_email": "manager@example.com",
+            "marketing_plan_runtime": "foundry_prompt",
+        }
+
+    def test_parse_saved_workflow_settings_keeps_backward_compatibility(self) -> None:
+        assert chat_module._parse_saved_workflow_settings(
+            {
+                "manager_approval_enabled": True,
+                "manager_email": "manager@example.com",
+            }
+        ) == {
+            "manager_approval_enabled": True,
+            "manager_email": "manager@example.com",
+        }
+
+
 # --- _extract_inline_images テスト ---
 
 

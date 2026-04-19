@@ -124,6 +124,7 @@ export async function connectSSE(
     body.workflow_settings = {
       manager_approval_enabled: settings.managerApprovalEnabled,
       manager_email: trimmedManagerEmail,
+      marketing_plan_runtime: settings.marketingPlanRuntime,
     }
   }
   if (conversationSettings && !conversationId) {

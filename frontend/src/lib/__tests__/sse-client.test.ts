@@ -58,6 +58,38 @@ describe('connectSSE', () => {
     expect(body.message).toBe('hello')
   })
 
+  it('includes marketing plan runtime in workflow settings', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_prompt',
+      },
+    )
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.workflow_settings).toMatchObject({
+      marketing_plan_runtime: 'foundry_prompt',
+    })
+  })
+
   it('sends conversation settings when starting a new conversation', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 

@@ -1,6 +1,7 @@
 """SSE チャットエンドポイント。Workflow の結果を SSE ストリームで返す。"""
 
 import asyncio
+import inspect
 import json
 import logging
 import random
@@ -169,6 +170,10 @@ class WorkflowSettings(TypedDict):
 
     manager_approval_enabled: bool
     manager_email: str
+    marketing_plan_runtime: NotRequired[str]
+
+
+MarketingPlanRuntime = Literal["legacy", "foundry_prompt"]
 
 
 class PendingApprovalContext(TypedDict):
@@ -733,6 +738,51 @@ def _resolve_raw_user_settings(user_settings: dict | None, legacy_settings: dict
     return None
 
 
+def _sanitize_marketing_plan_runtime(value: object) -> MarketingPlanRuntime | None:
+    """marketing-plan-agent の runtime selector を正規化する。"""
+    if not isinstance(value, str):
+        return None
+    normalized = _sanitize_optional_text(value).lower().replace("-", "_")
+    if normalized in {"legacy", "foundry_prompt"}:
+        return normalized
+    if normalized:
+        raise ValueError("marketing_plan_runtime は legacy または foundry_prompt を指定してください")
+    return None
+
+
+def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) -> MarketingPlanRuntime:
+    """request override と環境変数から marketing-plan-agent runtime を解決する。"""
+    if workflow_settings:
+        runtime_override = _sanitize_marketing_plan_runtime(workflow_settings.get("marketing_plan_runtime"))
+        if runtime_override is not None:
+            return runtime_override
+    return _sanitize_marketing_plan_runtime(get_settings()["marketing_plan_runtime"]) or "legacy"
+
+
+def _build_effective_workflow_settings(workflow_settings: WorkflowSettings | None) -> WorkflowSettings:
+    """実行時に使う完全な workflow settings を構築する。"""
+    source = workflow_settings or {}
+    return {
+        "manager_approval_enabled": _to_bool(source.get("manager_approval_enabled")),
+        "manager_email": _sanitize_optional_text(source.get("manager_email")),
+        "marketing_plan_runtime": _resolve_marketing_plan_runtime(workflow_settings),
+    }
+
+
+def _parse_saved_workflow_settings(raw_settings: dict | None) -> WorkflowSettings | None:
+    """保存済みイベントから workflow settings を後方互換込みで復元する。"""
+    if not isinstance(raw_settings, dict):
+        return None
+    parsed: WorkflowSettings = {
+        "manager_approval_enabled": _to_bool(raw_settings.get("manager_approval_enabled")),
+        "manager_email": _sanitize_optional_text(raw_settings.get("manager_email")),
+    }
+    runtime = _sanitize_optional_text(raw_settings.get("marketing_plan_runtime"))
+    if runtime:
+        parsed["marketing_plan_runtime"] = runtime
+    return parsed
+
+
 def _normalize_model_settings(raw_settings: dict | None) -> dict | None:
     """モデル設定だけを抽出して正規化する。"""
     if not isinstance(raw_settings, dict):
@@ -772,16 +822,24 @@ def _normalize_workflow_settings(
     email = ""
     if isinstance(source, dict):
         email = _sanitize_email_value(source.get("manager_email") or source.get("managerEmail"))
+        runtime = _sanitize_marketing_plan_runtime(
+            source.get("marketing_plan_runtime") or source.get("marketingPlanRuntime")
+        )
+    else:
+        runtime = None
 
     if enabled and not email:
         raise ValueError("上司承認を有効化する場合は上司メールアドレスが必要です")
-    if not enabled and not email:
+    if not enabled and not email and runtime is None:
         return None
 
-    return {
+    workflow_settings: WorkflowSettings = {
         "manager_approval_enabled": enabled,
         "manager_email": email,
     }
+    if runtime is not None:
+        workflow_settings["marketing_plan_runtime"] = runtime
+    return workflow_settings
 
 
 def _validate_manager_approval_configuration(workflow_settings: WorkflowSettings | None) -> None:
@@ -916,6 +974,10 @@ def _extract_result_text(result: object) -> str:
     """agent.run() の返り値からアシスタント本文を取り出す。"""
     if result is None:
         return ""
+
+    output_text = getattr(result, "output_text", None)
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
 
     direct_text = _extract_message_text(result)
     if direct_text:
@@ -1401,6 +1463,10 @@ def _collect_result_outputs(result: object) -> list[object]:
     if isinstance(contents, list):
         queue.extend(contents)
 
+    result_output = getattr(result, "output", None)
+    if isinstance(result_output, list):
+        queue.extend(result_output)
+
     try:
         outputs = result.get_outputs() if hasattr(result, "get_outputs") else []
     except AttributeError, TypeError, RuntimeError, OSError:
@@ -1494,10 +1560,7 @@ async def _load_pending_approval_context(
                 model_settings = event_model_settings
             event_workflow_settings = data.get("workflow_settings")
             if isinstance(event_workflow_settings, dict):
-                workflow_settings = {
-                    "manager_approval_enabled": _to_bool(event_workflow_settings.get("manager_approval_enabled")),
-                    "manager_email": _sanitize_optional_text(event_workflow_settings.get("manager_email")),
-                }
+                workflow_settings = _parse_saved_workflow_settings(event_workflow_settings)
             if data.get("approval_scope") == "manager":
                 approval_scope = "manager"
         if event_name != SSEEventType.TEXT.value:
@@ -1568,6 +1631,7 @@ async def _execute_agent(
     user_input: str,
     conversation_id: str,
     model_settings: dict | None = None,
+    workflow_settings: WorkflowSettings | None = None,
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
 ) -> AgentExecutionOutcome:
@@ -1633,20 +1697,49 @@ async def _execute_agent(
     result = None
     delay_seconds = 5.0
     max_attempts = 5
+    marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings) if agent_name == "marketing-plan-agent" else "legacy"
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
-            agent = create_fn(model_settings)
-            with tool_event_context(
-                attempt_tool_events.append,
-                agent_name=agent_name,
-                step=step,
-                step_key=resolve_step_key(agent_name),
-            ):
-                result = await agent.run(user_input)
+            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
+                from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
+
+                result = await asyncio.to_thread(run_marketing_plan_prompt_agent, user_input, model_settings)
+                attempt_tool_events.append(
+                    _build_agent_tool_event(
+                        "foundry_prompt_agent",
+                        "completed",
+                        agent_name=agent_name,
+                        step=step,
+                        source="foundry",
+                        provider="foundry",
+                    )
+                )
+            else:
+                agent = create_fn(model_settings)
+                with tool_event_context(
+                    attempt_tool_events.append,
+                    agent_name=agent_name,
+                    step=step,
+                    step_key=resolve_step_key(agent_name),
+                ):
+                    result = await agent.run(user_input)
             collected_tool_events = attempt_tool_events
             break
         except Exception as exc:
+            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_prompt":
+                attempt_tool_events.append(
+                    _build_agent_tool_event(
+                        "foundry_prompt_agent",
+                        "failed",
+                        agent_name=agent_name,
+                        step=step,
+                        source="foundry",
+                        provider="foundry",
+                        error_code="PROMPT_AGENT_RUNTIME_FAILED",
+                        error_message=str(exc),
+                    )
+                )
             # Code Interpreter 404: 無効化してリトライ（リトライ回数を消費しない）
             if agent_name == "data-search-agent" and _is_code_interpreter_404(exc):
                 from src.agents.data_search import _should_enable_code_interpreter, set_code_interpreter_available
@@ -1848,6 +1941,33 @@ async def _execute_agent(
         "tool_calls": tool_calls,
         "total_tokens": total_tokens,
     }
+
+
+async def _execute_agent_with_runtime(
+    *,
+    agent_name: str,
+    agent_step: int,
+    user_input: str,
+    conversation_id: str,
+    model_settings: dict | None = None,
+    workflow_settings: WorkflowSettings | None = None,
+    total_steps: int = _PIPELINE_TOTAL_STEPS,
+    include_done: bool = False,
+) -> AgentExecutionOutcome:
+    """workflow_settings 非対応の monkeypatch とも両立させる。"""
+    kwargs = {
+        "agent_name": agent_name,
+        "agent_step": agent_step,
+        "user_input": user_input,
+        "conversation_id": conversation_id,
+        "model_settings": model_settings,
+        "workflow_settings": workflow_settings,
+        "total_steps": total_steps,
+        "include_done": include_done,
+    }
+    if "workflow_settings" not in inspect.signature(_execute_agent).parameters:
+        kwargs.pop("workflow_settings")
+    return await _execute_agent(**kwargs)
 
 
 async def _maybe_run_quality_review(review_input: str) -> list[str]:
@@ -2366,14 +2486,16 @@ async def _run_single_agent(
     user_input: str,
     conversation_id: str,
     model_settings: dict | None = None,
+    workflow_settings: WorkflowSettings | None = None,
 ):
     """個別エージェントを実行して SSE イベントを生成する。"""
-    outcome = await _execute_agent(
+    outcome = await _execute_agent_with_runtime(
         agent_name=agent_name,
         agent_step=agent_step,
         user_input=user_input,
         conversation_id=conversation_id,
         model_settings=model_settings,
+        workflow_settings=workflow_settings,
         include_done=True,
     )
     for event in outcome["events"]:
@@ -2391,12 +2513,13 @@ async def _refine_events(
     pending_context = await _load_pending_approval_context(conversation_id, owner_id)
     if pending_context is not None:
         effective_model_settings = model_settings_override or pending_context.get("model_settings")
-        outcome = await _execute_agent(
+        outcome = await _execute_agent_with_runtime(
             agent_name="marketing-plan-agent",
             agent_step=2,
             user_input=_build_revision_prompt(pending_context, refine_text),
             conversation_id=conversation_id,
             model_settings=effective_model_settings,
+            workflow_settings=pending_context.get("workflow_settings"),
         )
         for event in outcome["events"]:
             yield event
@@ -2466,10 +2589,7 @@ async def _refine_events(
                 if msg.get("event") == SSEEventType.APPROVAL_REQUEST.value and isinstance(
                     data.get("workflow_settings"), dict
                 ):
-                    workflow_settings = {
-                        "manager_approval_enabled": _to_bool(data["workflow_settings"].get("manager_approval_enabled")),
-                        "manager_email": _sanitize_optional_text(data["workflow_settings"].get("manager_email")),
-                    }
+                    workflow_settings = _parse_saved_workflow_settings(data["workflow_settings"])
 
         improvement_instructions = refine_text
         mcp_configured = is_improvement_mcp_configured()
@@ -2518,12 +2638,13 @@ async def _refine_events(
         revision_sections.append(f"## 改善指示\n{improvement_instructions}")
         revision_prompt = "".join(revision_sections)
 
-        outcome = await _execute_agent(
+        outcome = await _execute_agent_with_runtime(
             agent_name="marketing-plan-agent",
             agent_step=2,
             user_input=revision_prompt,
             conversation_id=conversation_id,
             model_settings=model_settings,
+            workflow_settings=workflow_settings,
         )
         for event in outcome["events"]:
             yield event
@@ -2576,7 +2697,13 @@ async def _refine_events(
     settings = get_settings()
 
     if settings["project_endpoint"]:
-        async for event in _run_single_agent(target_agent, step, refine_text, conversation_id):
+        async for event in _run_single_agent(
+            target_agent,
+            step,
+            refine_text,
+            conversation_id,
+            workflow_settings=_build_effective_workflow_settings(None),
+        ):
             yield event
     else:
         async for event in _mock_revision_events(refine_text, conversation_id):
@@ -2710,12 +2837,13 @@ async def _post_approval_events(
 
             hero_image_task = asyncio.create_task(_pregenerate_hero())
 
-        regulation_outcome = await _execute_agent(
+        regulation_outcome = await _execute_agent_with_runtime(
             agent_name="regulation-check-agent",
             agent_step=4,
             user_input=regulation_input,
             conversation_id=conversation_id,
             model_settings=context.get("model_settings"),
+            workflow_settings=workflow_settings,
         )
         for event in regulation_outcome["events"]:
             yield event
@@ -2726,12 +2854,13 @@ async def _post_approval_events(
         regulation_text = regulation_outcome["text"]
 
         revision_input = f"## 元の企画書\n\n{context['plan_markdown']}\n\n## 規制チェック結果\n\n{regulation_text}"
-        revision_outcome = await _execute_agent(
+        revision_outcome = await _execute_agent_with_runtime(
             agent_name="plan-revision-agent",
             agent_step=4,
             user_input=revision_input,
             conversation_id=conversation_id,
             model_settings=context.get("model_settings"),
+            workflow_settings=workflow_settings,
         )
         for event in revision_outcome["events"]:
             yield event
@@ -2822,13 +2951,14 @@ async def _post_approval_events(
 
     video_summary = _extract_plan_summary(revised_plan_markdown)
     if video_summary:
-        video_outcome_task = asyncio.create_task(
-            _execute_agent(
-                agent_name="video-gen-agent",
-                agent_step=5,
-                user_input=video_summary,
-                conversation_id=conversation_id,
-                model_settings=context.get("model_settings"),
+            video_outcome_task = asyncio.create_task(
+                _execute_agent_with_runtime(
+                    agent_name="video-gen-agent",
+                    agent_step=5,
+                    user_input=video_summary,
+                    conversation_id=conversation_id,
+                    model_settings=context.get("model_settings"),
+                workflow_settings=workflow_settings,
             )
         )
 
@@ -2854,12 +2984,13 @@ async def _post_approval_events(
     if hero_image_task:
         await hero_image_task
 
-    brochure_outcome = await _execute_agent(
+    brochure_outcome = await _execute_agent_with_runtime(
         agent_name="brochure-gen-agent",
         agent_step=5,
         user_input=brochure_input,
         conversation_id=conversation_id,
         model_settings=context.get("model_settings"),
+        workflow_settings=workflow_settings,
     )
     for event in brochure_outcome["events"]:
         yield event
@@ -3256,12 +3387,13 @@ async def workflow_event_generator(
     user_time_zone: str = "UTC",
 ):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
-    analysis_outcome = await _execute_agent(
+    analysis_outcome = await _execute_agent_with_runtime(
         agent_name="data-search-agent",
         agent_step=1,
         user_input=user_input,
         conversation_id=conversation_id,
         model_settings=model_settings,
+        workflow_settings=workflow_settings,
     )
     for event in analysis_outcome["events"]:
         yield event
@@ -3327,12 +3459,13 @@ async def workflow_event_generator(
                     ),
                 )
 
-    plan_outcome = await _execute_agent(
+    plan_outcome = await _execute_agent_with_runtime(
         agent_name="marketing-plan-agent",
         agent_step=2,
         user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session),
         conversation_id=conversation_id,
         model_settings=model_settings,
+        workflow_settings=workflow_settings,
     )
     for event in plan_outcome["events"]:
         yield event
@@ -3387,7 +3520,9 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     explicit_conversation_settings = has_work_iq_overrides(body.conversation_settings, body.settings)
     try:
         normalized_model_settings = _normalize_model_settings(raw_user_settings)
-        normalized_workflow_settings = _normalize_workflow_settings(body.settings, body.workflow_settings)
+        normalized_workflow_settings = _build_effective_workflow_settings(
+            _normalize_workflow_settings(body.settings, body.workflow_settings)
+        )
         normalized_conversation_settings = normalize_conversation_settings(body.conversation_settings, body.settings)
         _validate_manager_approval_configuration(normalized_workflow_settings)
     except ValueError as exc:

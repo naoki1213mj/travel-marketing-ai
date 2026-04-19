@@ -7,6 +7,7 @@ import { useState } from 'react'
 
 export interface ModelSettings {
   model: string
+  marketingPlanRuntime: 'legacy' | 'foundry_prompt'
   temperature: number
   maxTokens: number
   topP: number
@@ -31,6 +32,7 @@ export interface ConversationSettings {
 // eslint-disable-next-line react-refresh/only-export-components
 export const DEFAULT_SETTINGS: ModelSettings = {
   model: 'gpt-5-4-mini',
+  marketingPlanRuntime: 'foundry_prompt',
   temperature: 0.7,
   maxTokens: 16384,
   topP: 1.0,
@@ -66,6 +68,11 @@ const AVAILABLE_MODELS = [
   { value: 'gpt-4-1-mini', label: 'GPT-4.1 mini' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
 ]
+
+const MARKETING_RUNTIME_OPTIONS = [
+  { value: 'legacy', labelKey: 'settings.marketingRuntime.legacy' },
+  { value: 'foundry_prompt', labelKey: 'settings.marketingRuntime.foundry_prompt' },
+] as const
 
 const AVAILABLE_IMAGE_MODELS = [
   { value: 'gpt-image-1.5', label: 'GPT Image 1.5 (default)' },
@@ -181,12 +188,13 @@ export function SettingsPanel({
 
   const resetSectionDefaults = (section: SettingsSection) => {
     if (section === 'model') {
-      onChange({
-        ...settings,
-        model: DEFAULT_SETTINGS.model,
-        temperature: DEFAULT_SETTINGS.temperature,
-        maxTokens: DEFAULT_SETTINGS.maxTokens,
-        topP: DEFAULT_SETTINGS.topP,
+        onChange({
+          ...settings,
+          model: DEFAULT_SETTINGS.model,
+          marketingPlanRuntime: DEFAULT_SETTINGS.marketingPlanRuntime,
+          temperature: DEFAULT_SETTINGS.temperature,
+          maxTokens: DEFAULT_SETTINGS.maxTokens,
+          topP: DEFAULT_SETTINGS.topP,
         iqSearchResults: DEFAULT_SETTINGS.iqSearchResults,
         iqScoreThreshold: DEFAULT_SETTINGS.iqScoreThreshold,
       })
@@ -282,6 +290,29 @@ export function SettingsPanel({
                 >
                   {AVAILABLE_MODELS.map((m) => (
                     <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label
+                    htmlFor="settings-marketing-runtime"
+                    className="text-xs font-medium text-[var(--text-secondary)]"
+                    title={t('settings.marketingRuntime.desc')}
+                  >
+                    {t('settings.marketingRuntime')}
+                    <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.marketingRuntime.desc')}>ⓘ</span>
+                  </label>
+                </div>
+                <select
+                  id="settings-marketing-runtime"
+                  value={settings.marketingPlanRuntime}
+                  onChange={(e) => update('marketingPlanRuntime', e.target.value)}
+                  aria-label={t('settings.marketingRuntime')}
+                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
+                >
+                  {MARKETING_RUNTIME_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
                   ))}
                 </select>
               </div>
