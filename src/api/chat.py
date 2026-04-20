@@ -650,6 +650,61 @@ def _build_work_iq_tool_event_data(work_iq_session: WorkIQSessionMetadata, statu
     return payload
 
 
+async def _apply_work_iq_result_to_session(
+    work_iq_session: WorkIQSessionMetadata,
+    work_iq_result: dict[str, object],
+) -> None:
+    """Work IQ 取得結果を session metadata に反映する。"""
+    brief_summary = _sanitize_optional_text(work_iq_result.get("brief_summary"))
+    brief_status = _sanitize_optional_text(work_iq_result.get("status")) or "completed"
+    warning_code = _sanitize_optional_text(work_iq_result.get("warning_code"))
+
+    if brief_summary:
+        shield_result = await check_tool_response(brief_summary)
+        if shield_result.is_safe:
+            work_iq_session["brief_summary"] = brief_summary
+            raw_source_metadata = work_iq_result.get("brief_source_metadata")
+            if isinstance(raw_source_metadata, list) and raw_source_metadata:
+                work_iq_session["brief_source_metadata"] = raw_source_metadata
+            else:
+                work_iq_session.pop("brief_source_metadata", None)
+            work_iq_session["status"] = "completed"
+            work_iq_session.pop("warning_code", None)
+            return
+
+        work_iq_session.pop("brief_summary", None)
+        work_iq_session.pop("brief_source_metadata", None)
+        work_iq_session["status"] = "unavailable"
+        work_iq_session["warning_code"] = "unavailable"
+        return
+
+    work_iq_session.pop("brief_summary", None)
+    work_iq_session.pop("brief_source_metadata", None)
+    work_iq_session["status"] = brief_status
+    if warning_code:
+        work_iq_session["warning_code"] = warning_code
+    else:
+        work_iq_session.pop("warning_code", None)
+
+
+def _should_fallback_work_iq_foundry_tool(
+    plan_outcome: AgentExecutionOutcome,
+    work_iq_runtime: WorkIQRuntime,
+    work_iq_session: WorkIQSessionMetadata | None,
+    work_iq_access_token: str,
+) -> bool:
+    """Foundry connector 経路の失敗時に graph_prefetch へフォールバックすべきか判定する。"""
+    if plan_outcome["success"] or work_iq_runtime != "foundry_tool" or not work_iq_access_token.strip():
+        return False
+    if not isinstance(work_iq_session, dict) or not work_iq_session.get("enabled"):
+        return False
+
+    event_blob = "\n".join(plan_outcome["events"])
+    return "PROMPT_AGENT_RUNTIME_FAILED" in event_blob and (
+        "Error code: 500" in event_blob or "server_error" in event_blob
+    )
+
+
 def _build_conversation_metadata_for_save(
     conversation_id: str,
     existing_conversation: dict | None,
@@ -3508,34 +3563,7 @@ async def workflow_event_generator(
                         access_token=work_iq_access_token,
                         user_time_zone=user_time_zone,
                     )
-                    brief_summary = _sanitize_optional_text(work_iq_result.get("brief_summary"))
-                    brief_status = _sanitize_optional_text(work_iq_result.get("status")) or "completed"
-                    warning_code = _sanitize_optional_text(work_iq_result.get("warning_code"))
-
-                    if brief_summary:
-                        shield_result = await check_tool_response(brief_summary)
-                        if shield_result.is_safe:
-                            work_iq_session["brief_summary"] = brief_summary
-                            raw_source_metadata = work_iq_result.get("brief_source_metadata")
-                            if isinstance(raw_source_metadata, list) and raw_source_metadata:
-                                work_iq_session["brief_source_metadata"] = raw_source_metadata
-                            else:
-                                work_iq_session.pop("brief_source_metadata", None)
-                            work_iq_session["status"] = "completed"
-                            work_iq_session.pop("warning_code", None)
-                        else:
-                            work_iq_session.pop("brief_summary", None)
-                            work_iq_session.pop("brief_source_metadata", None)
-                            work_iq_session["status"] = "unavailable"
-                            work_iq_session["warning_code"] = "unavailable"
-                    else:
-                        work_iq_session.pop("brief_summary", None)
-                        work_iq_session.pop("brief_source_metadata", None)
-                        work_iq_session["status"] = brief_status
-                        if warning_code:
-                            work_iq_session["warning_code"] = warning_code
-                        else:
-                            work_iq_session.pop("warning_code", None)
+                    await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
 
                 yield format_sse(
                     SSEEventType.TOOL_EVENT,
@@ -3555,6 +3583,41 @@ async def workflow_event_generator(
         work_iq_session=work_iq_session,
         work_iq_access_token=work_iq_access_token,
     )
+    if _should_fallback_work_iq_foundry_tool(
+        plan_outcome,
+        work_iq_runtime,
+        work_iq_session,
+        work_iq_access_token,
+    ):
+        logger.warning("Work IQ foundry_tool 経路が失敗したため graph_prefetch にフォールバックします")
+        work_iq_result = await generate_workplace_context_brief(
+            user_input=user_input,
+            source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+            access_token=work_iq_access_token,
+            user_time_zone=user_time_zone,
+        )
+        if work_iq_session:
+            await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
+            yield format_sse(
+                SSEEventType.TOOL_EVENT,
+                _build_work_iq_tool_event_data(
+                    work_iq_session,
+                    _sanitize_optional_text(work_iq_session.get("status")) or "completed",
+                ),
+            )
+
+        fallback_workflow_settings = dict(workflow_settings or {})
+        fallback_workflow_settings["work_iq_runtime"] = "graph_prefetch"
+        plan_outcome = await _execute_agent_with_runtime(
+            agent_name="marketing-plan-agent",
+            agent_step=2,
+            user_input=_build_marketing_plan_prompt(user_input, analysis_outcome["text"], work_iq_session, "graph_prefetch"),
+            conversation_id=conversation_id,
+            model_settings=model_settings,
+            workflow_settings=fallback_workflow_settings,
+            work_iq_session=work_iq_session,
+            work_iq_access_token="",
+        )
     for event in plan_outcome["events"]:
         yield event
     if not plan_outcome["success"]:

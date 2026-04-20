@@ -1253,6 +1253,137 @@ async def test_workflow_event_generator_emits_auth_required_work_iq_status_witho
 
 
 @pytest.mark.asyncio
+async def test_workflow_event_generator_falls_back_to_graph_prefetch_when_foundry_tool_errors(monkeypatch) -> None:
+    """foundry_tool が server_error で失敗したら graph_prefetch にフォールバックする。"""
+
+    captured: dict[str, object] = {"marketing_calls": []}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        if agent_name == "data-search-agent":
+            return {
+                "events": [],
+                "text": "analysis output",
+                "success": True,
+                "latency_seconds": 0.1,
+                "tool_calls": 1,
+            }
+        captured["marketing_calls"].append(
+            {
+                "prompt": user_input,
+                "workflow_settings": dict(workflow_settings or {}),
+                "access_token": work_iq_access_token,
+            }
+        )
+        if len(captured["marketing_calls"]) == 1:
+            return {
+                "events": [
+                    chat_module.format_sse(
+                        chat_module.SSEEventType.TOOL_EVENT,
+                        {
+                            "tool": "foundry_prompt_agent",
+                            "status": "failed",
+                            "agent": "marketing-plan-agent",
+                            "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
+                            "error_message": "Error code: 500 - {'error': {'code': 'server_error'}}",
+                        },
+                    ),
+                    chat_module.format_sse(
+                        chat_module.SSEEventType.ERROR,
+                        {"message": "marketing-plan-agent failed", "code": "AGENT_RUNTIME_ERROR"},
+                    ),
+                ],
+                "text": "",
+                "success": False,
+                "latency_seconds": 0.1,
+                "tool_calls": 0,
+            }
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": "marketing output", "agent": "marketing-plan-agent"},
+                )
+            ],
+            "text": "marketing output",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+        }
+
+    async def fake_generate_workplace_context_brief(**kwargs):
+        return {
+            "brief_summary": "会議メモでは学生旅行向けに SNS 訴求が重視されていました。",
+            "brief_source_metadata": [{"source": "meeting_notes", "label": "会議メモ", "count": 1}],
+            "status": "completed",
+        }
+
+    class _SafeResult:
+        is_safe = True
+
+    async def fake_check_tool_response(_: str):
+        return _SafeResult()
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
+    monkeypatch.setattr(chat_module, "check_tool_response", fake_check_tool_response)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "夏のハワイ学生旅行向けプランを企画して",
+            "conv-workiq-fallback",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="graph-token",
+            user_time_zone="Asia/Tokyo",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    marketing_calls = captured["marketing_calls"]
+    assert isinstance(marketing_calls, list)
+    assert len(marketing_calls) == 2
+    assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
+    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert "Work IQ の職場コンテキスト" in str(marketing_calls[1]["prompt"])
+    assert marketing_calls[1]["access_token"] == ""
+    assert not any(
+        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR"
+        for event_name, payload in parsed
+    )
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("source") == "workiq"
+        and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+    assert chat_module._pending_approvals["conv-workiq-fallback"]["work_iq_session"]["brief_summary"] == (
+        "会議メモでは学生旅行向けに SNS 訴求が重視されていました。"
+    )
+
+
+@pytest.mark.asyncio
 async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
     """承認待ちの修正では元の分析・企画書を含めて Agent2 を再実行する"""
     chat_module._pending_approvals.clear()
