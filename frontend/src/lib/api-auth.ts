@@ -1,4 +1,4 @@
-import { getWorkIqGraphAuth, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
+import { getWorkIqFoundryAuth, getWorkIqGraphAuth, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
 
 let cachedMsalConfigPromise: Promise<MsalConfig | null> | null = null
 
@@ -34,15 +34,34 @@ export interface DelegatedApiAuthResult {
   status: DelegatedAuthStatus
 }
 
-export async function getDelegatedApiAuth(options?: { interactive?: boolean }): Promise<DelegatedApiAuthResult> {
+export async function getDelegatedApiAuth(
+  options?: { interactive?: boolean; workIqRuntime?: 'graph_prefetch' | 'foundry_tool' },
+): Promise<DelegatedApiAuthResult> {
   const config = await getMsalConfig()
   if (!config) {
     return { headers: {}, status: 'unavailable' }
   }
 
-  const result = await getWorkIqGraphAuth(config, options?.interactive === true)
+  const runtime = options?.workIqRuntime === 'graph_prefetch' ? 'graph_prefetch' : 'foundry_tool'
+  if (runtime === 'graph_prefetch') {
+    const result = await getWorkIqGraphAuth(config, options?.interactive === true)
+    return {
+      headers: result.token ? { Authorization: `Bearer ${result.token}` } : {},
+      status: result.status,
+    }
+  }
+
+  const result = await getWorkIqFoundryAuth(config, options?.interactive === true)
+  const headers: Record<string, string> = result.token ? { Authorization: `Bearer ${result.token}` } : {}
+  if (result.status === 'ok') {
+    const graphResult = await getWorkIqGraphAuth(config, false)
+    if (graphResult.token) {
+      headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
+    }
+  }
+
   return {
-    headers: result.token ? { Authorization: `Bearer ${result.token}` } : {},
+    headers,
     status: result.status,
   }
 }

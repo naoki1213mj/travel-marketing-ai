@@ -650,6 +650,12 @@ def _build_work_iq_tool_event_data(work_iq_session: WorkIQSessionMetadata, statu
     return payload
 
 
+def _extract_bearer_token(header_value: str) -> str:
+    """Authorization ヘッダーから bearer token を安全に取り出す。"""
+    value = _sanitize_optional_text(header_value)
+    return value.split(" ", 1)[1] if value.lower().startswith("bearer ") else ""
+
+
 async def _apply_work_iq_result_to_session(
     work_iq_session: WorkIQSessionMetadata,
     work_iq_result: dict[str, object],
@@ -691,10 +697,10 @@ def _should_fallback_work_iq_foundry_tool(
     plan_outcome: AgentExecutionOutcome,
     work_iq_runtime: WorkIQRuntime,
     work_iq_session: WorkIQSessionMetadata | None,
-    work_iq_access_token: str,
+    work_iq_graph_access_token: str,
 ) -> bool:
     """Foundry connector 経路の失敗時に graph_prefetch へフォールバックすべきか判定する。"""
-    if plan_outcome["success"] or work_iq_runtime != "foundry_tool" or not work_iq_access_token.strip():
+    if plan_outcome["success"] or work_iq_runtime != "foundry_tool" or not work_iq_graph_access_token.strip():
         return False
     if not isinstance(work_iq_session, dict) or not work_iq_session.get("enabled"):
         return False
@@ -3514,6 +3520,7 @@ async def workflow_event_generator(
     conversation_settings: ConversationSettings | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    work_iq_graph_access_token: str = "",
     user_time_zone: str = "UTC",
 ):
     """実際の Workflow を実行して SSE イベントを生成する（Azure 接続時）"""
@@ -3560,7 +3567,7 @@ async def workflow_event_generator(
                     work_iq_result = await generate_workplace_context_brief(
                         user_input=user_input,
                         source_scope=list(work_iq_session.get("source_scope", [])),
-                        access_token=work_iq_access_token,
+                        access_token=work_iq_graph_access_token,
                         user_time_zone=user_time_zone,
                     )
                     await _apply_work_iq_result_to_session(work_iq_session, work_iq_result)
@@ -3587,13 +3594,13 @@ async def workflow_event_generator(
         plan_outcome,
         work_iq_runtime,
         work_iq_session,
-        work_iq_access_token,
+        work_iq_graph_access_token,
     ):
         logger.warning("Work IQ foundry_tool 経路が失敗したため graph_prefetch にフォールバックします")
         work_iq_result = await generate_workplace_context_brief(
             user_input=user_input,
             source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
-            access_token=work_iq_access_token,
+            access_token=work_iq_graph_access_token,
             user_time_zone=user_time_zone,
         )
         if work_iq_session:
@@ -3676,8 +3683,10 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     settings = get_settings()
     project_endpoint_available = bool(settings["project_endpoint"])
     caller_identity = extract_request_identity(request, expected_tenant_id=settings["entra_tenant_id"])
-    authorization = _sanitize_optional_text(request.headers.get("authorization"))
-    work_iq_access_token = authorization.split(" ", 1)[1] if authorization.lower().startswith("bearer ") else ""
+    work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
+    work_iq_graph_access_token = _extract_bearer_token(
+        _sanitize_optional_text(request.headers.get("x-work-iq-graph-authorization"))
+    )
     work_iq_auth_status = _sanitize_optional_text(request.headers.get("x-work-iq-auth-status")).lower()
     user_time_zone = _sanitize_optional_text(request.headers.get("x-user-timezone")) or "UTC"
     raw_user_settings = _resolve_raw_user_settings(body.user_settings, body.settings)
@@ -3691,6 +3700,8 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
         _validate_manager_approval_configuration(normalized_workflow_settings)
     except ValueError as exc:
         return _error_stream(str(exc), "INVALID_SETTINGS")
+    if not work_iq_graph_access_token and _resolve_work_iq_runtime(normalized_workflow_settings) == "graph_prefetch":
+        work_iq_graph_access_token = work_iq_access_token
 
     existing_conversation = (
         await get_conversation(conversation_id, owner_id=caller_identity["user_id"])
@@ -3769,6 +3780,7 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                         conversation_settings=effective_conversation_settings,
                         work_iq_session=effective_work_iq_session,
                         work_iq_access_token=work_iq_access_token,
+                        work_iq_graph_access_token=work_iq_graph_access_token,
                         user_time_zone=user_time_zone,
                     )
                 ):

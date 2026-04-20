@@ -91,3 +91,5 @@ def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(
     assert tools[0].as_dict()["type"] == "web_search"
     assert tools[1].as_dict()["connector_id"] == "connector_outlookemail"
     assert tools[2].as_dict()["connector_id"] == "connector_microsoftteams"
+    assert tools[1].as_dict()["require_approval"] == "never"
+    assert tools[2].as_dict()["require_approval"] == "never"

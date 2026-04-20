@@ -91,7 +91,7 @@ def _build_work_iq_tools(config: WorkIQPromptConfig, access_token: str) -> list[
                     server_label=server_label,
                     authorization=access_token,
                     allowed_tools=MCPToolFilter(read_only=True),
-                    require_approval="always",
+                    require_approval="never",
                 )
             )
     return tools

@@ -138,7 +138,10 @@ export async function connectSSE(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (conversationSettings?.workIqEnabled) {
-    const delegatedAuth = await getDelegatedApiAuth({ interactive: !conversationId })
+    const delegatedAuth = await getDelegatedApiAuth({
+      interactive: !conversationId,
+      ...(settings?.workIqRuntime ? { workIqRuntime: settings.workIqRuntime } : {}),
+    })
     Object.assign(headers, delegatedAuth.headers)
     headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
     if (delegatedAuth.status !== 'ok' && delegatedAuth.status !== 'redirecting') {

@@ -1160,7 +1160,7 @@ async def test_workflow_event_generator_injects_work_iq_brief_and_emits_tool_eve
                 "owner_tid": "tid-123",
                 "owner_upn": "user@example.com",
             },
-            work_iq_access_token="graph-token",
+            work_iq_graph_access_token="graph-token",
             user_time_zone="Asia/Tokyo",
         )
     ]
@@ -1355,7 +1355,8 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_when_foundr
                 "owner_tid": "tid-123",
                 "owner_upn": "user@example.com",
             },
-            work_iq_access_token="graph-token",
+            work_iq_access_token="foundry-token",
+            work_iq_graph_access_token="graph-token",
             user_time_zone="Asia/Tokyo",
         )
     ]

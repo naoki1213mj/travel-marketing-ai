@@ -35,6 +35,13 @@ const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/ChannelMessage.Read.All',
   'https://graph.microsoft.com/ExternalItem.Read.All',
 ]
+const AGENT_365_TOOLS_APP_ID = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1'
+const WORK_IQ_FOUNDRY_SCOPES = [
+  `${AGENT_365_TOOLS_APP_ID}/McpServers.Mail.All`,
+  `${AGENT_365_TOOLS_APP_ID}/McpServers.Calendar.All`,
+  `${AGENT_365_TOOLS_APP_ID}/McpServers.Teams.All`,
+  `${AGENT_365_TOOLS_APP_ID}/McpServers.OneDriveSharepoint.All`,
+]
 
 export async function initMsal(config: MsalConfig): Promise<void> {
   if (msalInstance) return
@@ -124,4 +131,12 @@ export async function getWorkIqGraphToken(config: MsalConfig, interactive = fals
 
 export async function getWorkIqGraphAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
   return acquireDelegatedToken(config, WORK_IQ_GRAPH_SCOPES, interactive)
+}
+
+export async function getWorkIqFoundryToken(config: MsalConfig, interactive = false): Promise<string | null> {
+  return (await acquireDelegatedToken(config, WORK_IQ_FOUNDRY_SCOPES, interactive)).token
+}
+
+export async function getWorkIqFoundryAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
+  return acquireDelegatedToken(config, WORK_IQ_FOUNDRY_SCOPES, interactive)
 }

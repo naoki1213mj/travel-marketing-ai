@@ -145,7 +145,13 @@ describe('connectSSE', () => {
   })
 
   it('adds delegated auth headers when Work IQ is enabled', async () => {
-    getDelegatedApiAuth.mockResolvedValue({ headers: { Authorization: 'Bearer delegated-token' }, status: 'ok' })
+    getDelegatedApiAuth.mockResolvedValue({
+      headers: {
+        Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
+      status: 'ok',
+    })
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await connectSSE('hello', {}, undefined, undefined, undefined, {
@@ -155,8 +161,42 @@ describe('connectSSE', () => {
 
     expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true })
     const [, options] = mockFetch.mock.calls[0]
-    expect(options.headers.Authorization).toBe('Bearer delegated-token')
+    expect(options.headers.Authorization).toBe('Bearer foundry-token')
+    expect(options.headers['X-Work-IQ-Graph-Authorization']).toBe('Bearer graph-token')
     expect(options.headers['X-User-Timezone']).toBeTruthy()
+  })
+
+  it('passes work iq runtime to delegated auth lookup when present', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_prompt',
+        workIqRuntime: 'foundry_tool',
+      },
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+    )
+
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
   })
 
   it('emits a local Work IQ tool event when consent is required', async () => {
