@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ErrorBoundary.tsx'
+import { bootstrapDelegatedApiAuth } from './lib/api-auth.ts'
+
+void bootstrapDelegatedApiAuth()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

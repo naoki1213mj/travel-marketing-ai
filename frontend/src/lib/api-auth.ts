@@ -1,6 +1,7 @@
-import { getWorkIqFoundryAuth, getWorkIqGraphAuth, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
+import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
 
 let cachedMsalConfigPromise: Promise<MsalConfig | null> | null = null
+let delegatedAuthBootstrapPromise: Promise<void> | null = null
 
 function normalizeMsalConfig(raw: unknown): MsalConfig | null {
   if (!raw || typeof raw !== 'object') return null
@@ -29,6 +30,18 @@ async function getMsalConfig(): Promise<MsalConfig | null> {
   return cachedMsalConfigPromise
 }
 
+export async function bootstrapDelegatedApiAuth(): Promise<void> {
+  if (!delegatedAuthBootstrapPromise) {
+    delegatedAuthBootstrapPromise = (async () => {
+      const config = await getMsalConfig()
+      if (!config) return
+      await initMsal(config)
+    })()
+  }
+
+  await delegatedAuthBootstrapPromise
+}
+
 export interface DelegatedApiAuthResult {
   headers: Record<string, string>
   status: DelegatedAuthStatus
@@ -37,6 +50,7 @@ export interface DelegatedApiAuthResult {
 export async function getDelegatedApiAuth(
   options?: { interactive?: boolean; workIqRuntime?: 'graph_prefetch' | 'foundry_tool' },
 ): Promise<DelegatedApiAuthResult> {
+  await bootstrapDelegatedApiAuth()
   const config = await getMsalConfig()
   if (!config) {
     return { headers: {}, status: 'unavailable' }
@@ -72,4 +86,5 @@ export async function getDelegatedApiHeaders(options?: { interactive?: boolean }
 
 export function resetDelegatedApiAuthCache(): void {
   cachedMsalConfigPromise = null
+  delegatedAuthBootstrapPromise = null
 }

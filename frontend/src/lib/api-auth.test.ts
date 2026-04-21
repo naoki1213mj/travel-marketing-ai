@@ -6,14 +6,17 @@ const originalFetch = global.fetch
 const {
   getWorkIqFoundryAuth,
   getWorkIqGraphAuth,
+  initMsal,
 } = vi.hoisted(() => ({
   getWorkIqFoundryAuth: vi.fn(),
   getWorkIqGraphAuth: vi.fn(),
+  initMsal: vi.fn(async () => {}),
 }))
 
 vi.mock('./msal-auth', () => ({
   getWorkIqFoundryAuth,
   getWorkIqGraphAuth,
+  initMsal,
 }))
 
 describe('getDelegatedApiAuth', () => {
@@ -25,6 +28,8 @@ describe('getDelegatedApiAuth', () => {
         headers: { 'Content-Type': 'application/json' },
       })
     ) as typeof fetch
+    initMsal.mockReset()
+    initMsal.mockResolvedValue(undefined)
     getWorkIqFoundryAuth.mockReset()
     getWorkIqGraphAuth.mockReset()
   })
@@ -40,6 +45,7 @@ describe('getDelegatedApiAuth', () => {
 
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
 
+    expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
@@ -56,6 +62,7 @@ describe('getDelegatedApiAuth', () => {
 
     const result = await getDelegatedApiAuth({ interactive: false, workIqRuntime: 'graph_prefetch' })
 
+    expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).not.toHaveBeenCalled()
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
@@ -70,6 +77,7 @@ describe('getDelegatedApiAuth', () => {
 
     const result = await getDelegatedApiAuth({ interactive: false })
 
+    expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
@@ -79,5 +87,15 @@ describe('getDelegatedApiAuth', () => {
       },
       status: 'ok',
     })
+  })
+
+  it('bootstraps redirect handling only once for repeated calls', async () => {
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
+
+    await getDelegatedApiAuth({ interactive: false })
+    await getDelegatedApiAuth({ interactive: false })
+
+    expect(initMsal).toHaveBeenCalledTimes(1)
   })
 })
