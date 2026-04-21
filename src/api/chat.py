@@ -829,13 +829,15 @@ def _sanitize_work_iq_runtime(value: object) -> WorkIQRuntime | None:
 
 
 def _resolve_work_iq_timeout_seconds() -> float:
-    """Work IQ 関連経路のタイムアウトを返す。"""
+    """Foundry connector 側で使う Work IQ タイムアウトを返す。"""
     raw_timeout = _sanitize_optional_text(get_settings().get("work_iq_timeout_seconds"))
     try:
         timeout_seconds = float(raw_timeout)
     except ValueError:
-        return 120.0
-    return timeout_seconds if timeout_seconds > 0 else 120.0
+        return 95.0
+    if timeout_seconds <= 0:
+        return 95.0
+    return min(timeout_seconds, 95.0)
 
 
 def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) -> MarketingPlanRuntime:
@@ -1856,26 +1858,33 @@ async def _execute_agent(
                     and work_iq_session.get("enabled")
                     and _resolve_work_iq_runtime(workflow_settings) == "foundry_tool"
                 )
-                run_prompt_agent = asyncio.to_thread(
-                    run_marketing_plan_prompt_agent,
-                    user_input,
-                    model_settings,
-                    work_iq={
-                        "enabled": work_iq_enabled_for_prompt,
-                        "source_scope": list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
-                    },
-                    work_iq_access_token=work_iq_access_token,
-                )
-                if work_iq_enabled_for_prompt:
-                    timeout_seconds = _resolve_work_iq_timeout_seconds()
-                    try:
-                        result = await asyncio.wait_for(run_prompt_agent, timeout=timeout_seconds)
-                    except TimeoutError as exc:
-                        raise TimeoutError(
-                            f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s"
-                        ) from exc
-                else:
-                    result = await run_prompt_agent
+                with tool_event_context(
+                    attempt_tool_events.append,
+                    agent_name=agent_name,
+                    step=step,
+                    step_key=resolve_step_key(agent_name),
+                    provider="foundry",
+                ):
+                    run_prompt_agent = asyncio.to_thread(
+                        run_marketing_plan_prompt_agent,
+                        user_input,
+                        model_settings,
+                        work_iq={
+                            "enabled": work_iq_enabled_for_prompt,
+                            "source_scope": list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                        },
+                        work_iq_access_token=work_iq_access_token,
+                    )
+                    if work_iq_enabled_for_prompt:
+                        timeout_seconds = _resolve_work_iq_timeout_seconds()
+                        try:
+                            result = await asyncio.wait_for(run_prompt_agent, timeout=timeout_seconds)
+                        except TimeoutError as exc:
+                            raise TimeoutError(
+                                f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s"
+                            ) from exc
+                    else:
+                        result = await run_prompt_agent
                 attempt_tool_events.append(
                     _build_agent_tool_event(
                         "foundry_prompt_agent",

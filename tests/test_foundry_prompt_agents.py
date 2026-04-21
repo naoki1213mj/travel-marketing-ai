@@ -60,6 +60,7 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_without_work_iq_to
 def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(monkeypatch) -> None:
     """Work IQ connector 利用時は agent_reference を外して tools を直接渡す。"""
     responses_client = _FakeResponsesClient()
+    emitted_events: list[dict[str, object]] = []
     monkeypatch.setattr(
         module,
         "get_settings",
@@ -71,6 +72,7 @@ def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(
     )
     monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
     monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: _FakeProjectClient(responses_client))
+    monkeypatch.setattr(module, "emit_tool_event", lambda payload: emitted_events.append(payload) or payload)
 
     result = module.run_marketing_plan_prompt_agent(
         "test input",
@@ -83,7 +85,10 @@ def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(
     kwargs = responses_client.calls[0]
     assert kwargs["input"] == "test input"
     assert kwargs["model"] == "gpt-5-4-mini"
-    assert kwargs["instructions"] == module.MARKETING_PLAN_INSTRUCTIONS
+    assert module.MARKETING_PLAN_INSTRUCTIONS in kwargs["instructions"]
+    assert "Microsoft 365 参照ガイド" in kwargs["instructions"]
+    assert "メール" in kwargs["instructions"]
+    assert "Teams チャット" in kwargs["instructions"]
     assert "extra_body" not in kwargs
     tools = kwargs["tools"]
     assert isinstance(tools, list)
@@ -93,3 +98,16 @@ def test_run_marketing_plan_prompt_agent_uses_direct_tools_when_work_iq_enabled(
     assert tools[2].as_dict()["connector_id"] == "connector_microsoftteams"
     assert tools[1].as_dict()["require_approval"] == "never"
     assert tools[2].as_dict()["require_approval"] == "never"
+    assert [event["status"] for event in emitted_events] == ["running", "completed"]
+    assert all(event["tool"] == "workiq_foundry_tool" for event in emitted_events)
+
+
+def test_build_work_iq_tools_prefers_teams_for_meeting_notes() -> None:
+    """meeting_notes は不要な calendar connector を混ぜない。"""
+    tools, resolved_tools = module._build_work_iq_tools(
+        {"enabled": True, "source_scope": ["meeting_notes", "teams_chats"]},
+        "delegated-token",
+    )
+
+    assert [tool.as_dict()["connector_id"] for tool in tools] == ["connector_microsoftteams"]
+    assert [tool["display_name"] for tool in resolved_tools] == ["Work IQ Teams"]

@@ -185,6 +185,10 @@ class TestMarketingPlanRuntimeSettings:
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_runtime": "graph_prefetch"})
         assert chat_module._resolve_work_iq_runtime(None) == "graph_prefetch"
 
+    def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
+        assert chat_module._resolve_work_iq_timeout_seconds() == 95.0
+
     def test_should_fallback_work_iq_foundry_tool_on_timeout(self) -> None:
         outcome = {
             "events": [
@@ -195,13 +199,13 @@ class TestMarketingPlanRuntimeSettings:
                         "status": "failed",
                         "agent": "marketing-plan-agent",
                         "error_code": "PROMPT_AGENT_RUNTIME_FAILED",
-                        "error_message": "Foundry Work IQ connector timed out after 120s",
+                        "error_message": "Foundry Work IQ connector timed out after 95s",
                     },
                 )
             ],
             "text": "",
             "success": False,
-            "latency_seconds": 120.0,
+            "latency_seconds": 95.0,
             "tool_calls": 0,
         }
         assert chat_module._should_fallback_work_iq_foundry_tool(
