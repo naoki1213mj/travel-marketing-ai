@@ -563,7 +563,10 @@ def test_create_entra_app_reconciles_existing_app_redirects_and_graph_permission
                     "redirectUris": [
                         "http://localhost:5173",
                         "http://localhost:8000",
+                        "http://localhost:5173/auth-redirect.html",
+                        "http://localhost:8000/auth-redirect.html",
                         "https://example.contoso.com",
+                        "https://example.contoso.com/auth-redirect.html",
                     ]
                 }
             },
@@ -647,7 +650,10 @@ def test_create_entra_app_creates_app_when_missing(monkeypatch) -> None:
                     "redirectUris": [
                         "http://localhost:5173",
                         "http://localhost:8000",
+                        "http://localhost:5173/auth-redirect.html",
+                        "http://localhost:8000/auth-redirect.html",
                         "https://example.contoso.com",
+                        "https://example.contoso.com/auth-redirect.html",
                     ]
                 }
             },

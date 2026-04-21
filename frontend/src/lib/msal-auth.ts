@@ -42,6 +42,7 @@ const WORK_IQ_FOUNDRY_SCOPES = [
   `${AGENT_365_TOOLS_APP_ID}/McpServers.Teams.All`,
   `${AGENT_365_TOOLS_APP_ID}/McpServers.OneDriveSharepoint.All`,
 ]
+const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
 export async function initMsal(config: MsalConfig): Promise<void> {
   if (msalInstance) return
@@ -52,9 +53,7 @@ export async function initMsal(config: MsalConfig): Promise<void> {
       auth: {
         clientId: config.clientId,
         authority: `https://login.microsoftonline.com/${config.tenantId}`,
-        redirectUri: window.location.origin,
-        // redirectUri と元画面が同一なので、戻り先の再ナビゲーションは抑止する。
-        navigateToLoginRequestUrl: false,
+        redirectUri: new URL(MSAL_REDIRECT_PATH, window.location.origin).toString(),
       },
       cache: {
         cacheLocation: 'sessionStorage',

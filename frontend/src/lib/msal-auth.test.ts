@@ -55,7 +55,7 @@ describe('msal-auth', () => {
     acquireTokenRedirectMock.mockClear()
   })
 
-  it('disables navigateToLoginRequestUrl when redirectUri points to the same page', async () => {
+  it('uses the dedicated redirect bridge page for MSAL auth flows', async () => {
     const { initMsal } = await import('./msal-auth')
 
     await initMsal({ clientId: 'client-id', tenantId: 'tenant-id' })
@@ -64,8 +64,7 @@ describe('msal-auth', () => {
       auth: {
         clientId: 'client-id',
         authority: 'https://login.microsoftonline.com/tenant-id',
-        redirectUri: window.location.origin,
-        navigateToLoginRequestUrl: false,
+        redirectUri: `${window.location.origin}/auth-redirect.html`,
       },
       cache: {
         cacheLocation: 'sessionStorage',

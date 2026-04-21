@@ -1372,10 +1372,13 @@ def create_entra_app(
     redirect_uris = [
         "http://localhost:5173",
         "http://localhost:8000",
+        "http://localhost:5173/auth-redirect.html",
+        "http://localhost:8000/auth-redirect.html",
     ]
     normalized_container_app_url = container_app_url.strip()
     if normalized_container_app_url:
         redirect_uris.append(normalized_container_app_url)
+        redirect_uris.append(f"{normalized_container_app_url.rstrip('/')}/auth-redirect.html")
 
     _ensure_spa_redirect_uris(app_id, redirect_uris)
     _ensure_graph_delegated_permissions(app_id)
