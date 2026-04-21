@@ -1169,36 +1169,29 @@ def _parse_json_stdout(raw: str) -> object:
 
 def _patch_graph_application(app_object_id: str, body: dict[str, object]) -> bool:
     """Microsoft Graph application manifest を PATCH する。"""
-    try:
-        token = _get_token("https://graph.microsoft.com/.default")
-    except ClientAuthenticationError as exc:
-        logger.warning("Graph token の取得に失敗しました: %s", exc)
-        return False
-    except (OSError, RuntimeError, ValueError) as exc:
-        logger.warning("Graph token の取得に失敗しました: %s", exc)
-        return False
-
     url = f"https://graph.microsoft.com/v1.0/applications/{app_object_id}"
-    request_body = json.dumps(body).encode("utf-8")
-    request = urllib.request.Request(
-        url,
-        data=request_body,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-        },
-        method="PATCH",
+    result = _run_cli(
+        [
+            "az",
+            "rest",
+            "--method",
+            "PATCH",
+            "--uri",
+            url,
+            "--headers",
+            "Content-Type=application/json",
+            "--body",
+            json.dumps(body),
+        ],
+        capture_output=True,
     )
-
-    try:
-        with urllib.request.urlopen(request, timeout=30) as response:
-            return 200 <= getattr(response, "status", 0) < 300
-    except urllib.error.HTTPError as exc:
-        error_body = exc.read().decode("utf-8", errors="replace")
-        logger.warning("Graph application PATCH に失敗しました: HTTP %s %s", exc.code, error_body[:500])
-        return False
-    except (OSError, ValueError, RuntimeError) as exc:
-        logger.warning("Graph application PATCH に失敗しました: %s", exc)
+    if result.returncode == 0:
+        return True
+    error_text = (result.stderr or result.stdout or "").strip()
+    if error_text:
+        logger.warning("Graph application PATCH に失敗しました: %s", error_text[:500])
+    else:
+        logger.warning("Graph application PATCH に失敗しました: returncode=%s", result.returncode)
         return False
 
 
