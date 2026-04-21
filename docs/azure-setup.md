@@ -132,7 +132,7 @@ GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger
    - `McpServers.Teams.All`
    - `McpServers.OneDriveSharepoint.All`
 5. 既定 runtime は **`WORKIQ_RUNTIME=graph_prefetch`** で、この場合だけ **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出して短い brief を先読みする
-5. `WORKIQ_RUNTIME=foundry_tool` は opt-in で、`MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせて Agent2 の Foundry Prompt Agent に read-only の Microsoft 365 connector を動的注入する。`meeting_notes` は Teams + Outlook Calendar、`emails` は Outlook Email、`teams_chats` は Teams、`documents_notes` は SharePoint を使う。Graph token は別 header で保持するため、両 runtime を同居させても audience が衝突しない。追加の Work IQ endpoint 環境変数は不要
+5. `WORKIQ_RUNTIME=foundry_tool` は opt-in で、`MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせて Agent2 の Foundry Prompt Agent に read-only の Microsoft 365 connector を動的注入する。`meeting_notes` は Teams、`emails` は Outlook Email、`teams_chats` は Teams、`documents_notes` は SharePoint を使う。Graph token は別 header で保持するため、両 runtime を同居させても audience が衝突しない。追加の Work IQ endpoint 環境変数は不要
 6. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、preflight の状態が `auth_required` / `consent_required` / `redirecting` から `ready` / `enabled` へ進むこと、そしてバックエンドに保存された `work_iq_session.status` を復元しても同じ UI 状態が表示されることを確認する
 
 tenant-wide consent はユーザー個人の delegated sign-in では代替できないため、この部分だけは外部手順として残ります。

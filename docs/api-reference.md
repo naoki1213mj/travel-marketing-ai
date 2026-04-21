@@ -136,7 +136,7 @@ REST API と SSE イベントの仕様です。
 
 - Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
 - 既定値は `marketing_plan_runtime=foundry_prompt` + `work_iq_runtime=graph_prefetch` です。Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。既定 timeout は `120` 秒です。
-- `work_iq_runtime=foundry_tool` は opt-in 経路で、この場合の Agent2 は Foundry Prompt Agent として実行され、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入します（`meeting_notes` → Teams + Outlook Calendar、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint）。
+- `work_iq_runtime=foundry_tool` は opt-in 経路で、この場合の Agent2 は Foundry Prompt Agent として実行され、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入します（`meeting_notes` → Teams、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint）。
 - `work_iq_runtime=foundry_tool` を `marketing_plan_runtime=legacy` と組み合わせた request はバリデーションエラーになります。
 - Work IQ の brief 取得が `auth_required` / `identity_mismatch` / `consent_required` / `timeout` / `unavailable` になっても、会話本体は止めずに **brief なしで継続** します。SSE には `tool_event.source="workiq"` の status だけが流れます。
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。

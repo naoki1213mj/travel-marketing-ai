@@ -76,7 +76,7 @@ flowchart TD
 | `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせて Agent2 を Foundry Prompt Agent として実行し、`source_scope` に応じて read-only の Microsoft 365 connector を動的注入する |
 | `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
 
-- `source_scope` ごとの connector は `meeting_notes` → Teams + Outlook Calendar、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint です。
+- `source_scope` ごとの connector は `meeting_notes` → Teams、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint です。
 - フロントエンドは Work IQ 有効化時の auth preflight で `auth_required` / `consent_required` / `redirecting` を先に反映します。
 - バックエンドは `work_iq_session` の status / source scope / sanitized brief metadata を会話 metadata に保存するため、会話復元後も Work IQ UI 状態が一致します。
 
