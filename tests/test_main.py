@@ -1,5 +1,7 @@
 """main モジュールのミドルウェアテスト"""
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 import src.main as main_module
@@ -46,3 +48,16 @@ def test_api_key_middleware_keeps_health_exempt(monkeypatch):
 
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_auth_redirect_bridge_serves_no_store_html(monkeypatch, tmp_path: Path):
+    """auth redirect bridge は no-store で静的 HTML を返す"""
+    redirect_file = tmp_path / "auth-redirect.html"
+    redirect_file.write_text("<html>redirect</html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "_STATIC_DIR", str(tmp_path))
+
+    response = client.get("/auth-redirect.html")
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
+    assert "redirect" in response.text

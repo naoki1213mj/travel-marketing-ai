@@ -7,10 +7,10 @@ import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -108,6 +108,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 # API キー認証（API_KEY 環境変数が設定されている場合のみ有効化）
 _API_KEY = os.environ.get("API_KEY", "")
 _AUTH_EXEMPT_PATHS = {"/api/health", "/api/ready", "/", "/index.html"}
+_STATIC_DIR = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
 
 
 @app.middleware("http")
@@ -165,8 +166,20 @@ app.include_router(conversations_router)
 app.include_router(voice_router)
 app.include_router(evaluate_router)
 
+
+@app.get("/auth-redirect.html", include_in_schema=False)
+async def auth_redirect_bridge() -> FileResponse:
+    """MSAL redirect bridge 専用ページを no-store で返す。"""
+    redirect_path = os.path.join(_STATIC_DIR, "auth-redirect.html")
+    if not os.path.isfile(redirect_path):
+        raise HTTPException(status_code=404, detail="Not Found")
+    return FileResponse(
+        redirect_path,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
+
 # 静的ファイル配信（本番: Docker マルチステージビルドで frontend/dist を配信）
 if os.environ.get("SERVE_STATIC", "").lower() == "true":
-    static_dir = os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")
-    if os.path.isdir(static_dir):
-        app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+    if os.path.isdir(_STATIC_DIR):
+        app.mount("/", StaticFiles(directory=_STATIC_DIR, html=True), name="static")
