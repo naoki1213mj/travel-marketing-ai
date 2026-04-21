@@ -342,7 +342,7 @@ _IMPROVEMENT_MCP_NAMED_VALUE = "func-mcp-extension-key"
 _IMPROVEMENT_MCP_READY_ATTEMPTS = 6
 _IMPROVEMENT_MCP_READY_DELAY_SECONDS = 10
 _IMPROVEMENT_MCP_RBAC_WAIT_SECONDS = 30
-_STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE = "Storage Blob Data Contributor"
+_STORAGE_BLOB_DATA_OWNER_ROLE = "Storage Blob Data Owner"
 _IMPROVEMENT_MCP_POLICY_XML = """\
 <policies>
   <inbound>
@@ -536,8 +536,8 @@ def _get_storage_account_resource_id(resource_group: str, storage_account_name: 
     return ""
 
 
-def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: str) -> bool:
-    """Function App の managed identity に Blob Data Contributor を付与する。"""
+def _ensure_storage_role_assignment(storage_account_id: str, principal_id: str, role_name: str) -> bool:
+    """Function App の managed identity に host storage 用ロールを付与する。"""
     list_result = _run_cli(
         [
             "az",
@@ -549,7 +549,7 @@ def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: 
             "--scope",
             storage_account_id,
             "--role",
-            _STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE,
+            role_name,
             "-o",
             "json",
         ],
@@ -562,7 +562,7 @@ def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: 
             assignments = []
 
         if isinstance(assignments, list) and assignments:
-            logger.info("Blob Data Contributor ロール割り当て既存: %s", principal_id)
+            logger.info("%s ロール割り当て既存: %s", role_name, principal_id)
             return True
 
     create_result = _run_cli(
@@ -576,7 +576,7 @@ def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: 
             "--assignee-principal-type",
             "ServicePrincipal",
             "--role",
-            _STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE,
+            role_name,
             "--scope",
             storage_account_id,
             "-o",
@@ -585,15 +585,15 @@ def _ensure_storage_blob_role_assignment(storage_account_id: str, principal_id: 
         capture_output=True,
     )
     if create_result.returncode == 0:
-        logger.info("Blob Data Contributor ロールを付与しました: %s", principal_id)
+        logger.info("%s ロールを付与しました: %s", role_name, principal_id)
         return True
 
     stderr = create_result.stderr.strip()
     if "already exists" in stderr.lower():
-        logger.info("Blob Data Contributor ロール割り当て既存: %s", principal_id)
+        logger.info("%s ロール割り当て既存: %s", role_name, principal_id)
         return True
 
-    logger.warning("Blob Data Contributor ロール付与に失敗しました: %s", stderr)
+    logger.warning("%s ロール付与に失敗しました: %s", role_name, stderr)
     return False
 
 
@@ -654,7 +654,7 @@ def ensure_improvement_mcp_managed_identity_storage(
     if not storage_account_id:
         return False
 
-    if not _ensure_storage_blob_role_assignment(storage_account_id, principal_id):
+    if not _ensure_storage_role_assignment(storage_account_id, principal_id, _STORAGE_BLOB_DATA_OWNER_ROLE):
         return False
 
     deployment_container_name = _get_deployment_storage_container_name(function_app_name, resource_group)

@@ -35,6 +35,7 @@ const t = (key: string) => ({
   'tool.generate_banner_image': 'バナー画像生成',
   'tool.source.mcp': 'Azure Functions MCP',
   'tool.source.foundry': 'Microsoft Foundry',
+  'tool.source.workiq': 'Work IQ',
   'tool.meta.inferred': '推定',
   'tool.fallback.legacy_prompt': '従来経路へフォールバック',
   'error.retry': '再試行',
@@ -183,6 +184,44 @@ describe('WorkflowAccordion', () => {
     expect(container.querySelector('[data-step-source="mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-tool-name="generate_improvement_brief"][data-tool-source="mcp"]')).not.toBeNull()
     expect(container.querySelector('[data-tool-name="generate_improvement_brief"][data-tool-provider="azure-functions-mcp"]')).not.toBeNull()
+  })
+
+  it('shows a dedicated Foundry Work IQ indicator on the marketing-plan step', () => {
+    const workIqToolEvents: ToolEvent[] = [
+      ...toolEvents,
+      {
+        tool: 'workiq_foundry_tool',
+        status: 'completed',
+        agent: 'marketing-plan-agent',
+        version: 2,
+        source: 'workiq',
+        provider: 'foundry',
+        display_name: 'Work IQ context tools',
+        source_scope: ['meeting_notes', 'emails'],
+      },
+    ]
+
+    const { container } = render(
+      <WorkflowAccordion
+        agentProgress={null}
+        textContents={textContents}
+        images={images}
+        toolEvents={workIqToolEvents}
+        metrics={null}
+        error={null}
+        onRetry={vi.fn()}
+        t={t}
+        locale="ja"
+      />,
+    )
+
+    expect(screen.getAllByText('Microsoft Foundry Work IQ').length).toBeGreaterThan(0)
+    expect(container.querySelector('[data-step-source="workiq-foundry"]')).not.toBeNull()
+
+    fireEvent.click(screen.getAllByRole('button', { name: /施策生成/ }).at(-1) as HTMLButtonElement)
+
+    expect(screen.getByText('Work IQ context tools')).toBeInTheDocument()
+    expect(container.querySelector('[data-tool-kind="foundry-workiq"]')).not.toBeNull()
   })
 
   it('shows a friendly collapsed summary for brochure steps instead of raw html', () => {

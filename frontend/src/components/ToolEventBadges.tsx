@@ -1,6 +1,6 @@
 import { AlertTriangle, BookOpen, Building2, Check, Database, FileSearch, Globe, Image, Loader2, Scale, Search, Sparkles, Star, Target, Video, Wand2, Wrench } from 'lucide-react'
 import type { ToolEvent } from '../hooks/useSSE'
-import { collapseToolEvents, isToolAttentionStatus, resolveToolProvider } from '../lib/tool-events'
+import { collapseToolEvents, isFoundryWorkIqToolEvent, isToolAttentionStatus, resolveToolProvider } from '../lib/tool-events'
 
 const TOOL_ICONS: Record<string, React.ReactNode> = {
   query_data_agent: <Database className="h-3.5 w-3.5" />,
@@ -56,6 +56,7 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
       {collapsedEvents.map((event, i) => {
         const source = event.source || (event.agent === 'improvement-mcp' ? 'mcp' : undefined)
         const provider = resolveToolProvider(event)
+        const isFoundryWorkIq = isFoundryWorkIqToolEvent(event)
         const isCompleted = event.status === 'completed' || event.status === 'ok'
         const isFailed = isToolAttentionStatus(event.status)
         const providerToken = provider === 'mcp'
@@ -70,24 +71,39 @@ export function ToolEventBadges({ events, t }: ToolEventBadgesProps) {
             data-tool-source={source || 'local'}
             data-tool-provider={providerToken}
             data-tool-status={event.status}
-            className="inline-flex items-center gap-2 rounded-full border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1.5 text-xs text-[var(--text-secondary)]"
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${
+              isFoundryWorkIq
+                ? 'border-violet-300/70 bg-violet-50/80 text-violet-900 dark:border-violet-700/60 dark:bg-violet-950/30 dark:text-violet-100'
+                : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)]'
+            }`}
           >
             <span>{resolveToolIcon(event.tool, source)}</span>
             <span>{event.display_name || resolveToolLabel(event.tool, t)}</span>
-            {provider === 'mcp' && (
-              <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)]">
-                {t('tool.source.mcp')}
+            {isFoundryWorkIq ? (
+              <span
+                data-tool-kind="foundry-workiq"
+                className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200"
+              >
+                {t('tool.source.foundry')} {t('tool.source.workiq')}
               </span>
-            )}
-            {provider === 'workiq' && (
-              <span className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200">
-                {t('tool.source.workiq')}
-              </span>
-            )}
-            {provider === 'foundry' && (
-              <span className="rounded-full border border-sky-300/70 bg-sky-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200">
-                {t('tool.source.foundry')}
-              </span>
+            ) : (
+              <>
+                {provider === 'mcp' && (
+                  <span className="rounded-full bg-[var(--accent-soft)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--accent-strong)]">
+                    {t('tool.source.mcp')}
+                  </span>
+                )}
+                {provider === 'workiq' && (
+                  <span className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200">
+                    {t('tool.source.workiq')}
+                  </span>
+                )}
+                {provider === 'foundry' && (
+                  <span className="rounded-full border border-sky-300/70 bg-sky-100/80 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200">
+                    {t('tool.source.foundry')}
+                  </span>
+                )}
+              </>
             )}
             {event.source_scope?.map((scope) => (
               <span

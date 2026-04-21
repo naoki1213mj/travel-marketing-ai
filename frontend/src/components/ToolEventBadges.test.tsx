@@ -19,6 +19,26 @@ const t = (key: string) => ({
 }[key] ?? key)
 
 describe('ToolEventBadges', () => {
+  it('highlights canonical Foundry Work IQ tool events with a dedicated badge', () => {
+    const events: ToolEvent[] = [
+      {
+        tool: 'workiq_foundry_tool',
+        status: 'completed',
+        agent: 'marketing-plan-agent',
+        source: 'workiq',
+        provider: 'foundry',
+        display_name: 'Work IQ context tools',
+      },
+    ]
+
+    const { container } = render(<ToolEventBadges events={events} t={t} />)
+
+    expect(screen.getByText('Work IQ context tools')).toBeInTheDocument()
+    expect(screen.getByText('Microsoft Foundry Work IQ')).toBeInTheDocument()
+    expect(container.querySelector('[data-tool-kind="foundry-workiq"]')).not.toBeNull()
+    expect(container.querySelector('[data-tool-provider="foundry"]')).not.toBeNull()
+  })
+
   it('shows Work IQ source and status badges', () => {
     const events: ToolEvent[] = [
       {

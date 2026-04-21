@@ -1,7 +1,7 @@
 import { BarChart3, Check, ChevronDown, FileText, Palette, Scale, Video } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentProgress, ErrorData, ImageContent, PipelineMetrics, TextContent, ToolEvent } from '../hooks/useSSE'
-import { collapseToolEvents, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
+import { collapseToolEvents, isFoundryWorkIqToolEvent, resolveToolProvider, resolveToolStepKey } from '../lib/tool-events'
 import { extractVideoStatusMessage, extractVideoUrl } from '../lib/video-status'
 import { AnalysisView } from './AnalysisView'
 import { ErrorRetry } from './ErrorRetry'
@@ -227,6 +227,7 @@ export function WorkflowAccordion({
     const sectionCollapsed = isSectionCollapsed(sectionKey, fallbackCollapsed)
     const isActive = status === 'active'
     const stepTools = getToolEvents(step.key, roundNumber)
+    const hasFoundryWorkIqTool = stepTools.some(isFoundryWorkIqToolEvent)
     const hasMcpTool = stepTools.some(isMcpToolEvent)
     const collapsedSummary = getCollapsedSummary(step.key, content, t)
 
@@ -264,6 +265,14 @@ export function WorkflowAccordion({
             {stepTools.length > 0 && (
               <span className="rounded-full border border-[var(--panel-border)] bg-[var(--panel-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-muted)]">
                 {t('workflow.tool_count').replace('{n}', String(stepTools.length))}
+              </span>
+            )}
+            {hasFoundryWorkIqTool && (
+              <span
+                data-step-source="workiq-foundry"
+                className="rounded-full border border-violet-300/70 bg-violet-100/80 px-2 py-0.5 text-[10px] font-semibold text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200"
+              >
+                {t('tool.source.foundry')} {t('tool.source.workiq')}
               </span>
             )}
             {hasMcpTool && (

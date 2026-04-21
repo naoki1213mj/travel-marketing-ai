@@ -287,7 +287,7 @@ def test_ensure_improvement_mcp_managed_identity_storage_switches_to_system_iden
         for command in commands
     )
     assert any(
-        command[:4] == ["az", "role", "assignment", "create"] and postprovision_module._STORAGE_BLOB_DATA_CONTRIBUTOR_ROLE in command
+        command[:4] == ["az", "role", "assignment", "create"] and postprovision_module._STORAGE_BLOB_DATA_OWNER_ROLE in command
         for command in commands
     )
     assert any(

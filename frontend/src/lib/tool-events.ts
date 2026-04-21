@@ -78,6 +78,17 @@ export function resolveToolProvider(event: Pick<ToolEvent, 'provider' | 'source'
   return 'local'
 }
 
+export function isFoundryWorkIqToolEvent(
+  event: Pick<ToolEvent, 'tool' | 'provider' | 'source' | 'agent'>,
+): boolean {
+  const normalizedTool = normalizeToolName(String(event.tool || ''))
+  const normalizedSource = String(event.source || '').trim()
+  const normalizedProvider = resolveToolProvider(event)
+
+  return normalizedTool === 'workiq_foundry_tool'
+    || (normalizedSource === 'workiq' && normalizedProvider === 'foundry')
+}
+
 export function isToolAttentionStatus(status: string): boolean {
   return new Set([
     'failed',
