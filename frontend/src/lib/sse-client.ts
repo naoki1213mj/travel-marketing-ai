@@ -2,7 +2,12 @@
  * SSE クライアント。POST /api/chat に接続し、イベントをハンドラに振り分ける。
  */
 
-import type { ConversationSettings, ModelSettings } from '../components/SettingsPanel'
+import {
+  normalizeMarketingPlanRuntime,
+  normalizeWorkIqRuntime,
+  type ConversationSettings,
+  type ModelSettings,
+} from '../components/SettingsPanel'
 import { getDelegatedApiAuth, getDelegatedApiHeaders } from './api-auth'
 
 /** SSE タイムアウト（15 分 — 画像生成と動画待機を考慮） */
@@ -101,6 +106,8 @@ export async function connectSSE(
     }
   }
   if (settings) {
+    const marketingPlanRuntime = normalizeMarketingPlanRuntime(settings.marketingPlanRuntime)
+    const workIqRuntime = normalizeWorkIqRuntime(settings.workIqRuntime)
     const trimmedManagerEmail = settings.managerEmail.trim()
     if (settings.managerApprovalEnabled && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)) {
       handlers.error?.({ message: '有効な上司メールアドレスを入力してください', code: 'INVALID_MANAGER_EMAIL' })
@@ -124,8 +131,8 @@ export async function connectSSE(
     body.workflow_settings = {
       manager_approval_enabled: settings.managerApprovalEnabled,
       manager_email: trimmedManagerEmail,
-      marketing_plan_runtime: settings.marketingPlanRuntime,
-      ...(settings.workIqRuntime ? { work_iq_runtime: settings.workIqRuntime } : {}),
+      marketing_plan_runtime: marketingPlanRuntime,
+      work_iq_runtime: workIqRuntime,
     }
   }
   if (conversationSettings && !conversationId) {
@@ -140,7 +147,7 @@ export async function connectSSE(
   if (conversationSettings?.workIqEnabled) {
     const delegatedAuth = await getDelegatedApiAuth({
       interactive: !conversationId,
-      ...(settings?.workIqRuntime ? { workIqRuntime: settings.workIqRuntime } : {}),
+      ...(settings ? { workIqRuntime: normalizeWorkIqRuntime(settings.workIqRuntime) } : {}),
     })
     Object.assign(headers, delegatedAuth.headers)
     headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'

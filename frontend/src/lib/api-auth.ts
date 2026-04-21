@@ -42,7 +42,7 @@ export async function getDelegatedApiAuth(
     return { headers: {}, status: 'unavailable' }
   }
 
-  const runtime = options?.workIqRuntime === 'foundry_tool' ? 'foundry_tool' : 'graph_prefetch'
+  const runtime = options?.workIqRuntime === 'graph_prefetch' ? 'graph_prefetch' : 'foundry_tool'
   if (runtime === 'graph_prefetch') {
     const result = await getWorkIqGraphAuth(config, options?.interactive === true)
     return {

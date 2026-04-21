@@ -83,14 +83,14 @@ describe('connectSSE', () => {
         managerEmail: '',
         iqSearchResults: 5,
         iqScoreThreshold: 0.3,
-        marketingPlanRuntime: 'foundry_prompt',
+        marketingPlanRuntime: 'foundry_preprovisioned',
       },
     )
 
     const [, options] = mockFetch.mock.calls[0]
     const body = JSON.parse(options.body)
     expect(body.workflow_settings).toMatchObject({
-      marketing_plan_runtime: 'foundry_prompt',
+      marketing_plan_runtime: 'foundry_preprovisioned',
     })
   })
 
@@ -115,7 +115,7 @@ describe('connectSSE', () => {
         managerEmail: '',
         iqSearchResults: 5,
         iqScoreThreshold: 0.3,
-        marketingPlanRuntime: 'foundry_prompt',
+        marketingPlanRuntime: 'foundry_preprovisioned',
         workIqRuntime: 'foundry_tool',
       },
     )
@@ -187,7 +187,7 @@ describe('connectSSE', () => {
         managerEmail: '',
         iqSearchResults: 5,
         iqScoreThreshold: 0.3,
-        marketingPlanRuntime: 'foundry_prompt',
+        marketingPlanRuntime: 'foundry_preprovisioned',
         workIqRuntime: 'foundry_tool',
       },
       {

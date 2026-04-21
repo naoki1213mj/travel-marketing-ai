@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_CONVERSATION_SETTINGS,
   DEFAULT_SETTINGS,
+  normalizeModelSettings,
   type ConversationSettings,
   type ModelSettings,
   type WorkIqSourceScope,
@@ -1226,7 +1227,7 @@ export function useSSE() {
   }, [])
 
   const updateSettings = useCallback((settings: ModelSettings) => {
-    setState(prev => ({ ...prev, settings }))
+    setState(prev => ({ ...prev, settings: normalizeModelSettings(settings) }))
   }, [])
 
   const updateConversationSettings = useCallback((conversationSettings: ConversationSettings) => {

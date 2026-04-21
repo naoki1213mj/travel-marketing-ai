@@ -64,15 +64,19 @@ describe('getDelegatedApiAuth', () => {
     })
   })
 
-  it('defaults to graph auth when runtime is omitted', async () => {
+  it('defaults to foundry auth when runtime is omitted', async () => {
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     const result = await getDelegatedApiAuth({ interactive: false })
 
-    expect(getWorkIqFoundryAuth).not.toHaveBeenCalled()
+    expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
-      headers: { Authorization: 'Bearer graph-token' },
+      headers: {
+        Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
       status: 'ok',
     })
   })

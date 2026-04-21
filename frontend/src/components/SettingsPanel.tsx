@@ -7,7 +7,7 @@ import { useState } from 'react'
 
 export interface ModelSettings {
   model: string
-  marketingPlanRuntime: 'legacy' | 'foundry_prompt'
+  marketingPlanRuntime: 'legacy' | 'foundry_preprovisioned'
   workIqRuntime?: 'graph_prefetch' | 'foundry_tool'
   temperature: number
   maxTokens: number
@@ -33,8 +33,8 @@ export interface ConversationSettings {
 // eslint-disable-next-line react-refresh/only-export-components
 export const DEFAULT_SETTINGS: ModelSettings = {
   model: 'gpt-5-4-mini',
-  marketingPlanRuntime: 'foundry_prompt',
-  workIqRuntime: 'graph_prefetch',
+  marketingPlanRuntime: 'foundry_preprovisioned',
+  workIqRuntime: 'foundry_tool',
   temperature: 0.7,
   maxTokens: 16384,
   topP: 1.0,
@@ -73,7 +73,7 @@ const AVAILABLE_MODELS = [
 
 const MARKETING_RUNTIME_OPTIONS = [
   { value: 'legacy', labelKey: 'settings.marketingRuntime.legacy' },
-  { value: 'foundry_prompt', labelKey: 'settings.marketingRuntime.foundry_prompt' },
+  { value: 'foundry_preprovisioned', labelKey: 'settings.marketingRuntime.foundry_preprovisioned' },
 ] as const
 
 const AVAILABLE_IMAGE_MODELS = [
@@ -86,6 +86,29 @@ const IMAGE_QUALITY_OPTIONS = [
   { value: 'medium', label: 'Medium' },
   { value: 'high', label: 'High' },
 ]
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function normalizeMarketingPlanRuntime(
+  runtime: string | null | undefined,
+): ModelSettings['marketingPlanRuntime'] {
+  return runtime === 'legacy' ? 'legacy' : 'foundry_preprovisioned'
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function normalizeWorkIqRuntime(
+  runtime: string | null | undefined,
+): NonNullable<ModelSettings['workIqRuntime']> {
+  return runtime === 'graph_prefetch' ? 'graph_prefetch' : 'foundry_tool'
+}
+
+// eslint-disable-next-line react-refresh/only-export-components
+export function normalizeModelSettings(settings: ModelSettings): ModelSettings {
+  return {
+    ...settings,
+    marketingPlanRuntime: normalizeMarketingPlanRuntime(settings.marketingPlanRuntime),
+    workIqRuntime: normalizeWorkIqRuntime(settings.workIqRuntime),
+  }
+}
 
 interface SettingsPanelProps {
   settings: ModelSettings
@@ -185,7 +208,8 @@ export function SettingsPanel({
   ]
 
   const update = (key: keyof ModelSettings, value: number | string | boolean) => {
-    onChange({ ...settings, [key]: value })
+    const nextSettings = { ...settings, [key]: value } as ModelSettings
+    onChange(normalizeModelSettings(nextSettings))
   }
 
   const resetSectionDefaults = (section: SettingsSection) => {
@@ -308,7 +332,7 @@ export function SettingsPanel({
                 </div>
                 <select
                   id="settings-marketing-runtime"
-                  value={settings.marketingPlanRuntime}
+                  value={normalizeMarketingPlanRuntime(settings.marketingPlanRuntime)}
                   onChange={(e) => update('marketingPlanRuntime', e.target.value)}
                   aria-label={t('settings.marketingRuntime')}
                   className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
