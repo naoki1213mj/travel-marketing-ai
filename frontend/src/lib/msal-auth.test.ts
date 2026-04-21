@@ -95,4 +95,27 @@ describe('msal-auth', () => {
     })
     expect(result).toEqual({ token: 'token', status: 'ok' })
   })
+
+  it('returns redirecting immediately for interactive login redirects', async () => {
+    acquireTokenRedirectMock.mockImplementation(() => new Promise<void>(() => {}))
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    const result = await Promise.race([
+      getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' }, true),
+      new Promise<DelegatedTokenResult>((resolve) => {
+        setTimeout(() => resolve({ token: null, status: 'unavailable' }), 25)
+      }),
+    ])
+
+    expect(acquireTokenRedirectMock).toHaveBeenCalledWith({
+      scopes: [
+        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+      ],
+    })
+    expect(result).toEqual({ token: null, status: 'redirecting' })
+  })
 })

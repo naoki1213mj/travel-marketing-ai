@@ -79,6 +79,16 @@ export async function initMsal(config: MsalConfig): Promise<void> {
   await initPromise
 }
 
+function beginRedirectAuth(
+  instance: PublicClientApplication,
+  scopes: string[],
+): DelegatedTokenResult {
+  void instance.acquireTokenRedirect({ scopes }).catch((err: unknown) => {
+    console.warn('MSAL redirect token acquisition failed:', err)
+  })
+  return { token: null, status: 'redirecting' }
+}
+
 async function acquireDelegatedToken(
   config: MsalConfig,
   scopes: string[],
@@ -100,9 +110,8 @@ async function acquireDelegatedToken(
       return { token: response.accessToken, status: 'ok' }
     } catch (err) {
       if (interactive && err instanceof InteractionRequiredAuthError) {
-        // サイレント失敗 → redirect で再認証
-        await msalInstance.acquireTokenRedirect({ scopes })
-        return { token: null, status: 'redirecting' } // redirect するため、ここには戻らない
+        // redirect API の Promise 完了には依存せず、直ちに UI を redirecting 扱いにする。
+        return beginRedirectAuth(msalInstance, scopes)
       }
       if (err instanceof InteractionRequiredAuthError) {
         const errorCode = String(err.errorCode || '').trim().toLowerCase()
@@ -125,9 +134,7 @@ async function acquireDelegatedToken(
 
   // 未ログイン → redirect でログイン
   try {
-    await msalInstance.acquireTokenRedirect({ scopes })
-    // redirect するため、ここには戻らない
-    return { token: null, status: 'redirecting' }
+    return beginRedirectAuth(msalInstance, scopes)
   } catch (err) {
     console.warn('MSAL token acquisition failed:', err)
     return { token: null, status: 'unavailable' }
