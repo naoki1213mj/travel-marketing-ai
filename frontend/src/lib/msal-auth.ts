@@ -53,6 +53,8 @@ export async function initMsal(config: MsalConfig): Promise<void> {
         clientId: config.clientId,
         authority: `https://login.microsoftonline.com/${config.tenantId}`,
         redirectUri: window.location.origin,
+        // redirectUri と元画面が同一なので、戻り先の再ナビゲーションは抑止する。
+        navigateToLoginRequestUrl: false,
       },
       cache: {
         cacheLocation: 'sessionStorage',
@@ -61,7 +63,18 @@ export async function initMsal(config: MsalConfig): Promise<void> {
 
     await msalInstance.initialize()
     // redirect からの戻りを処理
-    await msalInstance.handleRedirectPromise()
+    const redirectResponse = await msalInstance.handleRedirectPromise()
+    if (redirectResponse?.account) {
+      msalInstance.setActiveAccount(redirectResponse.account)
+      return
+    }
+
+    if (!msalInstance.getActiveAccount()) {
+      const accounts = msalInstance.getAllAccounts()
+      if (accounts.length > 0) {
+        msalInstance.setActiveAccount(accounts[0])
+      }
+    }
   })()
 
   await initPromise
@@ -75,7 +88,8 @@ async function acquireDelegatedToken(
   await initMsal(config)
   if (!msalInstance) return { token: null, status: 'unavailable' }
 
-  const accounts = msalInstance.getAllAccounts()
+  const activeAccount = msalInstance.getActiveAccount()
+  const accounts = activeAccount ? [activeAccount] : msalInstance.getAllAccounts()
 
   if (accounts.length > 0) {
     try {
