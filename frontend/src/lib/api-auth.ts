@@ -56,8 +56,6 @@ export async function bootstrapDelegatedApiAuth(): Promise<void> {
 
   try {
     await delegatedAuthBootstrapPromise
-  } catch (error) {
-    throw error
   } finally {
     delegatedAuthBootstrapPromise = null
   }
