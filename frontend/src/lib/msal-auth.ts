@@ -8,11 +8,17 @@
  * redirect 方式を使用する。
  */
 
-import { PublicClientApplication, type SilentRequest, InteractionRequiredAuthError } from '@azure/msal-browser'
+import {
+  PublicClientApplication,
+  type AuthenticationResult,
+  type SilentRequest,
+  InteractionRequiredAuthError,
+} from '@azure/msal-browser'
 
 let msalInstance: PublicClientApplication | null = null
 let initPromise: Promise<void> | null = null
 let msalInitialized = false
+let pendingRedirectResult: AuthenticationResult | null = null
 
 export interface MsalConfig {
   clientId: string
@@ -49,6 +55,36 @@ const WORK_IQ_FOUNDRY_SCOPES = [
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
+function normalizeScopes(scopes: string[]): string[] {
+  return scopes
+    .map(scope => scope.trim().toLowerCase())
+    .filter(scope => scope.length > 0)
+}
+
+function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | null {
+  if (!pendingRedirectResult) return null
+
+  const redirectToken = typeof pendingRedirectResult.accessToken === 'string'
+    ? pendingRedirectResult.accessToken.trim()
+    : ''
+  const redirectScopes = normalizeScopes(pendingRedirectResult.scopes ?? [])
+  const requestedScopes = normalizeScopes(scopes)
+
+  if (!redirectToken || redirectScopes.length === 0 || requestedScopes.length === 0) {
+    pendingRedirectResult = null
+    return null
+  }
+
+  const redirectScopeSet = new Set(redirectScopes)
+  const coversRequest = requestedScopes.every(scope => redirectScopeSet.has(scope))
+  if (!coversRequest) {
+    return null
+  }
+
+  pendingRedirectResult = null
+  return { token: redirectToken, status: 'ok' }
+}
+
 export async function initMsal(config: MsalConfig): Promise<void> {
   if (msalInitialized && msalInstance) return
   if (initPromise) { await initPromise; return }
@@ -69,6 +105,7 @@ export async function initMsal(config: MsalConfig): Promise<void> {
     // redirect からの戻りを処理
     const redirectResponse = await nextInstance.handleRedirectPromise()
     if (redirectResponse?.account) {
+      pendingRedirectResult = redirectResponse
       nextInstance.setActiveAccount(redirectResponse.account)
       msalInstance = nextInstance
       msalInitialized = true
@@ -119,6 +156,10 @@ async function acquireDelegatedToken(
   const accounts = activeAccount ? [activeAccount] : msalInstance.getAllAccounts()
 
   if (accounts.length > 0) {
+    const redirectResult = consumePendingRedirectToken(scopes)
+    if (redirectResult) {
+      return redirectResult
+    }
     try {
       const request: SilentRequest = {
         scopes,
