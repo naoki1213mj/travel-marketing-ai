@@ -184,7 +184,7 @@ export async function connectSSE(
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (conversationSettings?.workIqEnabled) {
     const workIqRuntime = settings ? normalizeWorkIqRuntime(settings.workIqRuntime) : 'foundry_tool'
-    const interactiveAuth = options?.authInteractionMode === 'silent' ? false : !conversationId
+    const interactiveAuth = options?.authInteractionMode !== 'silent'
     const delegatedAuth = await getDelegatedApiAuth({
       interactive: interactiveAuth,
       workIqRuntime,

@@ -184,14 +184,23 @@ export async function initMsal(config: MsalConfig): Promise<void> {
   }
 }
 
-function beginRedirectAuth(
+async function beginRedirectAuth(
   instance: PublicClientApplication,
   scopes: string[],
-): DelegatedTokenResult {
+): Promise<DelegatedTokenResult> {
   clearMsalRedirectFailureSentinel()
-  void instance.acquireTokenRedirect({ scopes }).catch((err: unknown) => {
+  let failureError: unknown = null
+  const redirectPromise = instance.acquireTokenRedirect({ scopes }).catch((err: unknown) => {
+    failureError = err
     console.warn('MSAL redirect token acquisition failed:', err)
+    recordMsalRedirectFailureSentinel('main_app', err)
   })
+  // 即時拒否（interaction_in_progress、テナント未登録など）を検出するため短時間待機する。
+  // acquireTokenRedirect が正常にブラウザ遷移した場合、ページが離れるため Promise は永遠に解決しない。
+  await Promise.race([redirectPromise, new Promise<void>(resolve => setTimeout(resolve, 200))])
+  if (failureError !== null) {
+    return { token: null, status: 'unavailable' }
+  }
   return { token: null, status: 'redirecting' }
 }
 

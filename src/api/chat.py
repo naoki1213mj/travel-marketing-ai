@@ -1959,7 +1959,12 @@ async def _execute_agent(
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
         try:
-            if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
+            if (
+                agent_name == "marketing-plan-agent"
+                and marketing_plan_runtime == "foundry_preprovisioned"
+                # ユーザートークンがない場合（WorkIQ OFF）は Foundry の OBO が失敗するため legacy path を使う
+                and _sanitize_optional_text(work_iq_access_token)
+            ):
                 from src.foundry_prompt_agents import run_marketing_plan_prompt_agent
 
                 work_iq_enabled_for_prompt = bool(
@@ -2019,6 +2024,15 @@ async def _execute_agent(
                         error_message=str(exc),
                     )
                 )
+                # Foundry 設定・プロビジョニング不備（ValueError）の場合は初回のみ
+                # Agent Framework にフォールバックしてリトライ回数を消費しない
+                if isinstance(exc, ValueError) and attempt == 1:
+                    logger.warning(
+                        "Foundry marketing-plan-agent が利用できないため Agent Framework にフォールバックします: %s",
+                        exc,
+                    )
+                    marketing_plan_runtime = "legacy"
+                    continue
             # Code Interpreter 404: 無効化してリトライ（リトライ回数を消費しない）
             if agent_name == "data-search-agent" and _is_code_interpreter_404(exc):
                 from src.agents.data_search import _should_enable_code_interpreter, set_code_interpreter_available
