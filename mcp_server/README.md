@@ -35,8 +35,8 @@ uv run python scripts/deploy_improvement_mcp.py
 
 1. improvement MCP 用 storage account と Function App を作成または再利用する
 2. Function App に system assigned managed identity を付与し、runtime / deployment storage を keyless 構成へ揃える
-3. `mcp_server/` を zip 化して Flex Consumption Function App へ remote build 付きで配備する
-4. Function App の system key `mcp_extension` を取得する
+3. `mcp_server/` と vendored 依存 (`.python_packages/lib/site-packages`) を含む ready-to-run zip package をローカル生成し、Flex Consumption Function App へ zip 配備する
+4. Function App の system key `mcp_extension` と `/runtime/webhooks/mcp` endpoint の応答準備を確認する
 5. APIM の backend / `improvement-mcp` API / policy を更新する
 6. FastAPI 側の `IMPROVEMENT_MCP_ENDPOINT` が `https://<apim>.azure-api.net/improvement-mcp/runtime/webhooks/mcp` を向く状態に揃える
 

@@ -1,7 +1,10 @@
 """scripts.postprovision のテスト。"""
 
 import json
+import shutil
 import subprocess
+import zipfile
+from pathlib import Path
 
 from scripts import postprovision as postprovision_module
 
@@ -39,6 +42,7 @@ def test_configure_improvement_mcp_registers_named_value_backend_api_and_policy(
         return {"ok": True}
 
     monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module, "_wait_for_function_app_mcp_runtime_ready", lambda *args, **kwargs: True)
 
     result = postprovision_module.configure_improvement_mcp(
         subscription_id="sub-id",
@@ -104,6 +108,7 @@ def test_configure_improvement_mcp_retries_until_mcp_extension_key_is_available(
         return {"ok": True}
 
     monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module, "_wait_for_function_app_mcp_runtime_ready", lambda *args, **kwargs: True)
     monkeypatch.setattr(postprovision_module.time, "sleep", lambda _seconds: None)
 
     result = postprovision_module.configure_improvement_mcp(
@@ -157,6 +162,174 @@ def test_configure_improvement_mcp_returns_false_when_mcp_extension_key_is_missi
 
     assert result is False
     assert len(calls) == 4
+
+
+def test_configure_improvement_mcp_waits_for_runtime_before_apim_registration(monkeypatch) -> None:
+    """APIM 登録前に MCP runtime の応答準備を待つ。"""
+    calls: list[dict[str, object]] = []
+    readiness_calls: list[dict[str, object]] = []
+
+    def fake_rest_call(
+        url: str,
+        *,
+        method: str = "GET",
+        body: dict | None = None,
+        token: str | None = None,
+        scope: str = "https://management.azure.com/.default",
+        timeout: int = 30,
+    ) -> dict | None:
+        del scope, timeout
+        calls.append({"url": url, "method": method, "body": body, "token": token})
+
+        if url.endswith("/providers/Microsoft.Web/sites/func-mcp?api-version=2024-04-01") and method == "GET":
+            return {"properties": {"defaultHostName": "func-mcp.azurewebsites.net"}}
+        if "/host/default/listKeys" in url and method == "POST":
+            return {"systemKeys": {"mcp_extension": "secret-key"}}
+        return {"ok": True}
+
+    def fake_wait_for_runtime(
+        function_base_url: str,
+        mcp_extension_key: str,
+        attempts: int,
+        delay_seconds: int,
+    ) -> bool:
+        readiness_calls.append(
+            {
+                "function_base_url": function_base_url,
+                "mcp_extension_key": mcp_extension_key,
+                "attempts": attempts,
+                "delay_seconds": delay_seconds,
+            }
+        )
+        return True
+
+    monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module, "_wait_for_function_app_mcp_runtime_ready", fake_wait_for_runtime)
+
+    result = postprovision_module.configure_improvement_mcp(
+        subscription_id="sub-id",
+        rg="rg-dev",
+        apim_name="apim-test",
+        function_app_name="func-mcp",
+        function_app_rg="rg-dev",
+        readiness_attempts=4,
+        readiness_delay_seconds=1,
+        token="prefetched-token",
+    )
+
+    assert result is True
+    assert readiness_calls == [
+        {
+            "function_base_url": "https://func-mcp.azurewebsites.net",
+            "mcp_extension_key": "secret-key",
+            "attempts": 4,
+            "delay_seconds": 1,
+        }
+    ]
+    assert any("/apis/improvement-mcp?" in str(call["url"]) for call in calls)
+
+
+def test_configure_improvement_mcp_returns_false_when_runtime_not_ready(monkeypatch) -> None:
+    """runtime endpoint が未準備なら APIM 登録を中断する。"""
+    calls: list[dict[str, object]] = []
+
+    def fake_rest_call(
+        url: str,
+        *,
+        method: str = "GET",
+        body: dict | None = None,
+        token: str | None = None,
+        scope: str = "https://management.azure.com/.default",
+        timeout: int = 30,
+    ) -> dict | None:
+        del body, token, scope, timeout
+        calls.append({"url": url, "method": method})
+        if method == "GET":
+            return {"properties": {"defaultHostName": "func-mcp.azurewebsites.net"}}
+        if "/host/default/listKeys" in url and method == "POST":
+            return {"systemKeys": {"mcp_extension": "secret-key"}}
+        return {"ok": True}
+
+    monkeypatch.setattr(postprovision_module, "_rest_call", fake_rest_call)
+    monkeypatch.setattr(postprovision_module, "_wait_for_function_app_mcp_runtime_ready", lambda *args, **kwargs: False)
+
+    result = postprovision_module.configure_improvement_mcp(
+        subscription_id="sub-id",
+        rg="rg-dev",
+        apim_name="apim-test",
+        function_app_name="func-mcp",
+        function_app_rg="rg-dev",
+        readiness_attempts=2,
+        readiness_delay_seconds=0,
+    )
+
+    assert result is False
+    assert all("/namedValues/" not in str(call["url"]) for call in calls)
+
+
+def test_build_mcp_package_creates_ready_to_run_zip_with_vendored_dependencies(monkeypatch) -> None:
+    """ready-to-run zip には vendored site-packages を含める。"""
+    build_root = Path(__file__).resolve().parent / ".artifacts-postprovision-build"
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        target_index = command.index("--target") + 1
+        vendor_root = Path(command[target_index])
+        dependency_file = vendor_root / "azure" / "functions" / "__init__.py"
+        dependency_file.parent.mkdir(parents=True, exist_ok=True)
+        dependency_file.write_text("# vendored dependency\n", encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(postprovision_module, "_IMPROVEMENT_MCP_BUILD_ROOT", build_root)
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+
+    package_path = postprovision_module._build_mcp_package()
+
+    try:
+        assert package_path is not None
+        assert package_path == build_root / postprovision_module._IMPROVEMENT_MCP_PACKAGE_NAME
+        assert package_path.exists()
+        with zipfile.ZipFile(package_path) as archive:
+            archived_files = set(archive.namelist())
+        assert "function_app.py" in archived_files
+        assert ".python_packages/lib/site-packages/azure/functions/__init__.py" in archived_files
+    finally:
+        if build_root.exists():
+            shutil.rmtree(build_root)
+
+
+def test_deploy_improvement_mcp_function_uses_local_zip_without_remote_build(monkeypatch) -> None:
+    """配備コマンドは local build zip をそのまま config-zip へ渡す。"""
+    build_root = Path(__file__).resolve().parent / ".artifacts-postprovision-deploy"
+    package_path = build_root / postprovision_module._IMPROVEMENT_MCP_PACKAGE_NAME
+    commands: list[list[str]] = []
+
+    build_root.mkdir(parents=True, exist_ok=True)
+    package_path.write_bytes(b"zip")
+
+    def fake_run_cli(command: list[str], **kwargs) -> subprocess.CompletedProcess[str]:
+        del kwargs
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(postprovision_module, "ensure_storage_account", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "ensure_improvement_mcp_function_app", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "ensure_improvement_mcp_managed_identity_storage", lambda *args, **kwargs: True)
+    monkeypatch.setattr(postprovision_module, "_build_mcp_package", lambda: package_path)
+    monkeypatch.setattr(postprovision_module, "_run_cli", fake_run_cli)
+
+    result = postprovision_module.deploy_improvement_mcp_function(
+        resource_group="rg-dev",
+        location="eastus2",
+        function_app_name="func-mcp-abc123",
+        storage_account_name="stfnabc123",
+    )
+
+    assert result is True
+    deploy_command = commands[0]
+    assert deploy_command[:5] == ["az", "functionapp", "deployment", "source", "config-zip"]
+    assert deploy_command[deploy_command.index("--build-remote") + 1] == "false"
+    assert build_root.exists() is False
 
 
 def test_setup_improvement_mcp_deploys_and_configures(monkeypatch) -> None:

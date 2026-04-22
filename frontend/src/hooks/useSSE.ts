@@ -15,6 +15,7 @@ import {
 } from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
 import { getDelegatedApiHeaders } from '../lib/api-auth'
+import { consumeMsalRedirectFailureSentinel } from '../lib/msal-redirect-sentinel'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
 import { normalizeToolEventData, type ToolEvent } from '../lib/tool-events'
@@ -1263,6 +1264,25 @@ export function useSSE() {
 
     const restoredSettings = normalizeModelSettings(pendingRequest.settings)
     const restoredConversationSettings = cloneConversationSettings(pendingRequest.conversationSettings)
+    const redirectFailure = consumeMsalRedirectFailureSentinel()
+
+    if (redirectFailure) {
+      console.warn('Skipping pending Work IQ resume after MSAL redirect failure:', redirectFailure)
+      clearPendingWorkIqRequest()
+      setState(prev => ({
+        ...prev,
+        status: 'error',
+        error: {
+          message: redirectFailure.message,
+          code: 'WORKIQ_REDIRECT_FAILED',
+        },
+        settings: restoredSettings,
+        conversationSettings: cloneConversationSettings(restoredConversationSettings),
+        draftConversationSettings: cloneConversationSettings(restoredConversationSettings),
+        workIq: createWorkIqState(restoredConversationSettings, restoredConversationSettings.workIqEnabled ? 'unavailable' : 'off', redirectFailure.stage),
+      }))
+      return
+    }
 
     setState(prev => ({
       ...prev,

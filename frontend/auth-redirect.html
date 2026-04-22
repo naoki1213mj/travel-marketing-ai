@@ -9,6 +9,10 @@
     <p>Processing authentication...</p>
     <script type="module">
       import { PublicClientApplication } from '@azure/msal-browser'
+      import {
+        clearMsalRedirectFailureSentinel,
+        recordMsalRedirectFailureSentinel,
+      } from '/src/lib/msal-redirect-sentinel.ts'
 
       // redirect-bridge は popup/iframe flow 専用。redirect flow では
       // acquireTokenRedirect の response を自分で PublicClientApplication を
@@ -37,10 +41,12 @@
           // bridge 上で token 交換まで完走させ、その後明示的に / へ戻す。
           const result = await pca.handleRedirectPromise({ navigateToLoginRequestUrl: false })
           if (result?.account) {
+            clearMsalRedirectFailureSentinel()
             pca.setActiveAccount(result.account)
           }
         } catch (err) {
           console.warn('auth-redirect finalize error', err)
+          recordMsalRedirectFailureSentinel('redirect_bridge', err)
         } finally {
           window.location.replace('/')
         }

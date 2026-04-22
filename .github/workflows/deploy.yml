@@ -144,9 +144,8 @@ jobs:
           AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AZURE_RESOURCE_GROUP: ${{ vars.RESOURCE_GROUP }}
           AZURE_CONTAINER_APP_NAME: ${{ vars.CONTAINER_APP_NAME }}
-        # improvement-mcp は web container と独立したリソース。Flex Consumption
-        # の remote build などで失敗しても web 本体の rollback を誘発させない。
-        continue-on-error: true
+        # improvement-mcp は APIM 経由で本番アプリから参照されるため、
+        # ready-to-run package 配備に失敗した場合はそのまま deploy を失敗させる。
         run: uv run --with azure-identity python scripts/deploy_improvement_mcp.py
 
       - name: Health check

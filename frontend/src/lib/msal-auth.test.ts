@@ -53,6 +53,7 @@ describe('msal-auth', () => {
     acquireTokenSilentMock.mockReset()
     acquireTokenSilentMock.mockResolvedValue({ accessToken: 'token' })
     acquireTokenRedirectMock.mockClear()
+    window.sessionStorage.clear()
   })
 
   it('uses the dedicated redirect bridge page for MSAL auth flows', async () => {
@@ -123,8 +124,9 @@ describe('msal-auth', () => {
     expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
   })
 
-  it('reuses the redirect response token when returned scopes partially overlap the requested Work IQ scopes', async () => {
+  it('falls back to silent token acquisition when the redirect response scopes only partially cover Work IQ', async () => {
     const redirectAccount = { username: 'user@example.com' }
+    acquireTokenSilentMock.mockResolvedValue({ accessToken: 'silent-token' })
     handleRedirectPromiseMock.mockResolvedValue({
       account: redirectAccount,
       accessToken: 'redirect-token',
@@ -141,8 +143,16 @@ describe('msal-auth', () => {
 
     const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 
-    expect(acquireTokenSilentMock).not.toHaveBeenCalled()
-    expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
+    expect(acquireTokenSilentMock).toHaveBeenCalledWith({
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+      ],
+      account: redirectAccount,
+    })
+    expect(result).toEqual({ token: 'silent-token', status: 'ok' })
   })
 
   it('returns redirecting immediately for interactive login redirects', async () => {
@@ -191,6 +201,13 @@ describe('msal-auth', () => {
     const { getWorkIqFoundryAuth } = await import('./msal-auth')
 
     await expect(getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })).rejects.toThrow('bridge failed')
+
+    const { readMsalRedirectFailureSentinel } = await import('./msal-redirect-sentinel')
+
+    expect(readMsalRedirectFailureSentinel()).toEqual(expect.objectContaining({
+      stage: 'main_app',
+      message: 'bridge failed',
+    }))
 
     const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 

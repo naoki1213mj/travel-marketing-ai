@@ -14,6 +14,7 @@ import {
   type SilentRequest,
   InteractionRequiredAuthError,
 } from '@azure/msal-browser'
+import { clearMsalRedirectFailureSentinel, recordMsalRedirectFailureSentinel } from './msal-redirect-sentinel'
 
 let msalInstance: PublicClientApplication | null = null
 let initPromise: Promise<void> | null = null
@@ -61,6 +62,15 @@ function normalizeScopes(scopes: string[]): string[] {
     .filter(scope => scope.length > 0)
 }
 
+function hasRequiredScopeCoverage(requestedScopes: string[], grantedScopes: string[]): boolean {
+  if (requestedScopes.length === 0 || grantedScopes.length === 0) {
+    return false
+  }
+
+  const grantedScopeSet = new Set(grantedScopes)
+  return requestedScopes.every(scope => grantedScopeSet.has(scope))
+}
+
 function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | null {
   if (!pendingRedirectResult) return null
 
@@ -75,9 +85,7 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
     return null
   }
 
-  const redirectScopeSet = new Set(redirectScopes)
-  const hasScopeOverlap = requestedScopes.some(scope => redirectScopeSet.has(scope))
-  if (!hasScopeOverlap) {
+  if (!hasRequiredScopeCoverage(requestedScopes, redirectScopes)) {
     return null
   }
 
@@ -105,10 +113,17 @@ export async function initMsal(config: MsalConfig): Promise<void> {
     // bridge (/auth-redirect.html) で token 交換済みなら main app に hash は残らず
     // null が返る。万一 main app が hash 付きで起動した場合も、MSAL が勝手に
     // request.origin へ再 navigate しないよう navigateToLoginRequestUrl:false で固定する。
-    const redirectResponse = await nextInstance.handleRedirectPromise({
-      navigateToLoginRequestUrl: false,
-    })
+    let redirectResponse: AuthenticationResult | null = null
+    try {
+      redirectResponse = await nextInstance.handleRedirectPromise({
+        navigateToLoginRequestUrl: false,
+      })
+    } catch (error) {
+      recordMsalRedirectFailureSentinel('main_app', error)
+      throw error
+    }
     if (redirectResponse?.account) {
+      clearMsalRedirectFailureSentinel()
       pendingRedirectResult = redirectResponse
       nextInstance.setActiveAccount(redirectResponse.account)
       msalInstance = nextInstance
@@ -142,6 +157,7 @@ function beginRedirectAuth(
   instance: PublicClientApplication,
   scopes: string[],
 ): DelegatedTokenResult {
+  clearMsalRedirectFailureSentinel()
   void instance.acquireTokenRedirect({ scopes }).catch((err: unknown) => {
     console.warn('MSAL redirect token acquisition failed:', err)
   })

@@ -21,7 +21,7 @@
 `azd up` 完了後に `scripts/postprovision.py` が自動実行します:
 
 1. **AI Gateway**: Foundry に `travel-ai-gateway` APIM 接続を作成、token policy 適用
-2. **Improvement MCP**: Flex Consumption Function App の作成、managed identity ベースの storage 構成、`mcp_server/` zip 配備、APIM `improvement-mcp` route 同期
+2. **Improvement MCP**: Flex Consumption Function App の作成、managed identity ベースの storage 構成、vendored 依存入り ready-to-run zip 配備、MCP runtime 応答確認、APIM `improvement-mcp` route 同期
 3. **Voice Agent**: Foundry SDK 経由で Voice Live 対応 Prompt Agent を作成
 4. **Marketing plan Agent**: Foundry SDK 経由で Agent2 用の事前作成済み Prompt Agent を作成/同期（UI で選択できる `gpt-5-4-mini` / `gpt-5.4` / `gpt-4-1-mini` / `gpt-4.1` をまとめて同期）
 5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Graph delegated permissions、Agent 365 Tools scopes を同期）

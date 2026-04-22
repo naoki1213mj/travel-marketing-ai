@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CONVERSATION_SETTINGS, DEFAULT_SETTINGS } from '../components/SettingsPanel'
+import { recordMsalRedirectFailureSentinel } from '../lib/msal-redirect-sentinel'
 import { buildRestoredPipelineState, useSSE } from './useSSE'
 
 const originalFetch = globalThis.fetch
@@ -514,24 +515,55 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.userMessages).toEqual([])
   })
 
-  it('replays a pending Work IQ request after auth redirect returns', async () => {
-    window.sessionStorage.setItem('workIqPendingChatRequest', JSON.stringify({
-      message: '沖縄プランを企画して',
-      settings: {
-        ...DEFAULT_SETTINGS,
-        workIqRuntime: 'foundry_tool',
-      },
-      conversationSettings: {
+  it('persists and resumes a pending Work IQ request across the redirect round-trip', async () => {
+    connectSSE
+      .mockResolvedValueOnce('redirecting')
+      .mockImplementationOnce(async (_message, handlers) => {
+        handlers.agent_progress?.({
+          agent: 'marketing-plan-agent',
+          status: 'running',
+          step: 2,
+          total_steps: 5,
+        })
+        handlers.tool_event?.({
+          tool: 'workiq_foundry_tool',
+          status: 'completed',
+          agent: 'marketing-plan-agent',
+          provider: 'foundry',
+          source: 'workiq',
+          source_scope: ['emails'],
+        })
+        handlers.text?.({ content: '# Okinawa plan', agent: 'marketing-plan-agent' })
+        handlers.done?.({
+          conversation_id: 'conv-resumed',
+          metrics: { latency_seconds: 12, tool_calls: 1, total_tokens: 100 },
+        })
+        return 'started'
+      })
+
+    const initialHook = renderHook(() => useSSE())
+
+    act(() => {
+      initialHook.result.current.updateConversationSettings({
         workIqEnabled: true,
         workIqSourceScope: ['emails'],
-      },
-      options: {},
-    }))
+      })
+    })
 
-    renderHook(() => useSSE())
+    await act(async () => {
+      await initialHook.result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(initialHook.result.current.state.status).toBe('idle')
+    expect(window.sessionStorage.getItem('workIqPendingChatRequest')).toContain('沖縄プランを企画して')
+
+    initialHook.unmount()
+
+    const resumedHook = renderHook(() => useSSE())
 
     await waitFor(() => {
-      expect(connectSSE).toHaveBeenCalledWith(
+      expect(connectSSE).toHaveBeenNthCalledWith(
+        2,
         '沖縄プランを企画して',
         expect.any(Object),
         undefined,
@@ -541,6 +573,59 @@ describe('buildRestoredPipelineState', () => {
         expect.objectContaining({ authInteractionMode: 'silent' }),
       )
     })
+
+    await waitFor(() => {
+      expect(resumedHook.result.current.state.status).toBe('completed')
+    })
+
+    expect(resumedHook.result.current.state.conversationId).toBe('conv-resumed')
+    expect(resumedHook.result.current.state.userMessages).toEqual(['沖縄プランを企画して'])
+    expect(resumedHook.result.current.state.workIq.status).toBe('enabled')
+    expect(resumedHook.result.current.state.textContents).toContainEqual({
+      content: '# Okinawa plan',
+      agent: 'marketing-plan-agent',
+    })
+    expect(window.sessionStorage.getItem('workIqPendingChatRequest')).toBeNull()
+  })
+
+  it('stops auto-resume and surfaces an error when the redirect bridge recorded a failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    connectSSE.mockResolvedValueOnce('redirecting')
+
+    const initialHook = renderHook(() => useSSE())
+
+    act(() => {
+      initialHook.result.current.updateConversationSettings({
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      })
+    })
+
+    await act(async () => {
+      await initialHook.result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    recordMsalRedirectFailureSentinel('redirect_bridge', new Error('bridge failed'))
+    initialHook.unmount()
+
+    const resumedHook = renderHook(() => useSSE())
+
+    await waitFor(() => {
+      expect(resumedHook.result.current.state.status).toBe('error')
+    })
+
+    expect(connectSSE).toHaveBeenCalledTimes(1)
+    expect(resumedHook.result.current.state.error).toEqual(expect.objectContaining({
+      code: 'WORKIQ_REDIRECT_FAILED',
+    }))
+    expect(resumedHook.result.current.state.workIq.status).toBe('unavailable')
+    expect(resumedHook.result.current.state.conversationSettings).toEqual({
+      workIqEnabled: true,
+      workIqSourceScope: ['emails'],
+    })
+    expect(window.sessionStorage.getItem('workIqPendingChatRequest')).toBeNull()
+
+    warnSpy.mockRestore()
   })
 
   it('seeds a first snapshot when evaluating before the first round is committed', async () => {

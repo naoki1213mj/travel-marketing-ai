@@ -1,6 +1,10 @@
 import { AlertTriangle } from 'lucide-react'
 import type { ErrorData } from '../hooks/useSSE'
 
+const ERROR_MESSAGE_KEYS: Partial<Record<string, string>> = {
+  WORKIQ_REDIRECT_FAILED: 'error.workiq_redirect_failed',
+}
+
 interface ErrorRetryProps {
   error: ErrorData
   onRetry: () => void
@@ -9,6 +13,9 @@ interface ErrorRetryProps {
 }
 
 export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
+  const translatedMessageKey = error.code ? ERROR_MESSAGE_KEYS[error.code] : undefined
+  const resolvedMessage = translatedMessageKey ? t(translatedMessageKey) : error.message
+
   return (
     <div className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-surface)] p-5">
       <div className="flex items-start gap-3">
@@ -18,7 +25,7 @@ export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
             {t('error.title')}
           </p>
           <p className="mt-1 text-sm text-[var(--danger-text)]/90">
-            {error.message}
+            {resolvedMessage}
           </p>
           {error.code && (
             <p className="mt-1 text-xs text-[var(--danger-text)]/70">

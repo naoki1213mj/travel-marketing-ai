@@ -14,7 +14,6 @@ import logging
 import os
 import shutil
 import subprocess
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -30,9 +29,15 @@ from azure.identity import DefaultAzureCredential
 
 logger = logging.getLogger(__name__)
 
-_MCP_SERVER_DIR = Path(__file__).resolve().parent.parent / "mcp_server"
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_MCP_SERVER_DIR = _REPO_ROOT / "mcp_server"
 _FUNCTION_RUNTIME = "python"
 _FUNCTION_RUNTIME_VERSION = "3.13"
+_IMPROVEMENT_MCP_BUILD_ROOT = _REPO_ROOT / ".artifacts" / "improvement-mcp"
+_IMPROVEMENT_MCP_PACKAGE_NAME = "improvement-mcp.zip"
+_IMPROVEMENT_MCP_VENDOR_PLATFORM = "x86_64-manylinux2014"
+_MCP_PACKAGE_EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".python_packages"}
+_MCP_PACKAGE_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
 
 def _resolve_cli(name: str) -> str:
@@ -365,30 +370,104 @@ _IMPROVEMENT_MCP_POLICY_XML = """\
 </policies>"""
 
 
+def _prepare_improvement_mcp_build_paths() -> tuple[Path, Path, Path]:
+    """improvement-mcp のローカル build 用パスを初期化する。"""
+    if _IMPROVEMENT_MCP_BUILD_ROOT.exists():
+        shutil.rmtree(_IMPROVEMENT_MCP_BUILD_ROOT, ignore_errors=True)
+
+    package_root = _IMPROVEMENT_MCP_BUILD_ROOT / "package"
+    vendor_root = package_root / ".python_packages" / "lib" / "site-packages"
+    vendor_root.mkdir(parents=True, exist_ok=True)
+    package_path = _IMPROVEMENT_MCP_BUILD_ROOT / _IMPROVEMENT_MCP_PACKAGE_NAME
+    return _IMPROVEMENT_MCP_BUILD_ROOT, package_root, package_path
+
+
+def _should_skip_mcp_package_path(relative_path: Path) -> bool:
+    """zip 配備対象から除外するローカル専用ファイルを判定する。"""
+    return any(part in _MCP_PACKAGE_EXCLUDE_DIRS for part in relative_path.parts) or relative_path.suffix in (
+        _MCP_PACKAGE_EXCLUDE_SUFFIXES
+    )
+
+
+def _copy_mcp_sources(package_root: Path) -> bool:
+    """mcp_server のソースを package staging へ複製する。"""
+    try:
+        for file_path in _MCP_SERVER_DIR.rglob("*"):
+            if file_path.is_dir():
+                continue
+            relative_path = file_path.relative_to(_MCP_SERVER_DIR)
+            if _should_skip_mcp_package_path(relative_path):
+                continue
+            destination = package_root / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(file_path, destination)
+    except OSError as exc:
+        logger.warning("MCP ソースの staging に失敗しました: %s", exc)
+        return False
+
+    return True
+
+
+def _vendor_mcp_dependencies(package_root: Path) -> bool:
+    """Azure Functions の ready-to-run package 用に依存を同梱する。"""
+    requirements_path = _MCP_SERVER_DIR / "requirements.txt"
+    if not requirements_path.exists():
+        logger.warning("MCP requirements.txt が見つかりません: %s", requirements_path)
+        return False
+
+    vendor_root = package_root / ".python_packages" / "lib" / "site-packages"
+    install_result = _run_cli(
+        [
+            "uv",
+            "pip",
+            "install",
+            "--requirements",
+            str(requirements_path),
+            "--target",
+            str(vendor_root),
+            "--python-version",
+            _FUNCTION_RUNTIME_VERSION,
+            "--python-platform",
+            _IMPROVEMENT_MCP_VENDOR_PLATFORM,
+            "--compile-bytecode",
+        ],
+        capture_output=True,
+    )
+    if install_result.returncode == 0:
+        return True
+
+    error_output = install_result.stderr.strip() or install_result.stdout.strip()
+    logger.warning("MCP 依存の vendor に失敗しました: %s", error_output)
+    return False
+
+
 def _build_mcp_package() -> Path | None:
-    """mcp_server ディレクトリを zip 化して返す。"""
+    """mcp_server を ready-to-run zip package に組み立てて返す。"""
     if not _MCP_SERVER_DIR.exists():
         logger.warning("mcp_server ディレクトリが見つかりません: %s", _MCP_SERVER_DIR)
         return None
 
-    with tempfile.NamedTemporaryFile(prefix="improvement-mcp-", suffix=".zip", delete=False) as temp_file:
-        package_path = Path(temp_file.name)
+    build_root, package_root, package_path = _prepare_improvement_mcp_build_paths()
 
     try:
+        if not _copy_mcp_sources(package_root):
+            shutil.rmtree(build_root, ignore_errors=True)
+            return None
+        if not _vendor_mcp_dependencies(package_root):
+            shutil.rmtree(build_root, ignore_errors=True)
+            return None
+
         with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for file_path in _MCP_SERVER_DIR.rglob("*"):
+            for file_path in package_root.rglob("*"):
                 if file_path.is_dir():
                     continue
-                relative_path = file_path.relative_to(_MCP_SERVER_DIR)
-                if any(part in {".venv", "__pycache__", ".pytest_cache"} for part in relative_path.parts):
-                    continue
-                if file_path.suffix in {".pyc", ".pyo"}:
-                    continue
+                relative_path = file_path.relative_to(package_root)
                 archive.write(file_path, arcname=relative_path.as_posix())
+        logger.info("improvement-mcp の ready-to-run package を作成しました: %s", package_path)
         return package_path
     except (OSError, ValueError) as exc:
         logger.warning("MCP package 作成に失敗しました: %s", exc)
-        package_path.unlink(missing_ok=True)
+        shutil.rmtree(build_root, ignore_errors=True)
         return None
 
 
@@ -817,7 +896,7 @@ def deploy_improvement_mcp_function(
 
     try:
         logger.info(
-            "improvement-mcp Function App へコードを配備します。Flex Consumption の remote build に数分かかる場合があります: %s",
+            "improvement-mcp Function App へ依存同梱済み package を zip 配備します: %s",
             function_app_name,
         )
         deploy_started = time.perf_counter()
@@ -835,13 +914,13 @@ def deploy_improvement_mcp_function(
                 "--resource-group",
                 resource_group,
                 "--build-remote",
-                "true",
+                "false",
             ],
             capture_output=True,
         )
         deploy_elapsed_seconds = time.perf_counter() - deploy_started
     finally:
-        package_path.unlink(missing_ok=True)
+        shutil.rmtree(package_path.parent, ignore_errors=True)
 
     if deploy_result.returncode == 0:
         logger.info(
@@ -985,6 +1064,44 @@ def _wait_for_function_app_mcp_details(
     return None
 
 
+def _probe_function_app_mcp_runtime(function_base_url: str, mcp_extension_key: str, timeout: int = 10) -> bool:
+    """MCP runtime endpoint が応答できる状態かを確認する。"""
+    request = urllib.request.Request(
+        f"{function_base_url.rstrip('/')}/runtime/webhooks/mcp",
+        headers={
+            "x-functions-key": mcp_extension_key,
+            "Accept": "application/json, text/event-stream",
+        },
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return response.status < 500
+    except urllib.error.HTTPError as exc:
+        return exc.code < 500 and exc.code != 404
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+def _wait_for_function_app_mcp_runtime_ready(
+    function_base_url: str,
+    mcp_extension_key: str,
+    attempts: int,
+    delay_seconds: int,
+) -> bool:
+    """MCP runtime endpoint が APIM 登録可能になるまで待機する。"""
+    total_attempts = max(1, attempts)
+    for attempt in range(1, total_attempts + 1):
+        if _probe_function_app_mcp_runtime(function_base_url, mcp_extension_key):
+            return True
+        if attempt >= total_attempts:
+            break
+        logger.info("improvement-mcp runtime の準備待機中 (%s/%s): %s", attempt, total_attempts, function_base_url)
+        time.sleep(delay_seconds)
+    return False
+
+
 def configure_improvement_mcp(
     subscription_id: str,
     rg: str,
@@ -1009,6 +1126,14 @@ def configure_improvement_mcp(
         return False
 
     function_base_url, mcp_extension_key = function_details
+    if not _wait_for_function_app_mcp_runtime_ready(
+        function_base_url,
+        mcp_extension_key,
+        attempts=readiness_attempts,
+        delay_seconds=readiness_delay_seconds,
+    ):
+        logger.warning("improvement-mcp runtime endpoint の準備待機に失敗しました: %s", function_base_url)
+        return False
 
     named_value_result = _rest_call(
         _apim_resource_url(subscription_id, rg, apim_name, f"/namedValues/{_IMPROVEMENT_MCP_NAMED_VALUE}"),
