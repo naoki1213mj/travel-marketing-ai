@@ -1,26 +1,27 @@
-import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus, type MsalConfig } from './msal-auth'
+import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
+import {
+  normalizeMsalConfig,
+  readCachedMsalConfig,
+  writeCachedMsalConfig,
+  type MsalConfig,
+} from './msal-config-cache'
 
 let cachedMsalConfig: MsalConfig | null = null
 let cachedMsalConfigPromise: Promise<MsalConfig | null> | null = null
 let delegatedAuthBootstrapped = false
 let delegatedAuthBootstrapPromise: Promise<void> | null = null
 
-function normalizeMsalConfig(raw: unknown): MsalConfig | null {
-  if (!raw || typeof raw !== 'object') return null
-  const clientId = typeof (raw as { client_id?: unknown }).client_id === 'string'
-    ? (raw as { client_id: string }).client_id.trim()
-    : ''
-  const tenantId = typeof (raw as { tenant_id?: unknown }).tenant_id === 'string'
-    ? (raw as { tenant_id: string }).tenant_id.trim()
-    : ''
-  if (!clientId || !tenantId) return null
-  return { clientId, tenantId }
-}
-
 async function getMsalConfig(): Promise<MsalConfig | null> {
   if (cachedMsalConfig) {
     return cachedMsalConfig
   }
+
+  const cachedStoredConfig = readCachedMsalConfig()
+  if (cachedStoredConfig) {
+    cachedMsalConfig = cachedStoredConfig
+    return cachedStoredConfig
+  }
+
   if (!cachedMsalConfigPromise) {
     cachedMsalConfigPromise = (async () => {
       try {
@@ -29,6 +30,7 @@ async function getMsalConfig(): Promise<MsalConfig | null> {
         const config = normalizeMsalConfig(await response.json())
         if (config) {
           cachedMsalConfig = config
+          writeCachedMsalConfig(config)
         }
         return config
       } catch {

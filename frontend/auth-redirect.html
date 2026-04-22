@@ -13,6 +13,25 @@
         clearMsalRedirectFailureSentinel,
         recordMsalRedirectFailureSentinel,
       } from '/src/lib/msal-redirect-sentinel.ts'
+      import {
+        normalizeMsalConfig,
+        readCachedMsalConfig,
+        writeCachedMsalConfig,
+      } from '/src/lib/msal-config-cache.ts'
+
+      async function loadMsalConfig() {
+        const cached = readCachedMsalConfig()
+        if (cached) {
+          return cached
+        }
+
+        const response = await fetch('/api/voice-config')
+        if (!response.ok) throw new Error('failed to load auth config')
+        const config = normalizeMsalConfig(await response.json())
+        if (!config) throw new Error('missing client/tenant id')
+        writeCachedMsalConfig(config)
+        return config
+      }
 
       // redirect-bridge は popup/iframe flow 専用。redirect flow では
       // acquireTokenRedirect の response を自分で PublicClientApplication を
@@ -20,12 +39,7 @@
       // account/token を書き込んでから戻る必要がある。
       async function finalize() {
         try {
-          const response = await fetch('/api/voice-config')
-          if (!response.ok) throw new Error('failed to load auth config')
-          const raw = await response.json()
-          const clientId = typeof raw?.client_id === 'string' ? raw.client_id.trim() : ''
-          const tenantId = typeof raw?.tenant_id === 'string' ? raw.tenant_id.trim() : ''
-          if (!clientId || !tenantId) throw new Error('missing client/tenant id')
+          const { clientId, tenantId } = await loadMsalConfig()
 
           const pca = new PublicClientApplication({
             auth: {

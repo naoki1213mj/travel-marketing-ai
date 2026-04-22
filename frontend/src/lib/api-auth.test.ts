@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { bootstrapDelegatedApiAuth, getDelegatedApiAuth, resetDelegatedApiAuthCache } from './api-auth'
+import { MSAL_CONFIG_CACHE_KEY } from './msal-config-cache'
 
 const originalFetch = global.fetch
 const {
@@ -22,6 +23,7 @@ vi.mock('./msal-auth', () => ({
 describe('getDelegatedApiAuth', () => {
   beforeEach(() => {
     resetDelegatedApiAuthCache()
+    window.sessionStorage.clear()
     global.fetch = vi.fn(async () =>
       new Response(JSON.stringify({ client_id: 'client-id', tenant_id: 'tenant-id' }), {
         status: 200,
@@ -165,5 +167,20 @@ describe('getDelegatedApiAuth', () => {
     expect(secondResult).toEqual(firstResult)
     expect(initMsal).toHaveBeenCalledTimes(2)
     expect(warnSpy).toHaveBeenCalledWith('Delegated auth bootstrap failed:', expect.any(Error))
+  })
+
+  it('reuses the cached MSAL config from sessionStorage without refetching voice-config', async () => {
+    window.sessionStorage.setItem(MSAL_CONFIG_CACHE_KEY, JSON.stringify({
+      clientId: 'cached-client-id',
+      tenantId: 'cached-tenant-id',
+    }))
+
+    await bootstrapDelegatedApiAuth()
+
+    expect(global.fetch).not.toHaveBeenCalled()
+    expect(initMsal).toHaveBeenCalledWith({
+      clientId: 'cached-client-id',
+      tenantId: 'cached-tenant-id',
+    })
   })
 })

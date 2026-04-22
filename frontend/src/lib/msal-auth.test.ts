@@ -54,6 +54,8 @@ describe('msal-auth', () => {
     acquireTokenSilentMock.mockResolvedValue({ accessToken: 'token' })
     acquireTokenRedirectMock.mockClear()
     window.sessionStorage.clear()
+    window.location.hash = ''
+    window.location.search = ''
   })
 
   it('uses the dedicated redirect bridge page for MSAL auth flows', async () => {
@@ -71,13 +73,22 @@ describe('msal-auth', () => {
         cacheLocation: 'sessionStorage',
       },
     })
-    // handleRedirectPromise は navigateToLoginRequestUrl:false で呼ばれる必要がある
-    // （bridge 側で token 交換済みの想定。main app が勝手に再 navigate しないため）。
+    expect(handleRedirectPromiseMock).not.toHaveBeenCalled()
+  })
+
+  it('handles a redirect response on pages that actually contain an auth callback hash', async () => {
+    window.location.hash = '#code=abc&state=xyz'
+
+    const { initMsal } = await import('./msal-auth')
+
+    await initMsal({ clientId: 'client-id', tenantId: 'tenant-id' })
+
     expect(handleRedirectPromiseMock).toHaveBeenCalledWith({ navigateToLoginRequestUrl: false })
   })
 
   it('sets the redirect response account as the active account before silent token acquisition', async () => {
     const redirectAccount = { username: 'user@example.com' }
+    window.location.hash = '#code=abc&state=xyz'
     handleRedirectPromiseMock.mockResolvedValue({ account: redirectAccount })
     setActiveAccountMock.mockImplementation((account) => {
       getActiveAccountMock.mockReturnValue(account)
@@ -102,6 +113,7 @@ describe('msal-auth', () => {
 
   it('reuses the redirect response access token for the immediate post-login Work IQ request', async () => {
     const redirectAccount = { username: 'user@example.com' }
+    window.location.hash = '#code=abc&state=xyz'
     handleRedirectPromiseMock.mockResolvedValue({
       account: redirectAccount,
       accessToken: 'redirect-token',
@@ -126,6 +138,7 @@ describe('msal-auth', () => {
 
   it('falls back to silent token acquisition when the redirect response scopes only partially cover Work IQ', async () => {
     const redirectAccount = { username: 'user@example.com' }
+    window.location.hash = '#code=abc&state=xyz'
     acquireTokenSilentMock.mockResolvedValue({ accessToken: 'silent-token' })
     handleRedirectPromiseMock.mockResolvedValue({
       account: redirectAccount,
@@ -193,6 +206,7 @@ describe('msal-auth', () => {
   })
 
   it('retries initialization after a failed redirect handling attempt', async () => {
+    window.location.hash = '#error=access_denied&state=xyz'
     handleRedirectPromiseMock
       .mockRejectedValueOnce(new Error('bridge failed'))
       .mockResolvedValueOnce(null)

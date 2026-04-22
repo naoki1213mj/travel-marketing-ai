@@ -15,16 +15,12 @@ import {
   InteractionRequiredAuthError,
 } from '@azure/msal-browser'
 import { clearMsalRedirectFailureSentinel, recordMsalRedirectFailureSentinel } from './msal-redirect-sentinel'
+import type { MsalConfig } from './msal-config-cache'
 
 let msalInstance: PublicClientApplication | null = null
 let initPromise: Promise<void> | null = null
 let msalInitialized = false
 let pendingRedirectResult: AuthenticationResult | null = null
-
-export interface MsalConfig {
-  clientId: string
-  tenantId: string
-}
 
 export type DelegatedAuthStatus = 'ok' | 'auth_required' | 'consent_required' | 'redirecting' | 'unavailable'
 
@@ -55,6 +51,11 @@ const WORK_IQ_FOUNDRY_SCOPES = [
   buildAgent365Scope('McpServers.OneDriveSharepoint.All'),
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
+
+function locationHasMsalAuthResponse(): boolean {
+  const currentLocation = `${window.location.hash}${window.location.search}`.toLowerCase()
+  return /(?:^|[?#&])(code|error)=/.test(currentLocation)
+}
 
 function normalizeScopes(scopes: string[]): string[] {
   return scopes
@@ -114,13 +115,15 @@ export async function initMsal(config: MsalConfig): Promise<void> {
     // null が返る。万一 main app が hash 付きで起動した場合も、MSAL が勝手に
     // request.origin へ再 navigate しないよう navigateToLoginRequestUrl:false で固定する。
     let redirectResponse: AuthenticationResult | null = null
-    try {
-      redirectResponse = await nextInstance.handleRedirectPromise({
-        navigateToLoginRequestUrl: false,
-      })
-    } catch (error) {
-      recordMsalRedirectFailureSentinel('main_app', error)
-      throw error
+    if (locationHasMsalAuthResponse()) {
+      try {
+        redirectResponse = await nextInstance.handleRedirectPromise({
+          navigateToLoginRequestUrl: false,
+        })
+      } catch (error) {
+        recordMsalRedirectFailureSentinel('main_app', error)
+        throw error
+      }
     }
     if (redirectResponse?.account) {
       clearMsalRedirectFailureSentinel()
