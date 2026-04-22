@@ -8,9 +8,42 @@
   <body>
     <p>Processing authentication...</p>
     <script type="module">
-      import { broadcastResponseToMainFrame } from '@azure/msal-browser/redirect-bridge'
+      import { PublicClientApplication } from '@azure/msal-browser'
 
-      broadcastResponseToMainFrame()
+      // redirect-bridge は popup/iframe flow 専用。redirect flow では
+      // acquireTokenRedirect の response を自分で PublicClientApplication を
+      // 生成して handleRedirectPromise() で処理し、sessionStorage に
+      // account/token を書き込んでから戻る必要がある。
+      async function finalize() {
+        try {
+          const response = await fetch('/api/voice-config')
+          if (!response.ok) throw new Error('failed to load auth config')
+          const raw = await response.json()
+          const clientId = typeof raw?.client_id === 'string' ? raw.client_id.trim() : ''
+          const tenantId = typeof raw?.tenant_id === 'string' ? raw.tenant_id.trim() : ''
+          if (!clientId || !tenantId) throw new Error('missing client/tenant id')
+
+          const pca = new PublicClientApplication({
+            auth: {
+              clientId,
+              authority: `https://login.microsoftonline.com/${tenantId}`,
+              redirectUri: new URL('/auth-redirect.html', window.location.origin).toString(),
+            },
+            cache: { cacheLocation: 'sessionStorage' },
+          })
+          await pca.initialize()
+          const result = await pca.handleRedirectPromise()
+          if (result?.account) {
+            pca.setActiveAccount(result.account)
+          }
+        } catch (err) {
+          console.warn('auth-redirect finalize error', err)
+        } finally {
+          window.location.replace('/')
+        }
+      }
+
+      finalize()
     </script>
   </body>
 </html>
