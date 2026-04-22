@@ -319,6 +319,58 @@ describe('connectSSE', () => {
     expect(textHandler).toHaveBeenCalledWith({ content: 'buffered', agent: 'a1' })
   })
 
+  it('parses CRLF-delimited SSE events', async () => {
+    const sseBody =
+      'event: text\r\ndata: {"content":"crlf","agent":"a1"}\r\n\r\n' +
+      'event: done\r\ndata: {"conversation_id":"c1","metrics":{}}\r\n\r\n'
+
+    mockFetch.mockResolvedValue(createMockResponse(sseBody))
+
+    const textHandler = vi.fn()
+    const doneHandler = vi.fn()
+
+    await connectSSE('test', {
+      text: textHandler,
+      done: doneHandler,
+    })
+
+    expect(textHandler).toHaveBeenCalledWith({ content: 'crlf', agent: 'a1' })
+    expect(doneHandler).toHaveBeenCalledWith({ conversation_id: 'c1', metrics: {} })
+  })
+
+  it('joins multi-line data fields before parsing JSON', async () => {
+    const sseBody =
+      'event: text\n' +
+      'data: {"content":"multiline",\n' +
+      'data: "agent":"a1"}\n\n'
+
+    mockFetch.mockResolvedValue(createMockResponse(sseBody))
+
+    const textHandler = vi.fn()
+    await connectSSE('test', { text: textHandler })
+
+    expect(textHandler).toHaveBeenCalledWith({ content: 'multiline', agent: 'a1' })
+  })
+
+  it('reports malformed SSE payloads without throwing', async () => {
+    const sseBody =
+      'event: text\ndata: {"content":"broken"\n\n' +
+      'event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'
+
+    mockFetch.mockResolvedValue(createMockResponse(sseBody))
+
+    const errorHandler = vi.fn()
+    const doneHandler = vi.fn()
+
+    await expect(connectSSE('test', { error: errorHandler, done: doneHandler })).resolves.toBe('started')
+
+    expect(errorHandler).toHaveBeenCalledWith({
+      message: 'SSE イベントの解析に失敗しました',
+      code: 'INVALID_SSE_EVENT',
+    })
+    expect(doneHandler).toHaveBeenCalledWith({ conversation_id: 'c1', metrics: {} })
+  })
+
   it('calls error handler on HTTP errors (non-2xx)', async () => {
     mockFetch.mockResolvedValue(new Response(null, { status: 500 }))
 

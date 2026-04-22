@@ -37,6 +37,36 @@ export interface ChatRequestOptions {
 
 export type ConnectSSEStartResult = 'started' | 'redirecting' | 'blocked'
 
+interface ParsedSSEBlock {
+  type: SSEEventType | null
+  rawData: string | null
+}
+
+function parseSSEBlock(block: string): ParsedSSEBlock {
+  let type: SSEEventType | null = null
+  const dataLines: string[] = []
+
+  for (const rawLine of block.split('\n')) {
+    const line = rawLine.trimEnd()
+    if (!line) continue
+
+    if (line.startsWith('event:')) {
+      type = line.slice('event:'.length).trim() as SSEEventType
+      continue
+    }
+
+    if (line.startsWith('data:')) {
+      const value = line.slice('data:'.length)
+      dataLines.push(value.startsWith(' ') ? value.slice(1) : value)
+    }
+  }
+
+  return {
+    type,
+    rawData: dataLines.length > 0 ? dataLines.join('\n') : null,
+  }
+}
+
 /**
  * SSE ストリームを読み取る共通処理
  */
@@ -55,19 +85,24 @@ async function readSSEStream(
       const { done, value } = await reader.read()
       if (done) break
 
-      buffer += decoder.decode(value, { stream: true })
+      buffer += decoder.decode(value, { stream: true }).replace(/\r/g, '')
       const blocks = buffer.split('\n\n')
       buffer = blocks.pop() || ''
 
       for (const block of blocks) {
         if (signal?.aborted) break
         if (!block.trim()) continue
-        const eventMatch = block.match(/^event: (.+)$/m)
-        const dataMatch = block.match(/^data: (.+)$/m)
-        if (eventMatch && dataMatch) {
-          const type = eventMatch[1] as SSEEventType
-          const data: unknown = JSON.parse(dataMatch[1])
+        const { type, rawData } = parseSSEBlock(block)
+        if (!type || !rawData) continue
+
+        try {
+          const data: unknown = JSON.parse(rawData)
           handlers[type]?.(data)
+        } catch {
+          handlers.error?.({
+            message: 'SSE イベントの解析に失敗しました',
+            code: 'INVALID_SSE_EVENT',
+          })
         }
       }
     }
