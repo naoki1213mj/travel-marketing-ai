@@ -102,8 +102,12 @@ export async function initMsal(config: MsalConfig): Promise<void> {
 
   initPromise = (async () => {
     await nextInstance.initialize()
-    // redirect からの戻りを処理
-    const redirectResponse = await nextInstance.handleRedirectPromise()
+    // bridge (/auth-redirect.html) で token 交換済みなら main app に hash は残らず
+    // null が返る。万一 main app が hash 付きで起動した場合も、MSAL が勝手に
+    // request.origin へ再 navigate しないよう navigateToLoginRequestUrl:false で固定する。
+    const redirectResponse = await nextInstance.handleRedirectPromise({
+      navigateToLoginRequestUrl: false,
+    })
     if (redirectResponse?.account) {
       pendingRedirectResult = redirectResponse
       nextInstance.setActiveAccount(redirectResponse.account)

@@ -70,6 +70,9 @@ describe('msal-auth', () => {
         cacheLocation: 'sessionStorage',
       },
     })
+    // handleRedirectPromise は navigateToLoginRequestUrl:false で呼ばれる必要がある
+    // （bridge 側で token 交換済みの想定。main app が勝手に再 navigate しないため）。
+    expect(handleRedirectPromiseMock).toHaveBeenCalledWith({ navigateToLoginRequestUrl: false })
   })
 
   it('sets the redirect response account as the active account before silent token acquisition', async () => {

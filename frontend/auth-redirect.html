@@ -32,7 +32,10 @@
             cache: { cacheLocation: 'sessionStorage' },
           })
           await pca.initialize()
-          const result = await pca.handleRedirectPromise()
+          // navigateToLoginRequestUrl:false を handleRedirectPromise に渡すと、
+          // MSAL が token 交換前に request.origin へ自動 navigate するのを止められる。
+          // bridge 上で token 交換まで完走させ、その後明示的に / へ戻す。
+          const result = await pca.handleRedirectPromise({ navigateToLoginRequestUrl: false })
           if (result?.account) {
             pca.setActiveAccount(result.account)
           }
