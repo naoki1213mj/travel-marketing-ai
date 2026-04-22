@@ -72,6 +72,19 @@ def _run_cli(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[s
         return subprocess.CompletedProcess(resolved_command, 127, stdout="", stderr=str(exc))
 
 
+def _is_partial_zip_deploy_success(result: subprocess.CompletedProcess[str]) -> bool:
+    """Functions zip deploy の partial success を継続可能か判定する。"""
+    if result.returncode == 0:
+        return True
+
+    combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part).lower()
+    return (
+        "deployment was partially successful" in combined_output
+        and "uploaded package to storage successfully" in combined_output
+        and "[kudu-synctriggerstep] starting" in combined_output
+    )
+
+
 # ---------------------------------------------------------------------------
 # ユーティリティ
 # ---------------------------------------------------------------------------
@@ -925,6 +938,14 @@ def deploy_improvement_mcp_function(
     if deploy_result.returncode == 0:
         logger.info(
             "improvement-mcp Function App にコードを配備しました: %s (%.1f秒)",
+            function_app_name,
+            deploy_elapsed_seconds,
+        )
+        return True
+
+    if _is_partial_zip_deploy_success(deploy_result):
+        logger.info(
+            "improvement-mcp の zip 配備は非同期継続中です。readiness wait で継続確認します: %s (%.1f秒)",
             function_app_name,
             deploy_elapsed_seconds,
         )
