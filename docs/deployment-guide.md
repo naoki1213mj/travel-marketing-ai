@@ -107,7 +107,7 @@ azd deploy
 - SharePoint 保存経路の復旧（preferred: site permission grant to Logic App MI、fallback: SharePoint connector 再認証）
 - Logic Apps の Teams / SharePoint connector や trigger URL が変わる場合の再接続 / 再設定
 
-Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`** を使います。`postprovision.py` が Agent2 用の事前作成済み Foundry Prompt Agent を同期し、実行時はその `agent_reference` に `source_scope` ベースの read-only Microsoft 365 connector を per-user delegated token 付きで overlay します。**`graph_prefetch` は明示 rollback** で、Microsoft Graph Copilot Chat API を per-user delegated token で呼び出して短い brief を先読みします。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。
+Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`** を使います。`postprovision.py` が Agent2 用の事前作成済み Foundry Prompt Agent を同期し、実行時はその `agent_reference` に `source_scope` ベースの read-only Microsoft 365 connector を per-user delegated token 付きで overlay します。Prompt Agent 側の instructions は、実行時に Work IQ / Microsoft 365 tools が付与されている場合はそれらを優先利用する前提で同期されます。**`graph_prefetch` は明示 rollback** で、Microsoft Graph Copilot Chat API を per-user delegated token で呼び出して短い brief を先読みします。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。instructions を変えた場合は marketing-plan agent を再同期してください。
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
 

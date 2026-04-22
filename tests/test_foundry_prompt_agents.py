@@ -57,6 +57,15 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_without_work_iq_to
     assert "instructions" not in kwargs
 
 
+def test_build_marketing_plan_agent_definition_includes_work_iq_guidance() -> None:
+    """事前作成 Agent 定義には Work IQ tool 利用方針を含める。"""
+    definition = module.build_marketing_plan_agent_definition("gpt-5-4-mini")
+
+    instructions = definition.as_dict()["instructions"]
+    assert "Work IQ / Microsoft 365 tools の利用方針" in instructions
+    assert "優先利用してください" in instructions
+
+
 def test_run_marketing_plan_prompt_agent_overlays_work_iq_tools_on_agent_reference(monkeypatch) -> None:
     """Work IQ connector 利用時も agent_reference を維持しつつ overlay する。"""
     responses_client = _FakeResponsesClient()
@@ -83,8 +92,11 @@ def test_run_marketing_plan_prompt_agent_overlays_work_iq_tools_on_agent_referen
     assert result == {"id": "resp_123"}
     assert len(responses_client.calls) == 1
     kwargs = responses_client.calls[0]
-    assert kwargs["input"] == "test input"
     assert kwargs["extra_body"] == {"agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"}}
+    assert "Microsoft 365 参照ガイド" in kwargs["input"]
+    assert "ユーザー入力:\ntest input" in kwargs["input"]
+    assert "Work IQ Mail" in kwargs["input"]
+    assert "Work IQ Teams" in kwargs["input"]
     tools = kwargs["tools"]
     assert isinstance(tools, list)
     assert len(tools) == 2

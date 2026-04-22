@@ -32,6 +32,13 @@ _SOURCE_LABELS = {
     "teams_chats": "Teams チャット",
     "documents_notes": "ドキュメント / ノート",
 }
+_WORK_IQ_BASELINE_GUIDANCE = (
+    "\n\n## Work IQ / Microsoft 365 tools の利用方針\n"
+    "- 実行時に Work IQ / Microsoft 365 tools が付与されている場合は、"
+    "社内方針・過去施策・承認条件・会議メモ・メール・チャット・文書の確認にそれらを優先利用してください。\n"
+    "- ツールから得た情報は、個人情報や長い原文を転載せず、企画判断に必要な要点だけを要約して反映してください。\n"
+    "- 追加文脈が十分でない場合はブロックせず、利用可能な情報だけで企画を完結させてください。"
+)
 
 
 class WorkIQPromptConfig(TypedDict):
@@ -76,7 +83,7 @@ def build_marketing_plan_agent_definition(model_name: str) -> PromptAgentDefinit
     """marketing-plan 用の事前作成済み Agent 定義を返す。"""
     return PromptAgentDefinition(
         model=model_name,
-        instructions=MARKETING_PLAN_INSTRUCTIONS,
+        instructions=f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
         tools=[_build_marketing_plan_web_search_tool()],
     )
 
@@ -223,13 +230,17 @@ def run_marketing_plan_prompt_agent(
             "input": user_input,
             "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
         }
-        work_iq_tools, _resolved_work_iq_tools = _build_work_iq_tools(
+        work_iq_tools, resolved_work_iq_tools = _build_work_iq_tools(
             work_iq or {"enabled": False, "source_scope": []},
             work_iq_access_token,
         )
         if work_iq_tools:
             started_at = _utc_now_iso()
             started_perf = time.perf_counter()
+            response_kwargs["input"] = (
+                f"{_build_work_iq_tool_guidance(work_iq or {'enabled': False, 'source_scope': []}, resolved_work_iq_tools)}"
+                f"\n\n---\n\nユーザー入力:\n{user_input}"
+            )
             _emit_work_iq_tool_event(
                 "running",
                 started_at=started_at,
