@@ -55,7 +55,7 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for detailed Azure 
 | Category | Details |
 | --- | --- |
 | **Multi-Agent Pipeline** | 7 agents in 5 user-facing steps with human-in-the-loop approval and optional manager gate |
-| **AI Image Generation** | GPT Image 1.5 / MAI-Image-2 — hero visuals and SNS banners, selectable in UI |
+| **AI Image Generation** | GPT Image 1.5 / GPT Image 2 / MAI-Image-2 — hero visuals and SNS banners, selectable in UI |
 | **Video Generation** | Photo Avatar with SSML narration, HD voice, MP4/H.264 |
 | **Quality Evaluation** | Built-in + custom business metrics with side-by-side version comparison |
 | **Evaluation-Driven Refinement** | Feed results back via APIM-fronted Azure Functions MCP |
@@ -112,7 +112,7 @@ azd up                                    # provision + build + deploy
 | Work IQ delegated auth | SPA redirect URIs, Microsoft Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
 | Work IQ runtime | The default runtime is `WORKIQ_RUNTIME=graph_prefetch`. Agent1 and Agent2 are bridged by a short workplace brief fetched through Microsoft Graph Copilot Chat API (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120` by default), which keeps the pipeline progressing even when Foundry connector execution is unstable. `foundry_tool` remains available as an opt-in path with `MARKETING_PLAN_RUNTIME=foundry_prompt`, where Agent2 dynamically injects read-only Microsoft 365 connectors from `source_scope`. Frontend auth preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same UI state. Accounts outside the tenant/guest list are rejected during sign-in |
 | Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
-| Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5` |
+| Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5`; GPT image routes also accept an optional `GPT_IMAGE_2_DEPLOYMENT_NAME` override when `gpt-image-2` is deployed under a custom name |
 | MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
 | Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored. The live app now uses both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` |
 | Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` and `logic-wmbvhdhcsuyb2` are live. Manager approval notification and post-approval Teams channel delivery were revalidated, and `deploy.yml` now resyncs the full signed manager trigger URL into the Container App secret |

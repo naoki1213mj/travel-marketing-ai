@@ -63,7 +63,7 @@ uv run python scripts/setup_knowledge_base.py
 
 ### 4.2 画像生成モデル
 
-`gpt-image-1.5` は IaC で自動配備されます。加えて rebuilt `workiq-dev` tenant では **`gpt-4-1-mini` / `gpt-4.1` / `gpt-5.4`** もメイン East US 2 Foundry account に追加済みです。
+`gpt-image-1.5` は IaC で自動配備されます。加えて rebuilt `workiq-dev` tenant では **`gpt-4-1-mini` / `gpt-4.1` / `gpt-5.4`** もメイン East US 2 Foundry account に追加済みです。`gpt-image-2` を追加配備する場合は、deployment 名が既定 (`gpt-image-2`) と異なるときだけ `GPT_IMAGE_2_DEPLOYMENT_NAME` を設定してください。
 
 MAI 系は East US 2 で使えないため、**別の East US AI Services account** にデプロイし:
 

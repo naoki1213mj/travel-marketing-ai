@@ -35,6 +35,8 @@ class AppSettings(TypedDict):
     manager_approval_trigger_url: str
     fabric_data_agent_url: str
     image_project_endpoint_mai: str
+    gpt_image_15_deployment_name: str
+    gpt_image_2_deployment_name: str
     marketing_plan_runtime: str
     marketing_plan_prompt_agent_name: str
     work_iq_runtime: str
@@ -62,6 +64,8 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "manager_approval_trigger_url": ("MANAGER_APPROVAL_TRIGGER_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
+    "gpt_image_15_deployment_name": ("GPT_IMAGE_15_DEPLOYMENT_NAME",),
+    "gpt_image_2_deployment_name": ("GPT_IMAGE_2_DEPLOYMENT_NAME",),
     "marketing_plan_runtime": ("MARKETING_PLAN_RUNTIME",),
     "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
     "work_iq_runtime": ("WORKIQ_RUNTIME",),
@@ -74,6 +78,8 @@ _DEFAULTS: dict[str, str] = {
     "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "allowed_origins": "http://localhost:5173",
+    "gpt_image_15_deployment_name": "gpt-image-1.5",
+    "gpt_image_2_deployment_name": "gpt-image-2",
     "marketing_plan_runtime": "foundry_preprovisioned",
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
     "work_iq_runtime": "foundry_tool",

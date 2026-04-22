@@ -75,7 +75,7 @@ describe('connectSSE', () => {
         temperature: 0.7,
         maxTokens: 2000,
         topP: 1,
-        imageModel: 'gpt-image-1',
+        imageModel: 'gpt-image-1.5',
         imageQuality: 'medium',
         imageWidth: 1024,
         imageHeight: 1024,
@@ -107,7 +107,7 @@ describe('connectSSE', () => {
         temperature: 0.7,
         maxTokens: 2000,
         topP: 1,
-        imageModel: 'gpt-image-1',
+        imageModel: 'gpt-image-1.5',
         imageQuality: 'medium',
         imageWidth: 1024,
         imageHeight: 1024,
@@ -179,7 +179,7 @@ describe('connectSSE', () => {
         temperature: 0.7,
         maxTokens: 2000,
         topP: 1,
-        imageModel: 'gpt-image-1',
+        imageModel: 'gpt-image-1.5',
         imageQuality: 'medium',
         imageWidth: 1024,
         imageHeight: 1024,
@@ -197,6 +197,39 @@ describe('connectSSE', () => {
     )
 
     expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
+  })
+
+  it('sends the selected image model in image settings', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-2',
+        imageQuality: 'high',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+      },
+    )
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.settings.image_settings).toMatchObject({
+      image_model: 'gpt-image-2',
+      image_quality: 'high',
+    })
   })
 
   it('emits a local Work IQ tool event when consent is required', async () => {

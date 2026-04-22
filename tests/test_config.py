@@ -34,6 +34,8 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "SPEECH_SERVICE_REGION",
         "LOGIC_APP_CALLBACK_URL",
         "MANAGER_APPROVAL_TRIGGER_URL",
+        "GPT_IMAGE_15_DEPLOYMENT_NAME",
+        "GPT_IMAGE_2_DEPLOYMENT_NAME",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -93,6 +95,18 @@ def test_work_iq_timeout_default(monkeypatch):
     settings = get_settings()
 
     assert settings["work_iq_timeout_seconds"] == "120"
+
+
+def test_image_deployment_name_defaults(monkeypatch):
+    """画像 deployment 名はモデル名を既定値として解決する"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("GPT_IMAGE_15_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_IMAGE_2_DEPLOYMENT_NAME", raising=False)
+
+    settings = get_settings()
+
+    assert settings["gpt_image_15_deployment_name"] == "gpt-image-1.5"
+    assert settings["gpt_image_2_deployment_name"] == "gpt-image-2"
 
 
 def test_foundry_env_aliases(monkeypatch):

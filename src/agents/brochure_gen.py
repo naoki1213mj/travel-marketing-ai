@@ -54,6 +54,12 @@ AVAILABLE_IMAGE_MODELS = {
         "sizes": ["1024x1024", "1024x1536", "1536x1024"],
         "qualities": ["low", "medium", "high"],
     },
+    "gpt-image-2": {
+        "label": "GPT Image 2",
+        "format": "openai",
+        "sizes": ["1024x1024", "1024x1536", "1536x1024"],
+        "qualities": ["low", "medium", "high"],
+    },
     "MAI-Image-2": {
         "label": "MAI-Image-2",
         "format": "mai",
@@ -118,9 +124,8 @@ _BANNER_PLATFORM_SPECS = {
 #     "adventure": {"header_bg": "linear-gradient(135deg, #FF6B35, #e63946)", "accent": "#0066CC"},
 # }
 
-# Responses API ベースの画像生成クライアント（シングルトン）
-_image_openai_client: object | None = None
-_image_client_initialized: bool = False
+# Responses API ベースの画像生成クライアント（deployment ごとにキャッシュ）
+_image_openai_clients: dict[str, object | None] = {}
 
 # Azure AD token provider — caching + auto-refresh
 _AZURE_AI_SCOPE = "https://ai.azure.com/.default"
@@ -151,6 +156,16 @@ def _get_current_image_settings() -> dict:
     return settings
 
 
+def _resolve_gpt_image_deployment(image_model: str) -> str:
+    """GPT 系画像モデルの deployment 名を解決する。"""
+    settings = get_settings()
+    deployment_overrides = {
+        "gpt-image-1.5": settings.get("gpt_image_15_deployment_name", "") or "gpt-image-1.5",
+        "gpt-image-2": settings.get("gpt_image_2_deployment_name", "") or "gpt-image-2",
+    }
+    return deployment_overrides.get(image_model, image_model)
+
+
 def _get_image_openai_client(deployment: str = _DEFAULT_IMAGE_MODEL):
     """Responses API 経由で画像生成する OpenAI クライアントを返す。
 
@@ -158,41 +173,42 @@ def _get_image_openai_client(deployment: str = _DEFAULT_IMAGE_MODEL):
     Responses API + image_generation ツールを使う。
     x-ms-oai-image-generation-deployment ヘッダでデプロイ先を指定する。
     """
-    global _image_openai_client, _image_client_initialized
-    if not _image_client_initialized:
-        _image_client_initialized = True
-        settings = get_settings()
-        endpoint = settings["project_endpoint"]
-        if not endpoint:
-            logger.info("project_endpoint 未設定、画像生成は無効")
-            _image_openai_client = None
-            return None
-        try:
-            from openai import OpenAI
+    if deployment in _image_openai_clients:
+        return _image_openai_clients[deployment]
 
-            # Responses API の base URL を構築
-            base_url = endpoint.rstrip("/")
-            if not base_url.endswith("/openai/v1"):
-                base_url = f"{base_url}/openai/v1"
+    settings = get_settings()
+    endpoint = settings["project_endpoint"]
+    if not endpoint:
+        logger.info("project_endpoint 未設定、画像生成は無効")
+        _image_openai_clients[deployment] = None
+        return None
+    try:
+        from openai import OpenAI
 
-            credential = DefaultAzureCredential()
-            token_provider = get_bearer_token_provider(credential, _AZURE_AI_SCOPE)
+        # Responses API の base URL を構築
+        base_url = endpoint.rstrip("/")
+        if not base_url.endswith("/openai/v1"):
+            base_url = f"{base_url}/openai/v1"
 
-            _image_openai_client = OpenAI(
-                base_url=base_url,
-                api_key=token_provider,
-                default_headers={
-                    "x-ms-oai-image-generation-deployment": deployment,
-                },
-            )
-            logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, deployment)
-        except (ImportError, ValueError, OSError) as exc:
-            logger.warning("画像クライアント初期化失敗: %s", exc)
-            _image_openai_client = None
-        except Exception as exc:
-            logger.exception("画像クライアント初期化で予期しないエラー: %s", exc)
-            _image_openai_client = None
-    return _image_openai_client
+        credential = DefaultAzureCredential()
+        token_provider = get_bearer_token_provider(credential, _AZURE_AI_SCOPE)
+
+        client = OpenAI(
+            base_url=base_url,
+            api_key=token_provider,
+            default_headers={
+                "x-ms-oai-image-generation-deployment": deployment,
+            },
+        )
+        _image_openai_clients[deployment] = client
+        logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, deployment)
+    except (ImportError, ValueError, OSError) as exc:
+        logger.warning("画像クライアント初期化失敗: %s", exc)
+        _image_openai_clients[deployment] = None
+    except Exception as exc:
+        logger.exception("画像クライアント初期化で予期しないエラー: %s", exc)
+        _image_openai_clients[deployment] = None
+    return _image_openai_clients[deployment]
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
@@ -210,7 +226,7 @@ async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
 
     quality = img_settings.get("image_quality", "medium")
     logger.info("GPT パス: size=%s, quality=%s", size, quality)
-    return await _generate_image_gpt(prompt, size, quality)
+    return await _generate_image_gpt(prompt, size, quality, image_model)
 
 
 def _parse_size_for_mai(size: str, img_settings: dict) -> tuple[int, int]:
@@ -259,10 +275,16 @@ def _get_banner_platform_spec(platform: str) -> dict[str, str]:
     }
 
 
-async def _generate_image_gpt(prompt: str, size: str = "1024x1024", quality: str = "medium") -> str:
+async def _generate_image_gpt(
+    prompt: str,
+    size: str = "1024x1024",
+    quality: str = "medium",
+    image_model: str = _DEFAULT_IMAGE_MODEL,
+) -> str:
     """Responses API の image_generation ツールで画像を生成し、data URI を返す。"""
     try:
-        client = _get_image_openai_client()
+        deployment = _resolve_gpt_image_deployment(image_model)
+        client = _get_image_openai_client(deployment)
         if client is None:
             logger.info("OpenAI クライアント未初期化。フォールバック画像を返します")
             return _FALLBACK_IMAGE
@@ -287,6 +309,7 @@ async def _generate_image_gpt(prompt: str, size: str = "1024x1024", quality: str
             return _FALLBACK_IMAGE
 
         b64_data = image_items[0].result
+        logger.info("GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s", image_model, deployment, size, quality)
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
         logger.warning("画像生成タイムアウト（30秒）。フォールバック画像を返します")

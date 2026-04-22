@@ -5,6 +5,8 @@
 import { Building2, ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
 
+export type ImageModel = 'gpt-image-1.5' | 'gpt-image-2' | 'MAI-Image-2'
+
 export interface ModelSettings {
   model: string
   marketingPlanRuntime: 'legacy' | 'foundry_preprovisioned'
@@ -14,7 +16,7 @@ export interface ModelSettings {
   topP: number
   iqSearchResults: number
   iqScoreThreshold: number
-  imageModel: string
+  imageModel: ImageModel
   imageQuality: string
   imageWidth: number
   imageHeight: number
@@ -78,8 +80,11 @@ const MARKETING_RUNTIME_OPTIONS = [
 
 const AVAILABLE_IMAGE_MODELS = [
   { value: 'gpt-image-1.5', label: 'GPT Image 1.5 (default)' },
+  { value: 'gpt-image-2', label: 'GPT Image 2' },
   { value: 'MAI-Image-2', label: 'MAI-Image-2' },
-]
+] as const
+
+const GPT_IMAGE_MODELS: ReadonlySet<ImageModel> = new Set(['gpt-image-1.5', 'gpt-image-2'])
 
 const IMAGE_QUALITY_OPTIONS = [
   { value: 'low', label: 'Low' },
@@ -408,7 +413,7 @@ export function SettingsPanel({
                 <select
                   id="settings-image-model"
                   value={settings.imageModel}
-                  onChange={(e) => update('imageModel', e.target.value)}
+                  onChange={(e) => update('imageModel', e.target.value as ImageModel)}
                   aria-label={t('settings.image.model')}
                   className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
                 >
@@ -418,7 +423,7 @@ export function SettingsPanel({
                 </select>
               </div>
 
-              {settings.imageModel === 'gpt-image-1.5' && (
+              {GPT_IMAGE_MODELS.has(settings.imageModel) && (
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <label htmlFor="settings-image-quality" className="text-xs font-medium text-[var(--text-secondary)]" title={t('settings.image.quality.desc')}>

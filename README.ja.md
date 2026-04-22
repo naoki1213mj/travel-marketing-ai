@@ -55,7 +55,7 @@ flowchart TD
 | カテゴリ | 内容 |
 | --- | --- |
 | **マルチエージェント** | 7 エージェントを 5 ステップに集約、承認ゲート + 任意の上司承認 |
-| **AI 画像生成** | GPT Image 1.5 / MAI-Image-2（UI から選択可） |
+| **AI 画像生成** | GPT Image 1.5 / GPT Image 2 / MAI-Image-2（UI から選択可） |
 | **動画生成** | Photo Avatar + SSML ナレーション、MP4/H.264 出力 |
 | **品質評価** | Built-in 指標 + 業務カスタム指標、版比較 UI |
 | **評価起点の改善** | APIM 経由の Azure Functions MCP で改善ブリーフを生成 |
@@ -112,7 +112,7 @@ azd up                                    # プロビジョニング + ビルド
 | Work IQ delegated auth | SPA redirect URI、Microsoft Graph delegated permissions、tenant-wide admin consent、Microsoft 365 Copilot ライセンス確認まで完了 |
 | Work IQ runtime | 既定値は `WORKIQ_RUNTIME=graph_prefetch` です。Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`chatOverStream` 優先、必要時 `/chat`、既定 `WORK_IQ_TIMEOUT_SECONDS=120`）から短い workplace brief を先読みするため、Foundry connector が不安定でもパイプラインが進みやすくなります。`foundry_tool` は引き続き opt-in 経路として残しており、`MARKETING_PLAN_RUNTIME=foundry_prompt` と組み合わせると Agent2 が `source_scope` に応じて read-only の Microsoft 365 connector を動的注入します。フロントエンドの auth preflight は `auth_required` / `consent_required` / `redirecting` を出し分け、バックエンドは `work_iq_session` の status を永続化するため復元後の UI 状態も一致します。tenant member / guest ではないアカウントはサインイン時に弾かれます |
 | Search / Foundry IQ | `regulations-index`、`regulations-ks`、`regulations-kb` を **East US** の Azure AI Search に作成済み。アプリには `SEARCH_ENDPOINT` + `SEARCH_API_KEY` で配線済み |
-| モデル配備 | メインの East US 2 Foundry account には `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み |
+| モデル配備 | メインの East US 2 Foundry account には `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み。`gpt-image-2` を custom deployment 名で追加した場合は `GPT_IMAGE_2_DEPLOYMENT_NAME` で上書きできます |
 | MAI 画像経路 | `IMAGE_PROJECT_ENDPOINT_MAI` は別の East US AI Services account を指す。現在は subscription に `MAI-Image-2` quota が無いため、`MAI-Image-2` deployment 名を **MAI-Image-2e** の alias として運用 |
 | Fabric | Fabric capacity `fcdemojapaneast001`、workspace `ws-MG-pod2`、lakehouse `Travel_Lakehouse`、`sales_results` / `customer_reviews` テーブルは復旧済みです。live アプリには `FABRIC_DATA_AGENT_URL` と `FABRIC_SQL_ENDPOINT` の両方を反映しています |
 | Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live です。上司承認通知と承認後 Teams channel 通知を再確認済みで、`deploy.yml` は full signed manager trigger URL を Container App secret へ毎回再同期します |

@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { DEFAULT_CONVERSATION_SETTINGS, DEFAULT_SETTINGS, SettingsPanel } from './SettingsPanel'
 
 const translations: Record<string, string> = {
@@ -114,6 +114,27 @@ describe('SettingsPanel', () => {
     expect(screen.getByText('メール')).toBeInTheDocument()
     expect(screen.getByText('Teams チャット')).toBeInTheDocument()
     expect(screen.getByText('ドキュメント/ノート')).toBeInTheDocument()
+  })
+
+  it('shows quality controls for GPT Image 2', () => {
+    const onChange = vi.fn()
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="off"
+        onChange={onChange}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /画像生成設定/ }))
+    fireEvent.change(screen.getByLabelText('画像モデル'), { target: { value: 'gpt-image-2' } })
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ imageModel: 'gpt-image-2' }))
+    expect(screen.getByLabelText('画質')).toBeInTheDocument()
+    expect(screen.queryByLabelText('幅 (px)')).toBeNull()
   })
 
   it('disables the Work IQ toggle when the conversation is locked', () => {
