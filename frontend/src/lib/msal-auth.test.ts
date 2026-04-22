@@ -120,6 +120,28 @@ describe('msal-auth', () => {
     expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
   })
 
+  it('reuses the redirect response token when returned scopes partially overlap the requested Work IQ scopes', async () => {
+    const redirectAccount = { username: 'user@example.com' }
+    handleRedirectPromiseMock.mockResolvedValue({
+      account: redirectAccount,
+      accessToken: 'redirect-token',
+      scopes: [
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
+        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+      ],
+    })
+    setActiveAccountMock.mockImplementation((account) => {
+      getActiveAccountMock.mockReturnValue(account)
+    })
+
+    const { getWorkIqFoundryAuth } = await import('./msal-auth')
+
+    const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
+
+    expect(acquireTokenSilentMock).not.toHaveBeenCalled()
+    expect(result).toEqual({ token: 'redirect-token', status: 'ok' })
+  })
+
   it('returns redirecting immediately for interactive login redirects', async () => {
     acquireTokenRedirectMock.mockImplementation(() => new Promise<void>(() => {}))
 

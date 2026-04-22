@@ -76,8 +76,8 @@ function consumePendingRedirectToken(scopes: string[]): DelegatedTokenResult | n
   }
 
   const redirectScopeSet = new Set(redirectScopes)
-  const coversRequest = requestedScopes.every(scope => redirectScopeSet.has(scope))
-  if (!coversRequest) {
+  const hasScopeOverlap = requestedScopes.some(scope => redirectScopeSet.has(scope))
+  if (!hasScopeOverlap) {
     return null
   }
 

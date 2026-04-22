@@ -4023,14 +4023,12 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     effective_conversation_settings = (
         stored_conversation_settings if existing_conversation else normalized_conversation_settings
     )
-    effective_work_iq_session = _get_work_iq_session_from_conversation(existing_conversation)
-    if effective_work_iq_session is None or not body.conversation_id:
-        effective_work_iq_session = build_work_iq_session_metadata(
-            effective_conversation_settings,
-            caller_identity,
-            existing_session=effective_work_iq_session,
-            preflight_status=work_iq_auth_status,
-        )
+    effective_work_iq_session = build_work_iq_session_metadata(
+        effective_conversation_settings,
+        caller_identity,
+        existing_session=_get_work_iq_session_from_conversation(existing_conversation),
+        preflight_status=work_iq_auth_status,
+    )
 
     project_endpoint_available = bool(settings["project_endpoint"])
 
