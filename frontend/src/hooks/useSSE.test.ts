@@ -859,6 +859,49 @@ describe('buildRestoredPipelineState', () => {
     )
   })
 
+  it('keeps delegated auth on approval for restored Work IQ foundry conversations', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '京都の秋プランを企画して',
+      metadata: {
+        work_iq_session: {
+          enabled: true,
+          status: 'completed',
+          source_scope: ['emails'],
+        },
+      },
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-workiq-approval',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-workiq-approval')
+    })
+
+    act(() => {
+      void result.current.approve('approve')
+    })
+
+    expect(sendApproval).toHaveBeenCalledWith(
+      'conv-workiq-approval',
+      'approve',
+      expect.any(Object),
+      expect.any(AbortSignal),
+      true,
+    )
+  })
+
   it('restores conversations with cache-busting fetch options', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'running',

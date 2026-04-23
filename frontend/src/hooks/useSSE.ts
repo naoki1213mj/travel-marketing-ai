@@ -7,7 +7,6 @@ import {
   DEFAULT_CONVERSATION_SETTINGS,
   DEFAULT_SETTINGS,
   normalizeModelSettings,
-  normalizeWorkIqRuntime,
   type ConversationSettings,
   type ModelSettings,
   type WorkIqSourceScope,
@@ -1332,7 +1331,7 @@ export function useSSE() {
         normalizedResponse,
         handlers,
         controller.signal,
-        stateRef.current.workIq.workIqEnabled && normalizeWorkIqRuntime(stateRef.current.settings.workIqRuntime) === 'graph_prefetch',
+        stateRef.current.workIq.workIqEnabled,
       )
     } finally {
       if (abortControllerRef.current === controller) {
