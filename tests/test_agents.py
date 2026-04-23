@@ -160,7 +160,7 @@ class TestBrochureGenTools:
 
         _disable_azd_env(monkeypatch)
         # シングルトンをリセットして未初期化にする
-        monkeypatch.setattr(bg, "_image_openai_clients", {})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
         bg.set_current_conversation_id("hero-test")
 
@@ -183,7 +183,7 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         _disable_azd_env(monkeypatch)
-        monkeypatch.setattr(bg, "_image_openai_clients", {})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
         bg.set_current_conversation_id("banner-test")
 
@@ -205,7 +205,7 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         _disable_azd_env(monkeypatch)
-        monkeypatch.setattr(bg, "_image_openai_clients", {})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
 
         result = await bg.generate_banner_image(
@@ -223,7 +223,7 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         _disable_azd_env(monkeypatch)
-        monkeypatch.setattr(bg, "_image_openai_clients", {})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
         monkeypatch.setattr(
             bg,
@@ -274,26 +274,35 @@ class TestBrochureGenTools:
         result = vg.pop_pending_video_job("missing")
         assert result is None
 
-    def test_get_image_openai_client_no_endpoint(self, monkeypatch):
+    def test_get_gpt_image_client_no_endpoint(self, monkeypatch):
         """project_endpoint 未設定時は None を返す"""
         import src.agents.brochure_gen as bg
 
         _disable_azd_env(monkeypatch)
-        monkeypatch.setattr(bg, "_image_openai_clients", {})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {})
         monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
 
-        result = bg._get_image_openai_client()
+        result = bg._get_gpt_image_client()
         assert result is None
-        assert bg._image_openai_clients == {bg._DEFAULT_IMAGE_MODEL: None}
+        assert bg._gpt_image_clients == {"__default__": None}
 
-    def test_get_image_openai_client_cached(self, monkeypatch):
+    def test_get_gpt_image_client_cached(self, monkeypatch):
         """2 回目以降はキャッシュされた結果を返す"""
         import src.agents.brochure_gen as bg
 
-        monkeypatch.setattr(bg, "_image_openai_clients", {"gpt-image-2": "cached-client"})
+        monkeypatch.setattr(bg, "_gpt_image_clients", {"https://example.services.ai.azure.com": "cached-client"})
 
-        result = bg._get_image_openai_client("gpt-image-2")
+        result = bg._get_gpt_image_client("https://example.services.ai.azure.com")
         assert result == "cached-client"
+
+    def test_resolve_ai_account_endpoint_strips_project_path(self):
+        """project endpoint から account endpoint を抽出できる"""
+        import src.agents.brochure_gen as bg
+
+        assert (
+            bg._resolve_ai_account_endpoint("https://example.services.ai.azure.com/api/projects/demo")
+            == "https://example.services.ai.azure.com"
+        )
 
     def test_resolve_gpt_image_deployment_uses_override(self, monkeypatch):
         """GPT Image 2 の deployment 名は環境変数で上書きできる"""
@@ -308,7 +317,20 @@ class TestBrochureGenTools:
         """クライアントが None の場合フォールバック画像を返す"""
         import src.agents.brochure_gen as bg
 
-        monkeypatch.setattr(bg, "_image_openai_clients", {bg._DEFAULT_IMAGE_MODEL: None})
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: None,
+        )
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
         bg.set_current_image_settings({"image_model": bg._DEFAULT_IMAGE_MODEL, "image_quality": "medium"})
 
         result = await bg._generate_image("test prompt")
@@ -321,8 +343,21 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         mock_client = MagicMock()
-        mock_client.responses.create.side_effect = Exception("API error")
-        monkeypatch.setattr(bg, "_image_openai_clients", {bg._DEFAULT_IMAGE_MODEL: mock_client})
+        mock_client.images.generate.side_effect = Exception("API error")
+        monkeypatch.setattr(
+            bg,
+            "_get_gpt_image_client",
+            lambda _account_endpoint=None: mock_client,
+        )
+        monkeypatch.setattr(
+            bg,
+            "get_settings",
+            lambda: {
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
+                "gpt_image_15_deployment_name": "gpt-image-1.5",
+                "gpt_image_2_deployment_name": "gpt-image-2",
+            },
+        )
         bg.set_current_image_settings({"image_model": bg._DEFAULT_IMAGE_MODEL, "image_quality": "medium"})
 
         result = await bg._generate_image("test prompt")
@@ -334,37 +369,44 @@ class TestBrochureGenTools:
         import src.agents.brochure_gen as bg
 
         class _ResponseItem:
-            type = "image_generation_call"
-            result = "abc123"
+            b64_json = "abc123"
 
         class _Response:
-            output = [_ResponseItem()]
+            data = [_ResponseItem()]
 
         captured: dict[str, object] = {}
         mock_client = MagicMock()
-        mock_client.responses.create.return_value = _Response()
+        mock_client.images.generate.return_value = _Response()
 
         monkeypatch.setattr(
             bg,
             "get_settings",
             lambda: {
-                "model_name": "gpt-5-4-mini",
+                "project_endpoint": "https://example.services.ai.azure.com/api/projects/demo",
                 "gpt_image_15_deployment_name": "gpt-image-1.5",
                 "gpt_image_2_deployment_name": "gpt-image-2-custom",
             },
         )
         bg.set_current_image_settings({"image_model": "gpt-image-2", "image_quality": "high"})
 
-        def _fake_get_client(deployment: str):
-            captured["deployment"] = deployment
+        def _fake_get_client(account_endpoint: str | None = None):
+            captured["account_endpoint"] = account_endpoint
             return mock_client
 
-        monkeypatch.setattr(bg, "_get_image_openai_client", _fake_get_client)
+        monkeypatch.setattr(bg, "_get_gpt_image_client", _fake_get_client)
 
         result = await bg._generate_image("test prompt")
 
         assert result == "data:image/png;base64,abc123"
-        assert captured["deployment"] == "gpt-image-2-custom"
+        assert captured["account_endpoint"] == "https://example.services.ai.azure.com"
+        mock_client.images.generate.assert_called_once_with(
+            model="gpt-image-2-custom",
+            prompt="test prompt",
+            n=1,
+            size="1024x1024",
+            quality="high",
+            output_format="png",
+        )
 
     @pytest.mark.asyncio
     async def test_analyze_existing_brochure_no_endpoint(self, monkeypatch):

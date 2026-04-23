@@ -7,13 +7,16 @@ import contextvars
 import json
 import logging
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 from agent_framework import tool
 from azure.identity import DefaultAzureCredential, get_bearer_token_provider
 
+from src.agent_client import get_shared_credential
 from src.config import get_settings
 from src.tool_telemetry import trace_tool_invocation
 
@@ -124,11 +127,11 @@ _BANNER_PLATFORM_SPECS = {
 #     "adventure": {"header_bg": "linear-gradient(135deg, #FF6B35, #e63946)", "accent": "#0066CC"},
 # }
 
-# Responses API ベースの画像生成クライアント（deployment ごとにキャッシュ）
-_image_openai_clients: dict[str, object | None] = {}
+# GPT 画像生成クライアント（account endpoint ごとにキャッシュ）
+_gpt_image_clients: dict[str, object | None] = {}
 
-# Azure AD token provider — caching + auto-refresh
-_AZURE_AI_SCOPE = "https://ai.azure.com/.default"
+# Azure AD token provider scope（resource endpoint 用）
+_COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
 
 # 画像設定コンテキスト変数（ツール関数から参照）
 _image_settings_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
@@ -166,49 +169,49 @@ def _resolve_gpt_image_deployment(image_model: str) -> str:
     return deployment_overrides.get(image_model, image_model)
 
 
-def _get_image_openai_client(deployment: str = _DEFAULT_IMAGE_MODEL):
-    """Responses API 経由で画像生成する OpenAI クライアントを返す。
+def _resolve_ai_account_endpoint(project_endpoint: str) -> str:
+    """project endpoint / resource endpoint から account endpoint を抽出する。"""
+    trimmed = project_endpoint.strip()
+    if not trimmed:
+        return ""
 
-    Foundry project endpoint は legacy images.generate() をサポートしないため、
-    Responses API + image_generation ツールを使う。
-    x-ms-oai-image-generation-deployment ヘッダでデプロイ先を指定する。
-    """
-    if deployment in _image_openai_clients:
-        return _image_openai_clients[deployment]
+    parsed = urlparse(trimmed)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _get_gpt_image_client(account_endpoint: str | None = None):
+    """Azure OpenAI Images API 用クライアントを返す。"""
+    cache_key = account_endpoint or "__default__"
+    if cache_key in _gpt_image_clients:
+        return _gpt_image_clients[cache_key]
 
     settings = get_settings()
-    endpoint = settings["project_endpoint"]
+    endpoint = account_endpoint or _resolve_ai_account_endpoint(settings["project_endpoint"])
     if not endpoint:
         logger.info("project_endpoint 未設定、画像生成は無効")
-        _image_openai_clients[deployment] = None
+        _gpt_image_clients[cache_key] = None
         return None
     try:
-        from openai import OpenAI
+        from openai import AzureOpenAI
 
-        # Responses API の base URL を構築
-        base_url = endpoint.rstrip("/")
-        if not base_url.endswith("/openai/v1"):
-            base_url = f"{base_url}/openai/v1"
+        token_provider = get_bearer_token_provider(get_shared_credential(), _COGNITIVE_SERVICES_SCOPE)
 
-        credential = DefaultAzureCredential()
-        token_provider = get_bearer_token_provider(credential, _AZURE_AI_SCOPE)
-
-        client = OpenAI(
-            base_url=base_url,
-            api_key=token_provider,
-            default_headers={
-                "x-ms-oai-image-generation-deployment": deployment,
-            },
+        client = AzureOpenAI(
+            azure_endpoint=endpoint,
+            azure_ad_token_provider=token_provider,
+            api_version="2025-04-01-preview",
         )
-        _image_openai_clients[deployment] = client
-        logger.info("Responses API 画像クライアント作成: base_url=%s, deployment=%s", base_url, deployment)
+        _gpt_image_clients[cache_key] = client
+        logger.info("GPT 画像クライアント作成: azure_endpoint=%s", endpoint)
     except (ImportError, ValueError, OSError) as exc:
         logger.warning("画像クライアント初期化失敗: %s", exc)
-        _image_openai_clients[deployment] = None
+        _gpt_image_clients[cache_key] = None
     except Exception as exc:
         logger.exception("画像クライアント初期化で予期しないエラー: %s", exc)
-        _image_openai_clients[deployment] = None
-    return _image_openai_clients[deployment]
+        _gpt_image_clients[cache_key] = None
+    return _gpt_image_clients[cache_key]
 
 
 async def _generate_image(prompt: str, size: str = "1024x1024") -> str:
@@ -281,34 +284,34 @@ async def _generate_image_gpt(
     quality: str = "medium",
     image_model: str = _DEFAULT_IMAGE_MODEL,
 ) -> str:
-    """Responses API の image_generation ツールで画像を生成し、data URI を返す。"""
+    """Azure OpenAI Images API で画像を生成し、data URI を返す。"""
     try:
         deployment = _resolve_gpt_image_deployment(image_model)
-        client = _get_image_openai_client(deployment)
+        account_endpoint = _resolve_ai_account_endpoint(get_settings()["project_endpoint"])
+        client = _get_gpt_image_client(account_endpoint)
         if client is None:
             logger.info("OpenAI クライアント未初期化。フォールバック画像を返します")
             return _FALLBACK_IMAGE
 
-        settings = get_settings()
-        model_name = settings["model_name"]
-
         def _sync_generate():
-            return client.responses.create(
-                model=model_name,
-                input=prompt,
-                tools=[{"type": "image_generation", "size": size, "quality": quality}],
+            return client.images.generate(
+                model=deployment,
+                prompt=prompt,
+                n=1,
+                size=size,
+                quality=quality,
+                output_format="png",
             )
 
         response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=30)
 
-        # Responses API の出力から画像データを抽出
-        image_items = [item for item in (response.output or []) if item.type == "image_generation_call"]
-        if not image_items or not getattr(image_items[0], "result", None):
-            out_types = [i.type for i in (response.output or [])]
-            logger.warning("画像データなし。出力タイプ: %s", out_types)
+        image_items = getattr(response, "data", None) or []
+        first_item = image_items[0] if image_items else None
+        b64_data = getattr(first_item, "b64_json", None) if first_item is not None else None
+        if not b64_data:
+            logger.warning("GPT 画像データなし。deployment=%s, response_type=%s", deployment, type(response).__name__)
             return _FALLBACK_IMAGE
 
-        b64_data = image_items[0].result
         logger.info("GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s", image_model, deployment, size, quality)
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
@@ -378,6 +381,14 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
         logger.warning("MAI-Image-2 画像生成タイムアウト（90秒）。フォールバック画像を返します")
+        return _FALLBACK_IMAGE
+    except urllib.error.HTTPError as exc:
+        response_body = exc.read().decode("utf-8", errors="replace")
+        logger.warning(
+            "MAI-Image-2 画像生成 HTTP エラー。status=%d, body=%s",
+            exc.code,
+            response_body[:1000],
+        )
         return _FALLBACK_IMAGE
     except (ValueError, OSError, urllib.error.URLError) as exc:
         logger.warning("MAI-Image-2 画像生成に失敗。フォールバック画像を返します: %s", exc)
