@@ -24,6 +24,9 @@ _SOURCE_LABELS = {
 }
 _WORK_IQ_CONNECTION_NAME = "WorkIQCopilot"
 _WORK_IQ_SERVER_LABEL = "mcp_M365Copilot"
+_WORK_IQ_SERVER_DESCRIPTION = (
+    "Microsoft 365 workplace context tools for organizational emails, meetings, chats, and documents."
+)
 _WORK_IQ_BASELINE_GUIDANCE = (
     "\n\n## Work IQ / Microsoft 365 tools の利用方針\n"
     "- Work IQ / Microsoft 365 MCP tool が利用可能な場合は、"
@@ -191,15 +194,27 @@ def _build_marketing_plan_responses_web_search_tool() -> dict[str, object]:
     }
 
 
-def _build_work_iq_responses_tool(server_url: str, access_token: str) -> dict[str, object]:
+def _build_work_iq_responses_tool(
+    server_url: str,
+    access_token: str,
+    *,
+    connection_name: str,
+) -> dict[str, object]:
     """Responses API で Work IQ MCP を呼ぶための tool 定義を返す。"""
     return {
         "type": "mcp",
         "server_label": _WORK_IQ_SERVER_LABEL,
         "server_url": server_url,
+        "project_connection_id": connection_name,
         "authorization": access_token,
         "require_approval": "never",
+        "server_description": _WORK_IQ_SERVER_DESCRIPTION,
     }
+
+
+def _build_work_iq_tool_choice() -> dict[str, str]:
+    """Responses API に Work IQ MCP を最低 1 回使わせる tool_choice を返す。"""
+    return {"type": "mcp", "server_label": _WORK_IQ_SERVER_LABEL}
 
 
 def run_marketing_plan_prompt_agent(
@@ -242,8 +257,13 @@ def run_marketing_plan_prompt_agent(
                 ),
                 "tools": [
                     _build_marketing_plan_responses_web_search_tool(),
-                    _build_work_iq_responses_tool(work_iq_connection["server_url"], access_token),
+                    _build_work_iq_responses_tool(
+                        work_iq_connection["server_url"],
+                        access_token,
+                        connection_name=work_iq_connection["connection_name"],
+                    ),
                 ],
+                "tool_choice": _build_work_iq_tool_choice(),
             }
         else:
             agent = _get_marketing_plan_agent(project_client, model_name)

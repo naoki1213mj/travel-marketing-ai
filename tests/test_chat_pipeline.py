@@ -13,7 +13,7 @@ from src.api import chat as chat_module
 def _parse_sse(event: str) -> tuple[str, dict]:
     lines = event.strip().split("\n")
     event_name = lines[0].replace("event: ", "")
-    payload = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+    payload = json.loads(lines[1].replace("data: ", "", 1)) if len(lines) > 1 else {}
     return event_name, payload
 
 
@@ -34,6 +34,30 @@ class TestExtractOauthConsentLink:
         consent_request.as_dict.return_value = {"auth_uri": "https://example.com/auth"}
 
         assert chat_module._extract_oauth_consent_link(consent_request) == "https://example.com/auth"
+
+
+class TestExtractTerminalToolEvents:
+    """_extract_terminal_tool_events のテスト"""
+
+    def test_keeps_error_message_containing_data_prefix(self) -> None:
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.TOOL_EVENT,
+            {
+                "tool": "foundry_prompt_agent",
+                "status": "failed",
+                "error_message": "OpenAI rejected request: Invalid data: field is required",
+            },
+        )
+
+        matched = chat_module._extract_terminal_tool_events(
+            [event],
+            tool_names={"foundry_prompt_agent"},
+            statuses={"failed"},
+        )
+
+        assert matched == [event]
+        _, payload = _parse_sse(matched[0])
+        assert payload["error_message"] == "OpenAI rejected request: Invalid data: field is required"
 
 
 # --- _extract_result_text テスト ---
@@ -265,6 +289,13 @@ async def test_execute_agent_uses_legacy_marketing_agent_when_foundry_token_is_m
         "user_input": "沖縄プラン",
         "model_settings": {"model": "gpt-5-4-mini"},
     }
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+    assert not any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "foundry_prompt_agent"
+        and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
 
 
 @pytest.mark.asyncio
@@ -1594,17 +1625,38 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_after_found
         )
     ]
     parsed = [_parse_sse(event) for event in events]
+    tool_events = [payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.TOOL_EVENT]
 
     marketing_calls = captured["marketing_calls"]
     assert isinstance(marketing_calls, list)
     assert len(marketing_calls) == 2
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
     assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
+    assert [payload["tool"] for payload in tool_events] == [
+        "workiq_foundry_tool",
+        "foundry_prompt_agent",
+        "generate_workplace_context_brief",
+        "generate_workplace_context_brief",
+    ]
+    assert [payload["status"] for payload in tool_events] == [
+        "running",
+        "failed",
+        "running",
+        "completed",
+    ]
     assert any(
         event_name == chat_module.SSEEventType.TOOL_EVENT
         and payload.get("tool") == "generate_workplace_context_brief"
         and payload.get("status") == "completed"
         for event_name, payload in parsed
+    )
+    assert not any(
+        payload.get("tool") == "workiq_foundry_tool" and payload.get("status") == "completed"
+        for payload in tool_events
+    )
+    assert not any(
+        payload.get("tool") == "foundry_prompt_agent" and payload.get("status") == "completed"
+        for payload in tool_events
     )
     assert any(
         event_name == chat_module.SSEEventType.TEXT and payload.get("content") == "# graph fallback plan"

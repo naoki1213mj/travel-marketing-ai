@@ -730,6 +730,38 @@ def _build_work_iq_blocked_error(status: str) -> dict[str, str]:
     }
 
 
+def _extract_terminal_tool_events(
+    raw_events: object,
+    *,
+    tool_names: set[str],
+    statuses: set[str],
+) -> list[str]:
+    """SSE 配列から fallback 後も残すべき終端 tool_event を抽出する。"""
+    if not isinstance(raw_events, list):
+        return []
+
+    matched_events: list[str] = []
+    for event in raw_events:
+        if not isinstance(event, str):
+            continue
+        lines = event.strip().split("\n")
+        event_type = lines[0].replace("event: ", "") if lines else ""
+        if event_type != SSEEventType.TOOL_EVENT:
+            continue
+        try:
+            payload = json.loads(lines[1].replace("data: ", "", 1)) if len(lines) > 1 else {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        tool_name = _sanitize_optional_text(payload.get("tool"))
+        status = _sanitize_optional_text(payload.get("status"))
+        if tool_name not in tool_names or status not in statuses:
+            continue
+        matched_events.append(event)
+    return matched_events
+
+
 _FOUNDRY_WORK_IQ_FALLBACK_MARKERS = (
     "PROMPT_AGENT_RUNTIME_FAILED",
     "WORKIQ_CONSENT_REQUIRED",
@@ -2056,6 +2088,7 @@ async def _execute_agent(
     result = None
     delay_seconds = 5.0
     max_attempts = 5
+    used_foundry_prompt_agent = False
     marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings) if agent_name == "marketing-plan-agent" else "legacy"
     for attempt in range(1, max_attempts + 1):
         attempt_tool_events: list[ToolEventPayload] = []
@@ -2100,6 +2133,7 @@ async def _execute_agent(
                             ) from exc
                     else:
                         result = await run_prompt_agent
+                    used_foundry_prompt_agent = True
             else:
                 agent = create_fn(model_settings)
                 with tool_event_context(
@@ -2191,7 +2225,7 @@ async def _execute_agent(
     result_text = _extract_result_text(result)
     total_tokens = _extract_total_tokens(result)
     tool_names = _extract_tool_names(result, agent_name, result_text)
-    if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
+    if agent_name == "marketing-plan-agent" and used_foundry_prompt_agent:
         work_iq_enabled_for_prompt = bool(
             work_iq_session
             and work_iq_session.get("enabled")
@@ -4055,6 +4089,12 @@ async def workflow_event_generator(
             user_time_zone=user_time_zone,
         )
         if fallback_outcome is not None and fallback_outcome.get("success"):
+            foundry_terminal_events = _extract_terminal_tool_events(
+                plan_outcome.get("events"),
+                tool_names={"workiq_foundry_tool", "foundry_prompt_agent"},
+                statuses={"failed", "auth_required"},
+            )
+            fallback_outcome["events"] = foundry_terminal_events + list(fallback_outcome.get("events", []))
             plan_outcome = fallback_outcome
     for event in plan_outcome["events"]:
         yield event
