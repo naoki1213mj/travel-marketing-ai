@@ -7,6 +7,7 @@ import contextvars
 import json
 import logging
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -132,6 +133,13 @@ _gpt_image_clients: dict[str, object | None] = {}
 
 # Azure AD token provider scope（resource endpoint 用）
 _COGNITIVE_SERVICES_SCOPE = "https://cognitiveservices.azure.com/.default"
+_GPT_IMAGE_TIMEOUT_SECONDS = 120
+_MAI_REQUEST_TIMEOUT_SECONDS = 90
+_MAI_TOTAL_TIMEOUT_SECONDS = 240
+_MAI_RATE_LIMIT_INTERVAL_SECONDS = 65.0
+_MAI_MAX_ATTEMPTS = 3
+_mai_request_lock = asyncio.Lock()
+_mai_last_request_started_at = 0.0
 
 # 画像設定コンテキスト変数（ツール関数から参照）
 _image_settings_var: contextvars.ContextVar[dict] = contextvars.ContextVar(
@@ -179,6 +187,23 @@ def _resolve_ai_account_endpoint(project_endpoint: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ""
     return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _extract_retry_after_seconds(headers: object) -> float | None:
+    """Retry-After ヘッダから待機秒数を取り出す。"""
+    if headers is None:
+        return None
+    try:
+        raw_value = headers.get("Retry-After")
+    except AttributeError:
+        raw_value = None
+    if raw_value is None:
+        return None
+    try:
+        retry_after = float(str(raw_value).strip())
+    except ValueError:
+        return None
+    return retry_after if retry_after >= 0 else None
 
 
 def _get_gpt_image_client(account_endpoint: str | None = None):
@@ -303,7 +328,7 @@ async def _generate_image_gpt(
                 output_format="png",
             )
 
-        response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=30)
+        response = await asyncio.wait_for(asyncio.to_thread(_sync_generate), timeout=_GPT_IMAGE_TIMEOUT_SECONDS)
 
         image_items = getattr(response, "data", None) or []
         first_item = image_items[0] if image_items else None
@@ -315,7 +340,7 @@ async def _generate_image_gpt(
         logger.info("GPT 画像生成成功: model=%s, deployment=%s, size=%s, quality=%s", image_model, deployment, size, quality)
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
-        logger.warning("画像生成タイムアウト（30秒）。フォールバック画像を返します")
+        logger.warning("画像生成タイムアウト（%d秒）。フォールバック画像を返します", _GPT_IMAGE_TIMEOUT_SECONDS)
         return _FALLBACK_IMAGE
     except (ValueError, OSError) as exc:
         logger.warning("画像生成に失敗。フォールバック画像を返します: %s", exc)
@@ -364,12 +389,52 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
         )
 
         def _sync_request():
-            with urllib.request.urlopen(request, timeout=60) as resp:
+            with urllib.request.urlopen(request, timeout=_MAI_REQUEST_TIMEOUT_SECONDS) as resp:
                 resp_body = resp.read().decode("utf-8")
                 logger.info("MAI-Image-2 API レスポンス: status=%d, body_len=%d", resp.status, len(resp_body))
                 return json.loads(resp_body)
 
-        result = await asyncio.wait_for(asyncio.to_thread(_sync_request), timeout=90)
+        global _mai_last_request_started_at
+        result: dict | None = None
+        async with _mai_request_lock:
+            for attempt in range(1, _MAI_MAX_ATTEMPTS + 1):
+                delay_seconds = _MAI_RATE_LIMIT_INTERVAL_SECONDS - (time.monotonic() - _mai_last_request_started_at)
+                if delay_seconds > 0:
+                    logger.info("MAI-Image-2 rate limit 回避のため %.1f 秒待機します", delay_seconds)
+                    await asyncio.sleep(delay_seconds)
+
+                _mai_last_request_started_at = time.monotonic()
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.to_thread(_sync_request),
+                        timeout=_MAI_TOTAL_TIMEOUT_SECONDS,
+                    )
+                    break
+                except urllib.error.HTTPError as exc:
+                    response_body = exc.read().decode("utf-8", errors="replace")
+                    if exc.code == 429 and attempt < _MAI_MAX_ATTEMPTS:
+                        retry_after = _extract_retry_after_seconds(exc.headers)
+                        wait_seconds = max(retry_after or _MAI_RATE_LIMIT_INTERVAL_SECONDS, 1.0)
+                        logger.warning(
+                            "MAI-Image-2 が 429 を返したため %.1f 秒待って再試行します (attempt=%d/%d, body=%s)",
+                            wait_seconds,
+                            attempt,
+                            _MAI_MAX_ATTEMPTS,
+                            response_body[:1000],
+                        )
+                        await asyncio.sleep(wait_seconds)
+                        continue
+
+                    logger.warning(
+                        "MAI-Image-2 画像生成 HTTP エラー。status=%d, body=%s",
+                        exc.code,
+                        response_body[:1000],
+                    )
+                    return _FALLBACK_IMAGE
+
+        if result is None:
+            logger.warning("MAI-Image-2 画像生成結果を取得できませんでした。フォールバック画像を返します")
+            return _FALLBACK_IMAGE
 
         data_list = result.get("data", [])
         if not data_list or not data_list[0].get("b64_json"):
@@ -380,15 +445,7 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
         logger.info("MAI-Image-2 画像生成成功: b64_len=%d", len(b64_data))
         return f"data:image/png;base64,{b64_data}"
     except TimeoutError:
-        logger.warning("MAI-Image-2 画像生成タイムアウト（90秒）。フォールバック画像を返します")
-        return _FALLBACK_IMAGE
-    except urllib.error.HTTPError as exc:
-        response_body = exc.read().decode("utf-8", errors="replace")
-        logger.warning(
-            "MAI-Image-2 画像生成 HTTP エラー。status=%d, body=%s",
-            exc.code,
-            response_body[:1000],
-        )
+        logger.warning("MAI-Image-2 画像生成タイムアウト（%d秒）。フォールバック画像を返します", _MAI_TOTAL_TIMEOUT_SECONDS)
         return _FALLBACK_IMAGE
     except (ValueError, OSError, urllib.error.URLError) as exc:
         logger.warning("MAI-Image-2 画像生成に失敗。フォールバック画像を返します: %s", exc)

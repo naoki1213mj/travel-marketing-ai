@@ -1,7 +1,10 @@
 """エージェントのツール関数テスト"""
 
+import asyncio
 import contextvars
+import io
 import json
+import urllib.error
 from unittest.mock import MagicMock
 
 import pytest
@@ -407,6 +410,71 @@ class TestBrochureGenTools:
             quality="high",
             output_format="png",
         )
+
+    def test_extract_retry_after_seconds_returns_float(self):
+        """Retry-After ヘッダを秒数へ変換できる"""
+        import src.agents.brochure_gen as bg
+
+        assert bg._extract_retry_after_seconds({"Retry-After": "3"}) == 3.0
+        assert bg._extract_retry_after_seconds({"Retry-After": "-1"}) is None
+        assert bg._extract_retry_after_seconds({}) is None
+
+    @pytest.mark.asyncio
+    async def test_generate_image_mai_retries_on_429(self, monkeypatch):
+        """MAI 429 は Retry-After を尊重して再試行する"""
+        import src.agents.brochure_gen as bg
+
+        class _Token:
+            token = "test-token"
+
+        class _Credential:
+            def get_token(self, _scope: str) -> _Token:
+                return _Token()
+
+        class _Response:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps({"data": [{"b64_json": "mai-image"}]}).encode("utf-8")
+
+        sleeps: list[float] = []
+        attempts = {"count": 0}
+
+        def _fake_urlopen(_request, timeout=0):
+            attempts["count"] += 1
+            if attempts["count"] == 1:
+                raise urllib.error.HTTPError(
+                    url="https://example.services.ai.azure.com/mai/v1/images/generations",
+                    code=429,
+                    msg="Too Many Requests",
+                    hdrs={"Retry-After": "1"},
+                    fp=io.BytesIO(b'{"error":"rate limit"}'),
+                )
+            return _Response()
+
+        async def _fake_sleep(seconds: float):
+            sleeps.append(seconds)
+
+        monkeypatch.setattr(bg, "get_settings", lambda: {"image_project_endpoint_mai": "https://example.services.ai.azure.com"})
+        monkeypatch.setattr(bg, "DefaultAzureCredential", lambda: _Credential())
+        monkeypatch.setattr(bg.urllib.request, "urlopen", _fake_urlopen)
+        monkeypatch.setattr(bg.asyncio, "sleep", _fake_sleep)
+        monkeypatch.setattr(bg, "_MAI_RATE_LIMIT_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(bg, "_MAI_MAX_ATTEMPTS", 2)
+        monkeypatch.setattr(bg, "_mai_request_lock", asyncio.Lock())
+        monkeypatch.setattr(bg, "_mai_last_request_started_at", 0.0)
+
+        result = await bg._generate_image_mai("test prompt", 1024, 1024)
+
+        assert result == "data:image/png;base64,mai-image"
+        assert attempts["count"] == 2
+        assert sleeps == [1.0]
 
     @pytest.mark.asyncio
     async def test_analyze_existing_brochure_no_endpoint(self, monkeypatch):
