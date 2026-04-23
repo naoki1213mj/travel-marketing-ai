@@ -247,34 +247,27 @@ def run_marketing_plan_prompt_agent(
     openai_client = project_client.get_openai_client()
     try:
         work_iq_config = work_iq or {"enabled": False, "source_scope": []}
+        agent = _get_marketing_plan_agent(project_client, model_name)
         if work_iq_config["enabled"]:
             access_token = work_iq_access_token.strip()
             if not access_token:
                 raise ValueError("Work IQ is enabled for the Foundry marketing-plan path, but no delegated access token was supplied.")
-            work_iq_connection = _resolve_work_iq_connection(project_client)
-            if work_iq_connection is None:
+            if _resolve_work_iq_connection(project_client) is None:
                 raise ValueError(
                     "Work IQ is enabled for the Foundry marketing-plan path, but no WorkIQCopilot RemoteTool connection was found."
                 )
             response_kwargs: dict[str, object] = {
                 "model": model_name,
-                "instructions": f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
                 "input": (
                     f"{_build_work_iq_tool_guidance(work_iq_config)}"
                     f"\n\n---\n\nユーザー入力:\n{user_input}"
                 ),
-                "tools": [
-                    _build_marketing_plan_responses_web_search_tool(),
-                    _build_work_iq_responses_tool(
-                        work_iq_connection["server_url"],
-                        access_token,
-                        connection_name=work_iq_connection["connection_name"],
-                    ),
-                ],
-                "tool_choice": _build_work_iq_tool_choice(),
+                "extra_body": {
+                    "agent_reference": {"name": agent.name, "type": "agent_reference"},
+                    "tool_choice": "required",
+                },
             }
         else:
-            agent = _get_marketing_plan_agent(project_client, model_name)
             response_kwargs = {
                 "model": model_name,
                 "input": user_input,

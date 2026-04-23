@@ -117,8 +117,8 @@ REST API と SSE イベントの仕様です。
 
 | ヘッダ | 必須 | 用途 |
 | --- | --- | --- |
-| `Authorization: Bearer <token>` | 任意 | Work IQ を有効化した **新規会話** で使う本人の delegated token。`work_iq_runtime=foundry_tool` / `graph_prefetch` のどちらでも **Graph delegated token** を使います。backend は `foundry_tool` では Azure OpenAI Responses API の top-level `tools[].authorization` に同じ token を渡し、Foundry runtime 側で Microsoft 365 connector 向け OBO を実行します。無い場合でも会話自体は fail-closed で継続し、`tool_event.status=auth_required` などを返します |
-| `X-Work-IQ-Graph-Authorization: Bearer <Graph token>` | 任意 | `foundry_tool` 実行中に backend が `graph_prefetch` へ安全フォールバックする場合に使う Graph delegated token。現在のフロントエンドは `Authorization` と同じ Graph token を互換目的で重ねて送ります |
+| `Authorization: Bearer <token>` | 任意 | Work IQ を有効化した **新規会話** で使う本人の delegated token。`work_iq_runtime=foundry_tool` では Agent 365 Tools / Copilot MCP 用スコープを持つ token、`graph_prefetch` では Graph delegated token を送ります。`foundry_tool` はこのヘッダの有無で fail-closed 判定し、同意や接続不備は Foundry の `oauth_consent_request` / tool error として返します |
+| `X-Work-IQ-Graph-Authorization: Bearer <Graph token>` | 任意 | `graph_prefetch` rollback を明示利用するときの Graph delegated token。`foundry_tool` では backend の互換用補助ヘッダとしてのみ扱い、これだけでは Foundry Work IQ 実行条件を満たしません |
 | `X-User-Timezone` | 任意 | rollback の `graph_prefetch` で Work IQ brief を取得するときの `locationHint.timeZone` に使用（未指定時は `UTC`） |
 
 > フロントエンドは Work IQ 有効化時に認証 preflight を行い、`auth_required` / `consent_required` / `redirecting` を UI へ先に反映します。`redirecting` の場合は Entra サインインへ遷移するため、この `/api/chat` リクエスト自体は送信されません。
@@ -136,8 +136,8 @@ REST API と SSE イベントの仕様です。
 ### `/api/chat` 注意
 
 - Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
-- 既定値は `marketing_plan_runtime=foundry_preprovisioned` + `work_iq_runtime=foundry_tool` です。Agent2 は Work IQ 無効時は `postprovision.py` で同期した事前作成済み Foundry Prompt Agent を `agent_reference` で実行し、Work IQ 有効時は delegated token を渡すために Azure OpenAI Responses API を top-level `tools`（`web_search` + Work IQ MCP）で直接実行します。Work IQ MCP には `tools[].authorization` で per-run の Agent 365 token を載せます。
-- `work_iq_runtime=graph_prefetch` は明示 rollback 経路で、この場合だけ Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。既定 timeout は `120` 秒です。
+- 既定値は `marketing_plan_runtime=foundry_preprovisioned` + `work_iq_runtime=foundry_tool` です。Agent2 は Work IQ の有無にかかわらず `postprovision.py` で同期した事前作成済み Foundry Prompt Agent を `agent_reference` で実行し、Work IQ 有効時は agent definition に含まれる Work IQ MCP connection を使います。Work IQ で同意が必要な場合は Foundry の `oauth_consent_request` を UI に返し、ユーザー同意後に同じ会話を再実行します。
+- `work_iq_runtime=graph_prefetch` は **明示 rollback 専用** の経路で、この場合だけ Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。既定 timeout は `120` 秒です。`foundry_tool` 失敗時に自動で silent fallback することはありません。
 - `work_iq_runtime=foundry_tool` を `marketing_plan_runtime=legacy` と組み合わせた request はバリデーションエラーになります。
 - Work IQ の brief 取得が `auth_required` / `identity_mismatch` / `consent_required` / `timeout` / `unavailable` になっても、会話本体は止めずに **brief なしで継続** します。SSE には `tool_event.source="workiq"` の status だけが流れます。
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。

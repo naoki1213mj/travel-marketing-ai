@@ -772,13 +772,9 @@ _FOUNDRY_WORK_IQ_FALLBACK_MARKERS = (
 
 def _should_retry_marketing_plan_with_graph_prefetch(plan_outcome: dict[str, object]) -> bool:
     """Foundry Work IQ の失敗が graph_prefetch fallback 対象か判定する。"""
-    if plan_outcome.get("success"):
-        return False
-    raw_events = plan_outcome.get("events")
-    if not isinstance(raw_events, list):
-        return False
-    event_strings = [event for event in raw_events if isinstance(event, str)]
-    return any(marker in event for marker in _FOUNDRY_WORK_IQ_FALLBACK_MARKERS for event in event_strings)
+    del plan_outcome
+    # Foundry Work IQ を本命経路として扱うため、自動 fallback で成功扱いにしない。
+    return False
 
 
 def _extract_bearer_token(header_value: str) -> str:

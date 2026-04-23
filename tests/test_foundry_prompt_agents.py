@@ -158,8 +158,8 @@ def test_build_marketing_plan_agent_definition_includes_work_iq_tool_when_provid
     assert tools[1]["server_label"] == "mcp_M365Copilot"
 
 
-def test_run_marketing_plan_prompt_agent_uses_direct_work_iq_mcp_tool(monkeypatch) -> None:
-    """Work IQ 有効時は top-level tools[].authorization で MCP を呼ぶ。"""
+def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_required_tool_choice(monkeypatch) -> None:
+    """Work IQ 有効時も docs-backed な agent_reference 経路を使う。"""
     responses_client = _FakeResponsesClient()
     fake_client = _FakeProjectClient(
         responses_client,
@@ -184,27 +184,15 @@ def test_run_marketing_plan_prompt_agent_uses_direct_work_iq_mcp_tool(monkeypatc
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
     assert kwargs["model"] == "gpt-5-4-mini"
-    assert kwargs["instructions"].startswith(module.MARKETING_PLAN_INSTRUCTIONS)
     assert "Work IQ MCP 利用ガイド" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
-    assert kwargs["tools"] == [
-        {
-            "type": "web_search",
-            "user_location": {"type": "approximate", "country": "JP", "region": "Tokyo"},
-            "search_context_size": "medium",
-        },
-        {
-            "type": "mcp",
-            "server_label": "mcp_M365Copilot",
-            "server_url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
-            "project_connection_id": "WorkIQCopilot",
-            "authorization": "Bearer delegated-token",
-            "require_approval": "never",
-            "server_description": module._WORK_IQ_SERVER_DESCRIPTION,
-        },
-    ]
-    assert kwargs["tool_choice"] == {"type": "mcp", "server_label": "mcp_M365Copilot"}
-    assert "extra_body" not in kwargs
+    assert kwargs["extra_body"] == {
+        "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
+        "tool_choice": "required",
+    }
+    assert "instructions" not in kwargs
+    assert "tools" not in kwargs
+    assert "tool_choice" not in kwargs
 
 
 def test_build_work_iq_responses_tool_keeps_existing_bearer_prefix() -> None:

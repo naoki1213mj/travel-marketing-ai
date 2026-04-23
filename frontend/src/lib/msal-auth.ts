@@ -57,6 +57,7 @@ const WORK_IQ_FOUNDRY_SCOPES = [
   buildAgent365Scope('McpServers.Calendar.All'),
   buildAgent365Scope('McpServers.Teams.All'),
   buildAgent365Scope('McpServers.OneDriveSharepoint.All'),
+  buildAgent365Scope('McpServers.CopilotMCP.All'),
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 

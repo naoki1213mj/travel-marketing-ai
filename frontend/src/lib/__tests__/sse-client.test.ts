@@ -147,7 +147,7 @@ describe('connectSSE', () => {
   it('adds delegated auth headers for foundry Work IQ runtime', async () => {
     getDelegatedApiAuth.mockResolvedValue({
       headers: {
-        Authorization: 'Bearer graph-token',
+        Authorization: 'Bearer foundry-token',
         'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
@@ -161,7 +161,7 @@ describe('connectSSE', () => {
 
     expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
     const [, options] = mockFetch.mock.calls[0]
-    expect(options.headers.Authorization).toBe('Bearer graph-token')
+    expect(options.headers.Authorization).toBe('Bearer foundry-token')
     expect(options.headers['X-Work-IQ-Graph-Authorization']).toBe('Bearer graph-token')
     expect(options.headers['X-User-Timezone']).toBeTruthy()
   })

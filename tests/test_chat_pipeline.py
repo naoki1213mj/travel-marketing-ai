@@ -237,6 +237,19 @@ class TestMarketingPlanRuntimeSettings:
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
         assert chat_module._resolve_work_iq_timeout_seconds() == 95.0
 
+    def test_foundry_work_iq_no_longer_auto_falls_back(self) -> None:
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.TOOL_EVENT,
+            {
+                "tool": "workiq_foundry_tool",
+                "status": "failed",
+                "error_code": "WORKIQ_NOT_USED",
+            },
+        )
+        assert chat_module._should_retry_marketing_plan_with_graph_prefetch(
+            {"success": False, "events": [event]}
+        ) is False
+
     def test_build_effective_workflow_settings_rejects_legacy_foundry_tool_combo(self, monkeypatch) -> None:
         monkeypatch.setattr(
             chat_module,
@@ -1520,8 +1533,8 @@ async def test_workflow_event_generator_blocks_foundry_tool_when_sign_in_is_requ
 
 
 @pytest.mark.asyncio
-async def test_workflow_event_generator_falls_back_to_graph_prefetch_after_foundry_tool_failure(monkeypatch) -> None:
-    """foundry_tool が marketing-plan で失敗したら graph_prefetch に退避する。"""
+async def test_workflow_event_generator_keeps_foundry_failure_without_graph_prefetch_fallback(monkeypatch) -> None:
+    """foundry_tool が marketing-plan で失敗しても graph_prefetch へ自動退避しない。"""
 
     captured: dict[str, object] = {"marketing_calls": []}
 
@@ -1591,16 +1604,7 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_after_found
             "tool_calls": 0,
         }
 
-    async def fake_generate_workplace_context_brief(**kwargs):
-        del kwargs
-        return {
-            "brief_summary": "Graph brief summary",
-            "brief_source_metadata": [{"source": "meeting_notes", "label": "Teams", "count": 1}],
-            "status": "completed",
-        }
-
     monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
-    monkeypatch.setattr(chat_module, "generate_workplace_context_brief", fake_generate_workplace_context_brief)
     chat_module._pending_approvals.clear()
 
     events = [
@@ -1629,44 +1633,22 @@ async def test_workflow_event_generator_falls_back_to_graph_prefetch_after_found
 
     marketing_calls = captured["marketing_calls"]
     assert isinstance(marketing_calls, list)
-    assert len(marketing_calls) == 2
+    assert len(marketing_calls) == 1
     assert marketing_calls[0]["workflow_settings"]["work_iq_runtime"] == "foundry_tool"
-    assert marketing_calls[1]["workflow_settings"]["work_iq_runtime"] == "graph_prefetch"
     assert [payload["tool"] for payload in tool_events] == [
         "workiq_foundry_tool",
         "foundry_prompt_agent",
-        "generate_workplace_context_brief",
-        "generate_workplace_context_brief",
     ]
     assert [payload["status"] for payload in tool_events] == [
         "running",
         "failed",
-        "running",
-        "completed",
     ]
-    assert any(
-        event_name == chat_module.SSEEventType.TOOL_EVENT
-        and payload.get("tool") == "generate_workplace_context_brief"
-        and payload.get("status") == "completed"
-        for event_name, payload in parsed
-    )
-    assert not any(
-        payload.get("tool") == "workiq_foundry_tool" and payload.get("status") == "completed"
-        for payload in tool_events
-    )
     assert not any(
         payload.get("tool") == "foundry_prompt_agent" and payload.get("status") == "completed"
         for payload in tool_events
     )
-    assert any(
-        event_name == chat_module.SSEEventType.TEXT and payload.get("content") == "# graph fallback plan"
-        for event_name, payload in parsed
-    )
-    assert not any(
-        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR"
-        for event_name, payload in parsed
-    )
-    assert "conv-workiq-fallback" in chat_module._pending_approvals
+    assert any(event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "AGENT_RUNTIME_ERROR" for event_name, payload in parsed)
+    assert "conv-workiq-fallback" not in chat_module._pending_approvals
 
 
 @pytest.mark.asyncio

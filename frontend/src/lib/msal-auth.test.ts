@@ -43,6 +43,7 @@ const WORK_IQ_SCOPE_SET = [
   'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
   'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
   'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
+  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.CopilotMCP.All',
 ]
 
 describe('msal-auth', () => {
