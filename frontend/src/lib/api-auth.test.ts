@@ -41,19 +41,16 @@ describe('getDelegatedApiAuth', () => {
     vi.restoreAllMocks()
   })
 
-  it('uses Agent 365 auth for foundry_tool and preserves graph auth only for fallback', async () => {
+  it('uses Foundry user auth for foundry_tool requests', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
-    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
 
     expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
-    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
-        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
     })
@@ -74,17 +71,14 @@ describe('getDelegatedApiAuth', () => {
 
   it('defaults to graph auth when runtime is omitted', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
-    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     const result = await getDelegatedApiAuth({ interactive: false })
 
     expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
-    expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(result).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
-        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
     })
@@ -92,7 +86,6 @@ describe('getDelegatedApiAuth', () => {
 
   it('bootstraps redirect handling only once for repeated calls', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
-    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     await getDelegatedApiAuth({ interactive: false })
     await getDelegatedApiAuth({ interactive: false })
@@ -108,7 +101,6 @@ describe('getDelegatedApiAuth', () => {
         headers: { 'Content-Type': 'application/json' },
       })) as typeof fetch
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
-    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     const firstResult = await getDelegatedApiAuth({ interactive: false })
     const secondResult = await getDelegatedApiAuth({ interactive: false })
@@ -116,14 +108,12 @@ describe('getDelegatedApiAuth', () => {
     expect(firstResult).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
-        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
     })
     expect(secondResult).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
-        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
     })
@@ -151,7 +141,6 @@ describe('getDelegatedApiAuth', () => {
       .mockRejectedValueOnce(new Error('redirect bridge failed'))
       .mockResolvedValue(undefined)
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
-    getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
 
     const firstResult = await getDelegatedApiAuth({ interactive: false })
     const secondResult = await getDelegatedApiAuth({ interactive: false })
@@ -159,7 +148,6 @@ describe('getDelegatedApiAuth', () => {
     expect(firstResult).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
-        'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
       },
       status: 'ok',
     })

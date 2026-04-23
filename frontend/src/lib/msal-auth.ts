@@ -36,6 +36,7 @@ export interface DelegatedTokenResult {
 }
 
 const VOICE_LIVE_SCOPES = ['https://cognitiveservices.azure.com/user_impersonation']
+const FOUNDRY_USER_SCOPES = ['https://ai.azure.com/user_impersonation']
 const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/Sites.Read.All',
   'https://graph.microsoft.com/Mail.Read',
@@ -44,20 +45,6 @@ const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/Chat.Read',
   'https://graph.microsoft.com/ChannelMessage.Read.All',
   'https://graph.microsoft.com/ExternalItem.Read.All',
-]
-const AGENT_365_TOOLS_APP_ID = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1'
-const AGENT_365_TOOLS_APP_ID_URI = `api://${AGENT_365_TOOLS_APP_ID}`
-
-function buildAgent365Scope(scopeName: string): string {
-  return `${AGENT_365_TOOLS_APP_ID_URI}/${scopeName}`
-}
-
-const WORK_IQ_FOUNDRY_SCOPES = [
-  buildAgent365Scope('McpServers.Mail.All'),
-  buildAgent365Scope('McpServers.Calendar.All'),
-  buildAgent365Scope('McpServers.Teams.All'),
-  buildAgent365Scope('McpServers.OneDriveSharepoint.All'),
-  buildAgent365Scope('McpServers.CopilotMCP.All'),
 ]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
@@ -295,9 +282,9 @@ export async function getWorkIqGraphAuth(config: MsalConfig, interactive = false
 }
 
 export async function getWorkIqFoundryToken(config: MsalConfig, interactive = false): Promise<string | null> {
-  return (await acquireDelegatedToken(config, WORK_IQ_FOUNDRY_SCOPES, interactive)).token
+  return (await acquireDelegatedToken(config, FOUNDRY_USER_SCOPES, interactive)).token
 }
 
 export async function getWorkIqFoundryAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
-  return acquireDelegatedToken(config, WORK_IQ_FOUNDRY_SCOPES, interactive)
+  return acquireDelegatedToken(config, FOUNDRY_USER_SCOPES, interactive)
 }

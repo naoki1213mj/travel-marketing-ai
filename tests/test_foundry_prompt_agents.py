@@ -76,8 +76,10 @@ class _FakeProjectClient:
         self.agents = _FakeAgents(agent_name, agent_tools)
         self.connections = _FakeConnections(connections or [])
         self.closed = False
+        self.openai_client_kwargs: list[dict[str, object]] = []
 
-    def get_openai_client(self) -> _FakeResponsesClient:
+    def get_openai_client(self, **kwargs) -> _FakeResponsesClient:
+        self.openai_client_kwargs.append(kwargs)
         return self._responses_client
 
     def close(self) -> None:
@@ -190,6 +192,7 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_required_tool
         "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
         "tool_choice": "required",
     }
+    assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]
     assert "instructions" not in kwargs
     assert "tools" not in kwargs
     assert "tool_choice" not in kwargs

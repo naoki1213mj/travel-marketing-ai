@@ -127,18 +127,16 @@ GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger
 1. 新テナントの Global Administrator または Cloud Application Administrator で Entra admin center にサインインする
 2. SPA アプリ登録に Microsoft Graph delegated permissions を追加する: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`
 3. Work IQ / Microsoft 365 Copilot 用の enterprise app / app registration を開き、上記権限に **Grant admin consent** を実行する
-4. `foundry_tool` を使うため、同じ SPA app registration に **Agent 365 Tools** の delegated permissions も追加する
-   - `McpServers.Mail.All`
-   - `McpServers.Calendar.All`
-   - `McpServers.Teams.All`
-   - `McpServers.OneDriveSharepoint.All`
-   - MSAL Browser から token を要求するときは、Microsoft Learn の resources/scopes ガイドどおり `api://<Agent365Tools appId>/McpServers.*` 形式の scope を使う
+4. `foundry_tool` を使うため、同じ SPA app registration から **Foundry data-plane delegated permission** を取得できるようにする
+   - browser/MSAL が要求する scope は `https://ai.azure.com/user_impersonation`
+   - これは FastAPI が Foundry Responses API を **ユーザーとして** 呼ぶための token で、Graph token の代替ではない
+   - Work IQ / Microsoft 365 Copilot connector 側の tenant-wide enablement は別途必要だが、SPA が Agent 365 Tools scope を直接要求する必要はない
 5. SPA redirect URI にはアプリ本体 URL に加えて **専用 redirect bridge ページ** も登録する
    - `http://localhost:5173/auth-redirect.html`
    - `http://localhost:8000/auth-redirect.html`
    - `https://<container-app-host>/auth-redirect.html`
 6. 既定 runtime は **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`**。`postprovision.py` が Agent2 用の Foundry Prompt Agent を同期し、実行時はその `agent_reference` を使う。instructions を更新した場合も、反映には `scripts/postprovision.py` の再実行で marketing-plan agent の再同期が必要
-7. `WORKIQ_RUNTIME=foundry_tool` では、事前作成済み Agent に対して read-only の Microsoft 365 connector を per-user delegated token 付きで overlay する。`meeting_notes` は Teams、`emails` は Outlook Email、`teams_chats` は Teams、`documents_notes` は SharePoint を使う。追加の Work IQ endpoint 環境変数は不要
+7. `WORKIQ_RUNTIME=foundry_tool` では、事前作成済み Agent に対して read-only の Microsoft 365 connector を使う。frontend は `https://ai.azure.com/user_impersonation` を取得し、backend はその token で Foundry Responses API をユーザーとして呼ぶ。`meeting_notes` は Teams、`emails` は Outlook Email、`teams_chats` は Teams、`documents_notes` は SharePoint を使う。追加の Work IQ endpoint 環境変数は不要
 8. `WORKIQ_RUNTIME=graph_prefetch` は明示 rollback 用で、この場合だけ **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出して短い brief を先読みする
 9. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、preflight の状態が `auth_required` / `consent_required` / `redirecting` から `ready` / `enabled` へ進むこと、そしてバックエンドに保存された `work_iq_session.status` を復元しても同じ UI 状態が表示されることを確認する
 

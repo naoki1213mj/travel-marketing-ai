@@ -39,11 +39,7 @@ vi.mock('@azure/msal-browser', () => ({
 }))
 
 const WORK_IQ_SCOPE_SET = [
-  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-  'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.CopilotMCP.All',
+  'https://ai.azure.com/user_impersonation',
 ]
 
 describe('msal-auth', () => {
@@ -237,7 +233,7 @@ describe('msal-auth', () => {
     }))
   })
 
-  it('requests Agent 365 delegated scopes for Work IQ preflight', async () => {
+  it('requests Foundry delegated scope for Work IQ preflight', async () => {
     const account = { username: 'user@example.com' }
     getAllAccountsMock.mockReturnValue([account])
     const { getWorkIqFoundryAuth } = await import('./msal-auth')

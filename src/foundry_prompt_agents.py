@@ -244,7 +244,7 @@ def run_marketing_plan_prompt_agent(
 
     credential = DefaultAzureCredential()
     project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)
-    openai_client = project_client.get_openai_client()
+    openai_client = None
     try:
         work_iq_config = work_iq or {"enabled": False, "source_scope": []}
         agent = _get_marketing_plan_agent(project_client, model_name)
@@ -267,12 +267,14 @@ def run_marketing_plan_prompt_agent(
                     "tool_choice": "required",
                 },
             }
+            openai_client = project_client.get_openai_client(api_key=access_token)
         else:
             response_kwargs = {
                 "model": model_name,
                 "input": user_input,
                 "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
             }
+            openai_client = project_client.get_openai_client()
         return openai_client.responses.create(
             **response_kwargs,
         )
