@@ -38,6 +38,16 @@ vi.mock('@azure/msal-browser', () => ({
   },
 }))
 
+const WORK_IQ_SCOPE_SET = [
+  'https://graph.microsoft.com/Sites.Read.All',
+  'https://graph.microsoft.com/Mail.Read',
+  'https://graph.microsoft.com/People.Read.All',
+  'https://graph.microsoft.com/OnlineMeetingTranscript.Read.All',
+  'https://graph.microsoft.com/Chat.Read',
+  'https://graph.microsoft.com/ChannelMessage.Read.All',
+  'https://graph.microsoft.com/ExternalItem.Read.All',
+]
+
 describe('msal-auth', () => {
   beforeEach(() => {
     vi.resetModules()
@@ -92,12 +102,7 @@ describe('msal-auth', () => {
       account: redirectAccount,
       accessToken: 'redirect-token',
       expiresOn: new Date(Date.now() + 60_000),
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      scopes: WORK_IQ_SCOPE_SET,
     })
     setActiveAccountMock.mockImplementation((account) => {
       getActiveAccountMock.mockReturnValue(account)
@@ -125,12 +130,7 @@ describe('msal-auth', () => {
 
     expect(setActiveAccountMock).toHaveBeenCalledWith(redirectAccount)
     expect(acquireTokenSilentMock).toHaveBeenCalledWith({
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      scopes: WORK_IQ_SCOPE_SET,
       account: redirectAccount,
     })
     expect(result).toEqual({ token: 'token', status: 'ok' })
@@ -143,12 +143,7 @@ describe('msal-auth', () => {
       account: redirectAccount,
       accessToken: 'redirect-token',
       expiresOn: new Date(Date.now() + 60_000),
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      scopes: WORK_IQ_SCOPE_SET,
     })
     setActiveAccountMock.mockImplementation((account) => {
       getActiveAccountMock.mockReturnValue(account)
@@ -170,12 +165,7 @@ describe('msal-auth', () => {
       account: redirectAccount,
       accessToken: 'redirect-token',
       expiresOn: new Date(Date.now() + 60_000),
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      scopes: WORK_IQ_SCOPE_SET,
     })
     setActiveAccountMock.mockImplementation((account) => {
       getActiveAccountMock.mockReturnValue(account)
@@ -196,8 +186,8 @@ describe('msal-auth', () => {
       account: redirectAccount,
       accessToken: 'redirect-token',
       scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
+        'https://graph.microsoft.com/Sites.Read.All',
+        'https://graph.microsoft.com/Chat.Read',
       ],
     })
     setActiveAccountMock.mockImplementation((account) => {
@@ -209,12 +199,7 @@ describe('msal-auth', () => {
     const result = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 
     expect(acquireTokenSilentMock).toHaveBeenCalledWith({
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      scopes: WORK_IQ_SCOPE_SET,
       account: redirectAccount,
     })
     expect(result).toEqual({ token: 'silent-token', status: 'ok' })
@@ -231,12 +216,7 @@ describe('msal-auth', () => {
       await vi.advanceTimersByTimeAsync(200)
 
       expect(acquireTokenRedirectMock).toHaveBeenCalledWith({
-        scopes: [
-          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-          'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-        ],
+        scopes: WORK_IQ_SCOPE_SET,
       })
       await expect(resultPromise).resolves.toEqual({ token: null, status: 'redirecting' })
     } finally {
@@ -259,7 +239,7 @@ describe('msal-auth', () => {
     }))
   })
 
-  it('requests Agent 365 Tools scopes via the documented api:// app ID URI', async () => {
+  it('requests Graph delegated scopes for Work IQ preflight', async () => {
     const account = { username: 'user@example.com' }
     getAllAccountsMock.mockReturnValue([account])
     const { getWorkIqFoundryAuth } = await import('./msal-auth')
@@ -267,9 +247,7 @@ describe('msal-auth', () => {
     await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 
     expect(acquireTokenSilentMock).toHaveBeenCalledWith(expect.objectContaining({
-      scopes: expect.arrayContaining([
-        expect.stringMatching(/^api:\/\/ea9ffc3e-8a23-4a7d-836d-234d7c7565c1\/McpServers\./),
-      ]),
+      scopes: WORK_IQ_SCOPE_SET,
     }))
   })
 
@@ -302,12 +280,7 @@ describe('msal-auth', () => {
 
   it('uses the cached redirect bridge token without calling acquireTokenSilent', async () => {
     // redirect 処理後に保持された bridge token をシミュレート
-    const bridgeScopes = [
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-    ]
+    const bridgeScopes = WORK_IQ_SCOPE_SET
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
       accessToken: 'bridge-access-token',
       scopes: bridgeScopes,
@@ -333,9 +306,7 @@ describe('msal-auth', () => {
     // 期限切れのブリッジ結果
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
       accessToken: 'old-bridge-token',
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-      ],
+      scopes: ['https://graph.microsoft.com/Sites.Read.All'],
       expiresAt: Date.now() - 1_000,
     }))
     acquireTokenSilentMock.mockResolvedValue({ accessToken: 'silent-token' })
@@ -350,12 +321,7 @@ describe('msal-auth', () => {
   it('uses bridge token as safety fallback when MSAL account cache is empty after redirect', async () => {
     // accounts が空（MSAL のアカウントキャッシュが引き継がれなかったエッジケース）
     getAllAccountsMock.mockReturnValue([])
-    const bridgeScopes = [
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-      'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-    ]
+    const bridgeScopes = WORK_IQ_SCOPE_SET
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
       accessToken: 'bridge-fallback-token',
       scopes: bridgeScopes,
@@ -372,7 +338,7 @@ describe('msal-auth', () => {
 
   it('clears the bridge entry and falls back to silent when scopes do not match the request', async () => {
     getAllAccountsMock.mockReturnValue([{ username: 'user@example.com' }])
-    // ブリッジ結果は Graph スコープ（Foundry スコープとは不一致）
+    // ブリッジ結果は一部の Graph スコープしか持たないため、要求セットを満たせない
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
       accessToken: 'graph-bridge-token',
       scopes: ['https://graph.microsoft.com/Sites.Read.All'],
@@ -393,29 +359,24 @@ describe('msal-auth', () => {
     const realDateNow = Date.now
     const bridgeExpiry = realDateNow() + 5_000
     window.sessionStorage.setItem('workIqMsalRedirectBridge', JSON.stringify({
-      accessToken: 'foundry-bridge-token',
-      scopes: [
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Mail.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Calendar.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.Teams.All',
-        'api://ea9ffc3e-8a23-4a7d-836d-234d7c7565c1/McpServers.OneDriveSharepoint.All',
-      ],
+      accessToken: 'graph-bridge-token',
+      scopes: WORK_IQ_SCOPE_SET,
       expiresAt: bridgeExpiry,
     }))
     acquireTokenSilentMock
-      .mockResolvedValueOnce({ accessToken: 'graph-token' })
-      .mockResolvedValueOnce({ accessToken: 'refreshed-foundry-token' })
+      .mockResolvedValueOnce({ accessToken: 'voice-live-token' })
+      .mockResolvedValueOnce({ accessToken: 'refreshed-graph-token' })
 
-    const { getWorkIqGraphAuth, getWorkIqFoundryAuth } = await import('./msal-auth')
+    const { getVoiceLiveToken, getWorkIqFoundryAuth } = await import('./msal-auth')
 
-    const graphResult = await getWorkIqGraphAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
-    expect(graphResult).toEqual({ token: 'graph-token', status: 'ok' })
+    const voiceResult = await getVoiceLiveToken({ clientId: 'client-id', tenantId: 'tenant-id' })
+    expect(voiceResult).toEqual('voice-live-token')
 
     vi.spyOn(Date, 'now').mockReturnValue(bridgeExpiry + 1)
 
     const foundryResult = await getWorkIqFoundryAuth({ clientId: 'client-id', tenantId: 'tenant-id' })
 
-    expect(foundryResult).toEqual({ token: 'refreshed-foundry-token', status: 'ok' })
+    expect(foundryResult).toEqual({ token: 'refreshed-graph-token', status: 'ok' })
     expect(acquireTokenSilentMock).toHaveBeenCalledTimes(2)
     vi.restoreAllMocks()
   })

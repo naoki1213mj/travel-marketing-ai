@@ -45,17 +45,12 @@ const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/ChannelMessage.Read.All',
   'https://graph.microsoft.com/ExternalItem.Read.All',
 ]
-const AGENT_365_TOOLS_APP_ID = 'ea9ffc3e-8a23-4a7d-836d-234d7c7565c1'
-const AGENT_365_TOOLS_APP_ID_URI = `api://${AGENT_365_TOOLS_APP_ID}`
-function buildAgent365Scope(scopeName: string): string {
-  return `${AGENT_365_TOOLS_APP_ID_URI}/${scopeName}`
-}
-const WORK_IQ_FOUNDRY_SCOPES = [
-  buildAgent365Scope('McpServers.Mail.All'),
-  buildAgent365Scope('McpServers.Calendar.All'),
-  buildAgent365Scope('McpServers.Teams.All'),
-  buildAgent365Scope('McpServers.OneDriveSharepoint.All'),
-]
+// Foundry Work IQ runtime currently only needs a tenant-member delegated token on the
+// frontend side so the backend can resume the pending request with caller identity.
+// Request the tenant-ready Graph scopes here to avoid failing the browser redirect flow
+// in tenants where the Agent 365 Tools service principals/admin consent have not yet
+// been provisioned. The saved Foundry agent still handles its own connector consent.
+const WORK_IQ_FOUNDRY_SCOPES = [...WORK_IQ_GRAPH_SCOPES]
 const MSAL_REDIRECT_PATH = '/auth-redirect.html'
 
 function normalizeScopes(scopes: string[]): string[] {
