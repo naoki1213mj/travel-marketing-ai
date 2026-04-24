@@ -1,10 +1,13 @@
 """Work IQ brief retrieval via Microsoft Graph Copilot Chat API."""
 
+import asyncio
 import json
 import logging
 import re
 from collections import Counter
 from collections.abc import AsyncIterator
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any, NotRequired, TypedDict
 
 import httpx
@@ -19,6 +22,10 @@ _GRAPH_CONVERSATIONS_URL = "https://graph.microsoft.com/beta/copilot/conversatio
 _GRAPH_STREAM_SUFFIX = "chatOverStream"
 _GRAPH_SYNC_SUFFIX = "chat"
 _DEFAULT_TIMEOUT_SECONDS = 120.0
+_MAX_RETRY_ATTEMPTS = 3
+_RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+_BASE_RETRY_DELAY_SECONDS = 1.0
+_MAX_RETRY_DELAY_SECONDS = 8.0
 _MAX_BRIEF_CHARS = 1200
 _SYNC_FALLBACK_STATUS_CODES = {404, 405, 406, 415, 501}
 _JSON_BLOCK_PATTERN = re.compile(r"\{.*\}", re.DOTALL)
@@ -65,6 +72,80 @@ def _resolve_timeout_seconds() -> float:
     except ValueError:
         return _DEFAULT_TIMEOUT_SECONDS
     return timeout_seconds if timeout_seconds > 0 else _DEFAULT_TIMEOUT_SECONDS
+
+
+def _parse_retry_after_seconds(value: str | None) -> float | None:
+    """Retry-After を秒数へ正規化する。"""
+    raw_value = _sanitize_text(value)
+    if not raw_value:
+        return None
+    try:
+        return max(float(raw_value), 0.0)
+    except ValueError:
+        pass
+
+    try:
+        retry_at = parsedate_to_datetime(raw_value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+    if retry_at.tzinfo is None:
+        retry_at = retry_at.replace(tzinfo=timezone.utc)
+    return max((retry_at - datetime.now(timezone.utc)).total_seconds(), 0.0)
+
+
+def _compute_retry_delay(attempt: int, retry_after_header: str | None) -> float:
+    """Retry-After または指数バックオフから待機秒数を計算する。"""
+    retry_after_seconds = _parse_retry_after_seconds(retry_after_header)
+    if retry_after_seconds is not None:
+        return min(retry_after_seconds, _MAX_RETRY_DELAY_SECONDS)
+    return min(_BASE_RETRY_DELAY_SECONDS * (2 ** (attempt - 1)), _MAX_RETRY_DELAY_SECONDS)
+
+
+async def _post_with_retry(
+    url: str,
+    *,
+    payload: dict[str, Any],
+    headers: dict[str, str],
+    timeout_seconds: float,
+    stage: str,
+) -> httpx.Response:
+    """一時的な Graph エラーに対して bounded retry 付きで POST する。"""
+    last_error: Exception | None = None
+
+    for attempt in range(1, _MAX_RETRY_ATTEMPTS + 1):
+        try:
+            response = await get_http_client().post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=timeout_seconds,
+            )
+            response.raise_for_status()
+            return response
+        except httpx.HTTPStatusError as exc:
+            last_error = exc
+            if exc.response.status_code not in _RETRYABLE_STATUS_CODES or attempt == _MAX_RETRY_ATTEMPTS:
+                raise
+            delay_seconds = _compute_retry_delay(attempt, exc.response.headers.get("Retry-After"))
+        except httpx.RequestError as exc:
+            last_error = exc
+            if attempt == _MAX_RETRY_ATTEMPTS:
+                raise
+            delay_seconds = _compute_retry_delay(attempt, None)
+
+        logger.info(
+            "work iq graph call retrying after %.1fs during %s (attempt %s/%s)",
+            delay_seconds,
+            stage,
+            attempt + 1,
+            _MAX_RETRY_ATTEMPTS,
+        )
+        await asyncio.sleep(delay_seconds)
+
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("unexpected retry state")
 
 
 def _build_headers(access_token: str) -> dict[str, str]:
@@ -295,13 +376,13 @@ async def _chat_synchronously(
     timeout_seconds: float,
 ) -> dict[str, Any]:
     """同期 endpoint を使って assistant message を取得する。"""
-    chat_response = await get_http_client().post(
+    chat_response = await _post_with_retry(
         f"{_GRAPH_CONVERSATIONS_URL}/{conversation_id}/{_GRAPH_SYNC_SUFFIX}",
-        json=payload,
+        payload=payload,
         headers=headers,
-        timeout=timeout_seconds,
+        timeout_seconds=timeout_seconds,
+        stage="chat",
     )
-    chat_response.raise_for_status()
     return _extract_assistant_message(chat_response.json())
 
 
@@ -337,13 +418,13 @@ async def generate_workplace_context_brief(
     chat_payload = _build_chat_payload(user_input, source_scope, user_time_zone)
 
     try:
-        create_response = await get_http_client().post(
+        create_response = await _post_with_retry(
             _GRAPH_CONVERSATIONS_URL,
-            json={},
+            payload={},
             headers=headers,
-            timeout=timeout_seconds,
+            timeout_seconds=timeout_seconds,
+            stage=stage,
         )
-        create_response.raise_for_status()
         conversation_payload = create_response.json()
         conversation_id = (
             _sanitize_text(conversation_payload.get("id")) if isinstance(conversation_payload, dict) else ""

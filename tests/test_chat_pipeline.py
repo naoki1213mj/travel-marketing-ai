@@ -706,8 +706,9 @@ class TestConversationStatusFromEvents:
         assert chat_module._conversation_status_from_events(events) == "error"
 
 
-def test_build_public_base_url_prefers_forwarded_headers():
-    """公開 URL は proxy の forwarded headers を優先する"""
+def test_build_public_base_url_prefers_configured_setting(monkeypatch):
+    """公開 URL は明示設定があればそれを優先する"""
+    monkeypatch.setattr(chat_module, "get_settings", lambda: {"public_app_base_url": "https://app.example.com"})
     request = Request(
         {
             "type": "http",
@@ -729,6 +730,32 @@ def test_build_public_base_url_prefers_forwarded_headers():
     )
 
     assert chat_module._build_public_base_url(request) == "https://app.example.com"
+
+
+def test_build_public_base_url_falls_back_to_request_base_url(monkeypatch):
+    """公開 URL 設定が無ければ request.base_url を使う"""
+    monkeypatch.setattr(chat_module, "get_settings", lambda: {"public_app_base_url": ""})
+    request = Request(
+        {
+            "type": "http",
+            "scheme": "http",
+            "method": "POST",
+            "path": "/api/chat/conv/approve",
+            "raw_path": b"/api/chat/conv/approve",
+            "query_string": b"",
+            "headers": [
+                (b"host", b"internal.local"),
+                (b"x-forwarded-proto", b"https"),
+                (b"x-forwarded-host", b"app.example.com"),
+            ],
+            "client": ("127.0.0.1", 12345),
+            "server": ("internal.local", 80),
+            "root_path": "",
+            "http_version": "1.1",
+        }
+    )
+
+    assert chat_module._build_public_base_url(request) == "http://internal.local"
 
     def test_other_event_defaults_completed(self):
         events = [{"event": "text"}]

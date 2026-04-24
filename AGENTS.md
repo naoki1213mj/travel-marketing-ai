@@ -88,7 +88,7 @@
 ### Agent2: marketing-plan-agent（施策生成）
 
 **ファイル**: `src/agents/marketing_plan.py`
-**役割**: Agent1 の分析結果をもとにマーケティング企画書を作成する。景品表示法違反表現を回避。既定では `marketing_plan_runtime=foundry_prompt` + `WORKIQ_RUNTIME=graph_prefetch` で動作し、Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を先読みする。`foundry_tool` は opt-in 経路として残しており、必要時だけ `source_scope` ベースの Microsoft 365 read-only connector を動的注入する。
+**役割**: Agent1 の分析結果をもとにマーケティング企画書を作成する。景品表示法違反表現を回避。既定では `marketing_plan_runtime=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool` で動作し、事前作成済み Foundry Prompt Agent を `agent_reference` で実行する。Work IQ 有効時はブラウザが取得した `https://ai.azure.com/user_impersonation` を backend が Foundry Responses へ渡し、Agent definition に含まれる Work IQ MCP connection を per-user で使う。`graph_prefetch` は明示 rollback 経路として残しており、必要時だけ Microsoft Graph Copilot Chat API から短い workplace brief を先読みする。
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|
@@ -98,9 +98,9 @@
 
 **Work IQ ランタイム補足**:
 
-- 既定: `WORKIQ_RUNTIME=graph_prefetch`
-- connector 対応: `meeting_notes` → Teams + Outlook Calendar、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint
-- opt-in: `WORKIQ_RUNTIME=foundry_tool` を指定すると `MARKETING_PLAN_RUNTIME=foundry_prompt` 前提で Microsoft 365 read-only connector を動的注入する
+- 既定: `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`
+- connector 対応: `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive
+- rollback: `WORKIQ_RUNTIME=graph_prefetch` を指定すると Microsoft Graph Copilot Chat API で短い brief を先読みする
 
 ---
 
@@ -140,8 +140,8 @@
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|
-| `generate_hero_image(prompt, destination, style)` | 目的地メインビジュアル画像生成（1792x1024px） | ✅ GPT Image 1.5 (Responses API) / MAI-Image-2 (MAI REST API) — UI から選択 | 1x1 透明 PNG プレースホルダー |
-| `generate_banner_image(prompt, platform)` | SNS バナー画像生成（Instagram/Twitter/Facebook サイズ対応） | ✅ GPT Image 1.5 (Responses API) / MAI-Image-2 (MAI REST API) — UI から選択 | 1x1 透明 PNG プレースホルダー |
+| `generate_hero_image(prompt, destination, style)` | 目的地メインビジュアル画像生成（1792x1024px） | ✅ GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 — UI から選択 | 可視 SVG プレースホルダー |
+| `generate_banner_image(prompt, platform)` | SNS バナー画像生成（Instagram/Twitter/Facebook サイズ対応） | ✅ GPT Image 2（既定）/ GPT Image 1.5 / MAI-Image-2 — UI から選択 | 可視 SVG プレースホルダー |
 
 **出力形式**: 顧客向け HTML ブローシャ（Tailwind CSS / レスポンシブ / 旅行業登録番号フッター付き）+ Base64 画像 data URI
 
@@ -177,7 +177,7 @@
 **ファイル**: `src/agents/quality_review.py`
 **役割**: 生成された成果物の品質を 4 観点でレビュー（企画書構造 / ブローシャアクセシビリティ / テキストトーン一貫性 / 旅行業法適合）。バックグラウンドで実行され、`AZURE_AI_PROJECT_ENDPOINT` 未設定時はスキップされる。
 
-**実装**: `GitHubCopilotAgent` を優先使用し、`PermissionHandler.approve_all` で自動権限承認を設定。利用不可時は `FoundryChatClient` にフォールバック。
+**実装**: `ENABLE_GITHUB_COPILOT_REVIEW_AGENT=true` のときだけ preview の `GitHubCopilotAgent` を使用する opt-in 構成。既定では `FoundryChatClient` にフォールバックし、自動権限承認は行わない。
 
 | ツール名 | 説明 | Azure 接続 | フォールバック |
 |---------|------|-----------|-------------|

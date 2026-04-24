@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: ModelSettings = {
   topP: 1.0,
   iqSearchResults: 5,
   iqScoreThreshold: 0.0,
-  imageModel: 'gpt-image-1.5',
+  imageModel: 'gpt-image-2',
   imageQuality: 'medium',
   imageWidth: 1024,
   imageHeight: 1024,
@@ -79,8 +79,8 @@ const MARKETING_RUNTIME_OPTIONS = [
 ] as const
 
 const AVAILABLE_IMAGE_MODELS = [
-  { value: 'gpt-image-1.5', label: 'GPT Image 1.5 (default)' },
-  { value: 'gpt-image-2', label: 'GPT Image 2' },
+  { value: 'gpt-image-2', label: 'GPT Image 2 (default)' },
+  { value: 'gpt-image-1.5', label: 'GPT Image 1.5' },
   { value: 'MAI-Image-2', label: 'MAI-Image-2' },
 ] as const
 

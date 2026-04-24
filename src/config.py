@@ -33,6 +33,7 @@ class AppSettings(TypedDict):
     speech_service_region: str
     logic_app_callback_url: str
     manager_approval_trigger_url: str
+    public_app_base_url: str
     fabric_data_agent_url: str
     image_project_endpoint_mai: str
     gpt_image_15_deployment_name: str
@@ -40,6 +41,7 @@ class AppSettings(TypedDict):
     marketing_plan_runtime: str
     marketing_plan_prompt_agent_name: str
     work_iq_runtime: str
+    enable_github_copilot_review_agent: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -62,6 +64,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "speech_service_region": ("SPEECH_SERVICE_REGION",),
     "logic_app_callback_url": ("LOGIC_APP_CALLBACK_URL",),
     "manager_approval_trigger_url": ("MANAGER_APPROVAL_TRIGGER_URL",),
+    "public_app_base_url": ("PUBLIC_APP_BASE_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
     "gpt_image_15_deployment_name": ("GPT_IMAGE_15_DEPLOYMENT_NAME",),
@@ -69,6 +72,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "marketing_plan_runtime": ("MARKETING_PLAN_RUNTIME",),
     "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
     "work_iq_runtime": ("WORKIQ_RUNTIME",),
+    "enable_github_copilot_review_agent": ("ENABLE_GITHUB_COPILOT_REVIEW_AGENT",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -83,6 +87,7 @@ _DEFAULTS: dict[str, str] = {
     "marketing_plan_runtime": "foundry_preprovisioned",
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
     "work_iq_runtime": "foundry_tool",
+    "enable_github_copilot_review_agent": "false",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

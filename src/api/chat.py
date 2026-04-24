@@ -475,22 +475,11 @@ def _build_manager_approval_url(base_url: str, conversation_id: str, approval_to
     return f"{normalized_base_url}/?{query}#{fragment}"
 
 
-def _extract_forwarded_header_value(value: str | None) -> str:
-    """Forwarded header の先頭値を取り出す。"""
-    if not value:
-        return ""
-    return value.split(",", 1)[0].strip()
-
-
 def _build_public_base_url(request: Request) -> str:
-    """リバースプロキシ配下でも公開 URL を正しく組み立てる。"""
-    forwarded_proto = _sanitize_optional_text(_extract_forwarded_header_value(request.headers.get("x-forwarded-proto")))
-    forwarded_host = _sanitize_optional_text(
-        _extract_forwarded_header_value(request.headers.get("x-forwarded-host") or request.headers.get("host"))
-    )
-    if forwarded_host:
-        scheme = forwarded_proto or request.url.scheme or "https"
-        return f"{scheme}://{forwarded_host}".rstrip("/")
+    """設定済みの公開 URL または現在の request.base_url を返す。"""
+    configured_base_url = _sanitize_optional_text(get_settings().get("public_app_base_url")).rstrip("/")
+    if configured_base_url:
+        return configured_base_url
     return str(request.base_url).rstrip("/")
 
 

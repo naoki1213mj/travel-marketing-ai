@@ -1,13 +1,9 @@
-"""Voice Live トークンエンドポイント。フロントエンドの WebSocket 認証用。"""
+"""Voice Live 設定エンドポイント。"""
 
-import logging
 import os
 
-from azure.identity import DefaultAzureCredential
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["voice"])
 
@@ -30,32 +26,18 @@ def _get_foundry_voice_target() -> tuple[str, str, str]:
 
 @router.get("/voice-token")
 async def get_voice_token() -> JSONResponse:
-    """Voice Live API 接続用の AAD トークンを取得する。
-
-    フロントエンドが WebSocket 接続時に使用する Bearer トークンを返す。
-    Voice Live は https://ai.azure.com/.default スコープを推奨。
-    """
-    try:
-        credential = DefaultAzureCredential()
-        # Voice Live 公式ドキュメント推奨スコープ
-        token = credential.get_token("https://ai.azure.com/.default")
-
-        # Voice Live 接続情報も返す
-        resource_name, project_name, endpoint = _get_foundry_voice_target()
-
-        return JSONResponse(
-            content={
-                "token": token.token,
-                "expires_on": token.expires_on,
-                "resource_name": resource_name,
-                "project_name": project_name,
-                "endpoint": endpoint,
-                "api_version": "2026-01-01-preview",
-            }
-        )
-    except Exception as exc:
-        logger.warning("Voice token 取得失敗: %s", exc)
-        return JSONResponse(status_code=503, content={"error": "Voice token unavailable"})
+    """廃止済み endpoint であることを返す。"""
+    return JSONResponse(
+        status_code=410,
+        content={
+            "error": "Voice token endpoint disabled",
+            "code": "VOICE_TOKEN_ENDPOINT_DISABLED",
+            "message": (
+                "Use /api/voice-config and browser delegated MSAL auth with "
+                "https://cognitiveservices.azure.com/user_impersonation."
+            ),
+        },
+    )
 
 
 @router.get("/voice-config")

@@ -616,7 +616,10 @@ def _evaluate_cta_visibility(html: str) -> dict:
     checks = {
         "予約導線": _contains_any(html, ("予約", "申込", "お申し込み", "お問い合わせ")),
         "行動喚起文": _contains_any(html, ("今すぐ", "詳しくはこちら", "空席確認", "ご予約はこちら")),
-        "リンクまたはボタン": bool(re.search(r"<(a|button)\b", html, re.IGNORECASE)),
+        "予約方法の明記": _contains_any(
+            html,
+            ("予約方法", "申込方法", "お申し込み方法", "ご予約は", "予約は", "お問い合わせ窓口", "受付方法"),
+        ),
         "連絡先または URL": _contains_any(html, ("http://", "https://", "電話", "メール", "QR")),
     }
     return _build_check_metric(checks)
@@ -630,8 +633,8 @@ def _evaluate_value_visibility(html: str) -> dict:
     checks = {
         "価格表示": _contains_any(html, ("円", "税込", "価格", "料金")),
         "日程表示": _contains_any(html, ("日程", "2泊3日", "3日間", "行程")),
-        "限定条件": _contains_any(html, ("期間限定", "先着", "限定", "残りわずか", "各出発日")),
-        "特典表示": _contains_any(html, ("特典", "無料", "プレゼント", "割引", "早割")),
+        "含まれるサービス": _contains_any(html, ("含まれるもの", "宿泊", "食事", "朝食", "送迎", "現地サポート")),
+        "訴求ポイント": _contains_any(html, ("魅力", "おすすめ", "特典", "安心", "体験", "絶景", "人気")),
     }
     return _build_check_metric(checks)
 
@@ -661,7 +664,7 @@ def _evaluate_accessibility_readiness(html: str) -> dict:
         "lang 属性": bool(re.search(r"<html[^>]+\blang\s*=", html, re.IGNORECASE)),
         "画像 alt": not image_tags or len(images_with_alt) == len(image_tags),
         "見出し構造": bool(re.search(r"<(h1|h2)\b", html, re.IGNORECASE)),
-        "リンク/ボタン導線": bool(re.search(r"<(a|button)\b", html, re.IGNORECASE)),
+        "本文セクション構造": bool(re.search(r"<(p|ul|ol|li|section|article)\b", html, re.IGNORECASE)),
         "フッターまたは注意書き": bool(re.search(r"<(footer|small)\b", html, re.IGNORECASE))
         or _contains_any(html, ("旅行条件", "登録番号", "お問い合わせ")),
     }
@@ -881,6 +884,9 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
     if not endpoint:
         return None
 
+    trimmed_query = _truncate_for_evaluation(query, _MAX_EVAL_QUERY_CHARS)
+    trimmed_response = _truncate_for_evaluation(response, _MAX_EVAL_RESPONSE_CHARS)
+    temp_path: str | None = None
     try:
         from azure.ai.evaluation import evaluate
         from azure.identity import DefaultAzureCredential
@@ -892,7 +898,7 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
         import tempfile
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False, encoding="utf-8") as f:
-            json.dump({"query": query, "response": response}, f, ensure_ascii=False)
+            json.dump({"query": trimmed_query, "response": trimmed_response}, f, ensure_ascii=False)
             f.write("\n")
             temp_path = f.name
 
@@ -921,9 +927,6 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
             azure_ai_project=azure_ai_project,
         )
 
-        # クリーンアップ
-        os.unlink(temp_path)
-
         # ポータル URL を返す
         studio_url = result.get("studio_url", "")
         if studio_url:
@@ -934,6 +937,12 @@ async def _log_to_foundry(query: str, response: str, scores: dict) -> str | None
     except (ImportError, ValueError, OSError, RuntimeError) as exc:
         logger.warning("Foundry ポータル連携に失敗: %s", exc)
         return None
+    finally:
+        if temp_path:
+            try:
+                os.unlink(temp_path)
+            except OSError as exc:
+                logger.warning("評価ログ用の一時ファイル削除に失敗: %s", exc)
 
 
 # --- エンドポイント ---

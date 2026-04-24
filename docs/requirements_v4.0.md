@@ -5,6 +5,8 @@
 > **更新日**: 2026-04-07  
 > **作成者**: Team D (Tokunaga / Matsumoto / mmatsuzaki)  
 > **ステータス**: v4.0（コードフリーズ済み — 実装メトリクス: pytest 275 / vitest 74 / カバレッジ 68%）
+>
+> **注**: このファイルは要件定義時点のスナップショットです。最新の runtime defaults、認証契約、画像モデル既定値は `README.md` / `README.ja.md` / `docs/deployment-guide.md` を正としてください。
 
 ---
 

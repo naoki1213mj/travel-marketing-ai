@@ -48,7 +48,7 @@ def _build_fallback_image() -> str:
 _FALLBACK_IMAGE = _build_fallback_image()
 
 # 画像生成モデル名（デフォルト値）
-_DEFAULT_IMAGE_MODEL = "gpt-image-1.5"
+_DEFAULT_IMAGE_MODEL = "gpt-image-2"
 
 # 利用可能な画像生成モデル
 AVAILABLE_IMAGE_MODELS = {

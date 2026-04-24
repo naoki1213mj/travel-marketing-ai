@@ -1,7 +1,7 @@
 """品質レビューエージェント。
 
 Agent4 の成果物生成後に実行し、品質チェックを行う。
-GitHubCopilotAgent が利用可能な場合はそちらを使用し、
+GitHubCopilotAgent は明示 opt-in の場合のみ使用し、
 未設定時は FoundryChatClient ベースのエージェントにフォールバックする。
 """
 
@@ -13,6 +13,11 @@ from src.config import get_settings
 from src.tool_telemetry import trace_tool_invocation
 
 logger = logging.getLogger(__name__)
+
+
+def _is_truthy(value: str) -> bool:
+    """環境変数由来のフラグを bool へ正規化する。"""
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @tool
@@ -114,28 +119,29 @@ _REVIEW_TOOLS = [review_plan_quality, review_brochure_accessibility]
 def create_review_agent():
     """品質レビューエージェントを作成する。
 
-    GitHubCopilotAgent が利用可能な場合はそちらを使用し、
+    GitHubCopilotAgent は明示 opt-in の場合のみ使用し、
     未設定時は従来の FoundryChatClient ベースのエージェントにフォールバックする。
     """
-    # GitHubCopilotAgent を優先的に試行
-    try:
-        from agent_framework.github import GitHubCopilotAgent, PermissionHandler
+    settings = get_settings()
+    if _is_truthy(settings["enable_github_copilot_review_agent"]):
+        try:
+            from agent_framework.github import GitHubCopilotAgent
 
-        review_agent = GitHubCopilotAgent(
-            name="quality-review-agent",
-            instructions=INSTRUCTIONS,
-            tools=_REVIEW_TOOLS,
-            on_permission_request=PermissionHandler.approve_all,
-        )
-        logger.info("GitHubCopilotAgent で品質レビューエージェントを作成しました")
-        return review_agent
-    except (ImportError, ValueError, OSError) as exc:
-        logger.info("GitHubCopilotAgent 未設定のため従来エージェントにフォールバック: %s", exc)
-    except Exception as exc:
-        logger.warning("GitHubCopilotAgent の初期化で予期しないエラー: %s", exc)
+            review_agent = GitHubCopilotAgent(
+                name="quality-review-agent",
+                instructions=INSTRUCTIONS,
+                tools=_REVIEW_TOOLS,
+            )
+            logger.info("GitHubCopilotAgent で品質レビューエージェントを作成しました")
+            return review_agent
+        except (ImportError, ValueError, OSError) as exc:
+            logger.info("GitHubCopilotAgent 未設定のため従来エージェントにフォールバック: %s", exc)
+        except Exception as exc:
+            logger.warning("GitHubCopilotAgent の初期化で予期しないエラー: %s", exc)
+    else:
+        logger.info("ENABLE_GITHUB_COPILOT_REVIEW_AGENT が false のため Foundry review agent を使用します")
 
     # フォールバック: FoundryChatClient ベースのエージェント
-    settings = get_settings()
     if not settings["project_endpoint"]:
         logger.info("Project endpoint 未設定のためレビューエージェントはスキップ")
         return None

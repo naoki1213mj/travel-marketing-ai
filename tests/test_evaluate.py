@@ -28,7 +28,9 @@ def test_evaluate_brochure_accessibility_scores_all_checks():
         <html lang="ja"><body>
             <h1>京都の秋をゆったり楽しむ旅</h1>
             <p>期間限定の特典付きツアーを予約受付中。価格は 98,000円（税込）から。</p>
-            <a href="https://example.com/reserve">今すぐ予約</a>
+            <section>
+                <p>予約方法: お問い合わせ窓口で受付中。電話で空席確認も可能です。</p>
+            </section>
             <footer>観光庁長官登録旅行業第123号 / お問い合わせはこちら</footer>
     </body></html>
     """
@@ -37,6 +39,39 @@ def test_evaluate_brochure_accessibility_scores_all_checks():
 
     assert result["score"] == 1.0
     assert all(result["details"].values())
+
+
+def test_evaluate_cta_visibility_accepts_static_brochure_reservation_copy():
+    html = """
+        <html lang="ja"><body>
+            <h1>京都の秋をゆったり楽しむ旅</h1>
+            <p>今すぐ秋の京都旅をチェック。</p>
+            <p>予約方法: お問い合わせ窓口で受付中。電話 03-1234-5678</p>
+        </body></html>
+    """
+
+    result = evaluate_module._evaluate_cta_visibility(html)
+
+    assert result["score"] == 1.0
+    assert result["details"]["予約方法の明記"] is True
+    assert "リンクまたはボタン" not in result["details"]
+
+
+def test_evaluate_value_visibility_matches_actual_brochure_content():
+    html = """
+        <html lang="ja"><body>
+            <h1>京都の秋をゆったり楽しむ旅</h1>
+            <p>2泊3日 98,000円（税込）</p>
+            <p>含まれるもの: 宿泊、朝食、現地サポート</p>
+            <p>紅葉名所と街歩きを楽しめる人気プランです。</p>
+        </body></html>
+    """
+
+    result = evaluate_module._evaluate_value_visibility(html)
+
+    assert result["score"] == 1.0
+    assert result["details"]["含まれるサービス"] is True
+    assert result["details"]["訴求ポイント"] is True
 
 
 def test_evaluate_plan_structure_detects_core_sections():

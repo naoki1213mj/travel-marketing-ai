@@ -7,10 +7,17 @@ from src import work_iq_context
 
 
 class _MockResponse:
-    def __init__(self, payload: object, status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        payload: object,
+        status_code: int = 200,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self._payload = payload
         self.status_code = status_code
         self.text = text
+        self.headers = headers or {}
 
     def json(self) -> object:
         return self._payload
@@ -18,7 +25,7 @@ class _MockResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             request = httpx.Request("POST", "https://graph.microsoft.com/beta/copilot/conversations")
-            response = httpx.Response(self.status_code, text=self.text, request=request)
+            response = httpx.Response(self.status_code, text=self.text, request=request, headers=self.headers)
             raise httpx.HTTPStatusError("graph call failed", request=request, response=response)
 
 
@@ -43,10 +50,17 @@ class _MockClient:
 
 
 class _MockStreamResponse:
-    def __init__(self, chunks: list[str], status_code: int = 200, text: str = "") -> None:
+    def __init__(
+        self,
+        chunks: list[str],
+        status_code: int = 200,
+        text: str = "",
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.chunks = chunks
         self.status_code = status_code
         self.text = text
+        self.headers = headers or {}
 
     async def __aenter__(self):
         return self
@@ -57,7 +71,7 @@ class _MockStreamResponse:
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
             request = httpx.Request("POST", "https://graph.microsoft.com/beta/copilot/conversations/conv-123/chatOverStream")
-            response = httpx.Response(self.status_code, text=self.text, request=request)
+            response = httpx.Response(self.status_code, text=self.text, request=request, headers=self.headers)
             raise httpx.HTTPStatusError("graph call failed", request=request, response=response)
 
     async def aiter_text(self):
@@ -196,8 +210,21 @@ async def test_generate_workplace_context_brief_requires_access_token(monkeypatc
 
 @pytest.mark.asyncio
 async def test_generate_workplace_context_brief_maps_timeout(monkeypatch) -> None:
-    client = _MockClient([_MockResponse({"id": "conv-123"}), httpx.TimeoutException("timed out")])
+    client = _MockClient(
+        [
+            _MockResponse({"id": "conv-123"}),
+            httpx.TimeoutException("timed out"),
+            httpx.TimeoutException("timed out"),
+            httpx.TimeoutException("timed out"),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
     monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
+    monkeypatch.setattr(work_iq_context.asyncio, "sleep", fake_sleep)
 
     result = await work_iq_context.generate_workplace_context_brief(
         "北海道の春プラン",
@@ -211,6 +238,93 @@ async def test_generate_workplace_context_brief_maps_timeout(monkeypatch) -> Non
         "status": "timeout",
         "warning_code": "timeout",
     }
+    assert sleep_calls == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_generate_workplace_context_brief_retries_transient_create_failure(monkeypatch) -> None:
+    client = _MockClient(
+        [
+            _MockResponse({}, status_code=503, text="temporarily unavailable"),
+            _MockResponse({"id": "conv-123"}),
+            _MockResponse(
+                {
+                    "messages": [
+                        {
+                            "text": '{"brief_summary":"営業会議では春休み向け施策を優先していました。"}',
+                            "attributions": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
+    monkeypatch.setattr(work_iq_context, "get_settings", lambda: {"work_iq_timeout_seconds": "7"})
+    monkeypatch.setattr(work_iq_context.asyncio, "sleep", fake_sleep)
+
+    result = await work_iq_context.generate_workplace_context_brief(
+        "北海道の春プラン",
+        ["emails"],
+        "graph-token",
+    )
+
+    assert result["status"] == "completed"
+    assert result["brief_summary"] == "営業会議では春休み向け施策を優先していました。"
+    assert sleep_calls == [1.0]
+    assert [str(call["url"]) for call in client.calls] == [
+        "https://graph.microsoft.com/beta/copilot/conversations",
+        "https://graph.microsoft.com/beta/copilot/conversations",
+        "https://graph.microsoft.com/beta/copilot/conversations/conv-123/chat",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_generate_workplace_context_brief_retries_chat_with_retry_after(monkeypatch) -> None:
+    client = _MockClient(
+        [
+            _MockResponse({"id": "conv-123"}),
+            _MockResponse({}, status_code=429, text="too many requests", headers={"Retry-After": "2"}),
+            _MockResponse(
+                {
+                    "messages": [
+                        {
+                            "text": '{"brief_summary":"価格より体験価値を優先する方針が確認できました。"}',
+                            "attributions": [],
+                        }
+                    ]
+                }
+            ),
+        ]
+    )
+    sleep_calls: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleep_calls.append(delay)
+
+    monkeypatch.setattr(work_iq_context, "get_http_client", lambda: client)
+    monkeypatch.setattr(work_iq_context, "get_settings", lambda: {"work_iq_timeout_seconds": "7"})
+    monkeypatch.setattr(work_iq_context.asyncio, "sleep", fake_sleep)
+
+    result = await work_iq_context.generate_workplace_context_brief(
+        "北海道の春プラン",
+        ["emails"],
+        "graph-token",
+    )
+
+    assert result["status"] == "completed"
+    assert result["brief_summary"] == "価格より体験価値を優先する方針が確認できました。"
+    assert sleep_calls == [2.0]
+    assert [str(call["url"]) for call in client.calls] == [
+        "https://graph.microsoft.com/beta/copilot/conversations",
+        "https://graph.microsoft.com/beta/copilot/conversations/conv-123/chat",
+        "https://graph.microsoft.com/beta/copilot/conversations/conv-123/chat",
+    ]
 
 
 @pytest.mark.asyncio

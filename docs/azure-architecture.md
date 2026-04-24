@@ -162,7 +162,7 @@ flowchart TD
 | 実行主体 | 認証方式 | 用途 |
 | --- | --- | --- |
 | Container App | `DefaultAzureCredential` | Foundry, Fabric, Cosmos DB, AI Search |
-| ブラウザ利用者 | delegated Microsoft Graph token | Work IQ connector auth / rollback brief 取得、owner-bound 会話 API、評価保存 |
+| ブラウザ利用者 | delegated token (`https://ai.azure.com/user_impersonation` / `https://cognitiveservices.azure.com/user_impersonation`) | 既定の Work IQ Foundry tool auth、Voice Live auth、owner-bound 会話 API、評価保存。`graph_prefetch` rollback を使う場合だけ Graph delegated token も利用 |
 | APIM | Managed Identity | Foundry バックエンド接続 |
 | AI Search bootstrap | Foundry connection or API key | 初期インデックス投入 |
 

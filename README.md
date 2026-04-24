@@ -103,16 +103,16 @@ azd auth login
 azd up                                    # provision + build + deploy
 ```
 
-`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and the remaining follow-up items.
+`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, Marketing-plan Prompt Agent sync, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and the remaining follow-up items.
 
 ### Current Azure status (`workiq-dev` tenant)
 
 | Area | Current state |
 | --- | --- |
 | Work IQ delegated auth | SPA redirect URIs, Microsoft Graph delegated permissions, tenant-wide admin consent, and Microsoft 365 Copilot license verification are complete |
-| Work IQ runtime | The default runtime is `WORKIQ_RUNTIME=graph_prefetch`. Agent1 and Agent2 are bridged by a short workplace brief fetched through Microsoft Graph Copilot Chat API (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120` by default), which keeps the pipeline progressing even when Foundry connector execution is unstable. `foundry_tool` remains available as an opt-in path with `MARKETING_PLAN_RUNTIME=foundry_prompt`, where Agent2 dynamically injects read-only Microsoft 365 connectors from `source_scope`. Frontend auth preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same UI state. Accounts outside the tenant/guest list are rejected during sign-in |
+| Work IQ runtime | The default runtime is `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`. Agent2 runs the pre-provisioned Foundry Prompt Agent through `agent_reference`, the frontend acquires `https://ai.azure.com/user_impersonation`, and the backend passes that user token into Foundry Responses so the attached Work IQ MCP connection runs per-user. `graph_prefetch` remains the explicit rollback path, where a short Microsoft Graph Copilot Chat API brief is prefetched (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120` by default). Frontend preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same UI state. Accounts outside the tenant/guest list are rejected during sign-in |
 | Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
-| Model deployments | The main East US 2 Foundry account now has `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, `gpt-5.4`, and `gpt-image-1.5`; GPT image routes also accept an optional `GPT_IMAGE_2_DEPLOYMENT_NAME` override when `gpt-image-2` is deployed under a custom name |
+| Model deployments | The text deployments are `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, and `gpt-5.4`. The app default image route is now `gpt-image-2`; deploy it under the default name or set `GPT_IMAGE_2_DEPLOYMENT_NAME` when the deployment name differs. `gpt-image-1.5` remains supported |
 | MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
 | Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored. The live app now uses both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` |
 | Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` and `logic-wmbvhdhcsuyb2` are live. Manager approval notification and post-approval Teams channel delivery were revalidated, and `deploy.yml` now resyncs the full signed manager trigger URL into the Container App secret |
@@ -129,9 +129,11 @@ azd up                                    # provision + build + deploy
 | `SEARCH_ENDPOINT` | Optional | Azure AI Search endpoint for Foundry IQ / direct knowledge-base lookup |
 | `SEARCH_API_KEY` | Optional | Azure AI Search admin key (stored as a secret in Container Apps for the live tenant) |
 | `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent Published URL |
-| `MARKETING_PLAN_RUNTIME` | Optional | Marketing-plan runtime selector (default: `foundry_prompt`; `legacy` remains available for rollback/testing) |
-| `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `graph_prefetch`). `foundry_tool` remains available as an opt-in path and requires `MARKETING_PLAN_RUNTIME=foundry_prompt` |
+| `MARKETING_PLAN_RUNTIME` | Optional | Marketing-plan runtime selector (default: `foundry_preprovisioned`; `legacy` remains available for rollback/testing) |
+| `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `foundry_tool`; `graph_prefetch` remains available as the explicit rollback path) |
 | `WORK_IQ_TIMEOUT_SECONDS` | Optional | Timeout for the `graph_prefetch` rollback path when fetching a short Work IQ brief from Microsoft Graph Copilot Chat API (default: `120`) |
+| `PUBLIC_APP_BASE_URL` | Recommended for manager approval | Canonical public base URL used when generating manager approval and callback links |
+| `ENABLE_GITHUB_COPILOT_REVIEW_AGENT` | Optional | Opt-in for the preview `GitHubCopilotAgent` quality review path. Default is `false`, which keeps the safer Foundry review fallback |
 | `SPEECH_SERVICE_ENDPOINT` | Optional | Photo Avatar video generation |
 | `IMPROVEMENT_MCP_ENDPOINT` | Optional | APIM MCP route for evaluation refinement |
 | `IMAGE_PROJECT_ENDPOINT_MAI` | Optional | Separate MAI-capable AI Services endpoint |
@@ -183,7 +185,7 @@ docs/                Architecture, API reference, deployment guides
 | --- | --- |
 | Frontend | React 19 · TypeScript · Vite 8 · Tailwind CSS 4 |
 | Backend | Python 3.14 · FastAPI · uvicorn |
-| AI Models | gpt-5.4-mini · gpt-4.1 family · gpt-5.4 · GPT Image 1.5 · MAI route (separate East US account) |
+| AI Models | gpt-5.4-mini · gpt-4.1 family · gpt-5.4 · GPT Image 2 (default) · GPT Image 1.5 · MAI route (separate East US account) |
 | Agent Framework | Microsoft Agent Framework 1.0.0 (GA) |
 | Data | Fabric Lakehouse · Fabric Data Agent · Delta Parquet + SQL |
 | Knowledge | Foundry IQ · Azure AI Search |

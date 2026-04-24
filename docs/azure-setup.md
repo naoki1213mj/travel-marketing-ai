@@ -24,15 +24,15 @@
 2. **Improvement MCP**: Flex Consumption Function App の作成、managed identity ベースの storage 構成、vendored 依存入り ready-to-run zip 配備、MCP runtime 応答確認、APIM `improvement-mcp` route 同期
 3. **Voice Agent**: Foundry SDK 経由で Voice Live 対応 Prompt Agent を作成
 4. **Marketing plan Agent**: Foundry SDK 経由で Agent2 用の事前作成済み Prompt Agent を作成/同期（UI で選択できる `gpt-5-4-mini` / `gpt-5.4` / `gpt-4-1-mini` / `gpt-4.1` をまとめて同期）
-5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Graph delegated permissions、Agent 365 Tools scopes を同期）
+5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Voice Live / Foundry delegated scopes、`graph_prefetch` rollback 用の Graph delegated permissions を同期）
 
 ## 3. Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-18)
 
 | 領域 | 状態 | 補足 |
 | --- | --- | --- |
-| Work IQ | 完了 | SPA redirect URI、Graph delegated permissions、**Agent 365 Tools delegated scopes**、admin consent、M365 Copilot ライセンス確認まで完了。既定 runtime は `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool` です。Agent2 は事前作成済み Foundry Agent を使い、per-user delegated token がある場合だけ `source_scope` に応じた read-only Microsoft 365 connector を overlay します。`graph_prefetch` は明示 rollback 用で、必要時だけ Microsoft Graph Copilot Chat API（`chatOverStream` 優先、既定 `WORK_IQ_TIMEOUT_SECONDS=120`）から短い brief を先読みします |
+| Work IQ | 完了 | SPA redirect URI、Foundry delegated auth (`https://ai.azure.com/user_impersonation`)、`graph_prefetch` rollback 用 Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。既定 runtime は `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool` です。Agent2 は事前作成済み Foundry Agent を使い、backend がユーザーの Foundry delegated token を Responses API へ渡して、添付済みの Work IQ MCP connection を per-user で実行します。`graph_prefetch` は明示 rollback 用で、必要時だけ Microsoft Graph Copilot Chat API（`chatOverStream` 優先、既定 `WORK_IQ_TIMEOUT_SECONDS=120`）から短い brief を先読みします |
 | Search / Foundry IQ | 完了 | Azure AI Search は **East US** に作成。`regulations-index`、`regulations-ks`、`regulations-kb` を投入済み |
-| 追加モデル | 完了 | メイン East US 2 Foundry account に `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4`、`gpt-image-1.5` を配備済み |
+| 追加モデル | 完了 | メイン East US 2 Foundry account に `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4` を配備済み。アプリ既定の画像経路は `gpt-image-2` で、deployment 名が既定と異なる場合は `GPT_IMAGE_2_DEPLOYMENT_NAME` で上書きできます。`gpt-image-1.5` も引き続き利用可能です |
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
 | Fabric | 完了 | Fabric capacity `fcdemojapaneast001` を resume し、workspace `ws-MG-pod2` に `Travel_Lakehouse` と `sales_results` / `customer_reviews` を再投入済み。`FABRIC_DATA_AGENT_URL` / `FABRIC_SQL_ENDPOINT` も Container App へ反映済み |
 | Logic Apps / Teams / SharePoint | 部分完了 | Teams connection `teams-1` は Connected。`logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live で、post-approval の Teams channel 通知は動作確認済みです。manager approval の signed trigger URL 同期も live で再確認済みで、Container App secret は現在の Logic App callback URL と一致しています。残件は SharePoint 保存経路（site permission grant または connector 再認証） |
@@ -63,7 +63,7 @@ uv run python scripts/setup_knowledge_base.py
 
 ### 4.2 画像生成モデル
 
-`gpt-image-1.5` は IaC で自動配備されます。加えて rebuilt `workiq-dev` tenant では **`gpt-4-1-mini` / `gpt-4.1` / `gpt-5.4`** もメイン East US 2 Foundry account に追加済みです。`gpt-image-2` を追加配備する場合は、deployment 名が既定 (`gpt-image-2`) と異なるときだけ `GPT_IMAGE_2_DEPLOYMENT_NAME` を設定してください。
+アプリ既定の画像経路は `gpt-image-2` です。rebuilt `workiq-dev` tenant では **`gpt-4-1-mini` / `gpt-4.1` / `gpt-5.4`** をメイン East US 2 Foundry account に追加済みで、`gpt-image-2` は既定 deployment 名 (`gpt-image-2`) で配備するか、異なる場合だけ `GPT_IMAGE_2_DEPLOYMENT_NAME` を設定してください。`gpt-image-1.5` は互換 fallback として残しています。
 
 MAI 系は East US 2 で使えないため、**別の East US AI Services account** にデプロイし:
 
