@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle, ExternalLink, MessageSquare, Search, Sparkles, TrendingDown, TrendingUp, XCircle } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { ArtifactSnapshot } from '../hooks/useSSE'
-import { getDelegatedApiHeaders } from '../lib/api-auth'
+import { getDelegatedApiAuth } from '../lib/api-auth'
 import {
     buildEvaluationFeedback,
     calculateEvaluationOverall,
@@ -60,6 +60,17 @@ const ASSET_GROUPS = [
     keys: ['cta_visibility', 'value_visibility', 'trust_signal_presence', 'disclosure_completeness', 'accessibility_readiness'],
   },
 ]
+
+function getDelegatedAuthErrorMessage(status: string): string {
+  switch (status) {
+    case 'auth_required':
+      return 'Work IQ の利用にはサインインが必要です'
+    case 'consent_required':
+      return 'Work IQ の利用には管理者の同意が必要です'
+    default:
+      return 'Work IQ の委任認証を確認できませんでした'
+  }
+}
 
 function ScoreBadge({ score, max = 5 }: { score: number; max?: number }) {
   if (score < 0) return <span className="text-xs text-[var(--text-muted)]">N/A</span>
@@ -395,7 +406,12 @@ export function EvaluationPanel({
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' }
       if (useDelegatedAuth) {
-        Object.assign(headers, await getDelegatedApiHeaders())
+        const delegatedAuth = await getDelegatedApiAuth({ workIqRuntime: 'foundry_tool' })
+        if (delegatedAuth.status !== 'ok') {
+          setError(getDelegatedAuthErrorMessage(delegatedAuth.status))
+          return
+        }
+        Object.assign(headers, delegatedAuth.headers)
       }
       const res = await fetch('/api/evaluate', {
         method: 'POST',

@@ -3,12 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { EvaluationPanel } from './EvaluationPanel'
 
 const originalFetch = globalThis.fetch
-const { getDelegatedApiHeaders } = vi.hoisted(() => ({
-  getDelegatedApiHeaders: vi.fn(async () => ({})),
+const { getDelegatedApiAuth } = vi.hoisted(() => ({
+  getDelegatedApiAuth: vi.fn(async () => ({ headers: {}, status: 'ok' })),
 }))
 
 vi.mock('../lib/api-auth', () => ({
-  getDelegatedApiHeaders,
+  getDelegatedApiAuth,
 }))
 
 const evaluationV1 = {
@@ -262,8 +262,8 @@ describe('EvaluationPanel', () => {
   beforeEach(() => {
     globalThis.fetch = mockFetch
     mockFetch.mockReset()
-    getDelegatedApiHeaders.mockReset()
-    getDelegatedApiHeaders.mockResolvedValue({})
+    getDelegatedApiAuth.mockReset()
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'ok' })
   })
 
   afterEach(() => {
@@ -389,7 +389,7 @@ describe('EvaluationPanel', () => {
   })
 
   it('adds delegated auth headers when requested', async () => {
-    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    getDelegatedApiAuth.mockResolvedValue({ headers: { Authorization: 'Bearer delegated-token' }, status: 'ok' })
     mockFetch.mockResolvedValueOnce(createJsonResponse({
       plan_quality: evaluationV2.result.plan_quality,
       asset_quality: evaluationV2.result.asset_quality,
@@ -423,6 +423,31 @@ describe('EvaluationPanel', () => {
       'Content-Type': 'application/json',
       Authorization: 'Bearer delegated-token',
     })
+  })
+
+  it('does not run evaluation when delegated auth is unavailable', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'unavailable' })
+
+    render(
+      <EvaluationPanel
+        query="q"
+        response="plan B"
+        html="<p>B</p>"
+        conversationId="conv-1"
+        artifactVersion={2}
+        evaluations={[]}
+        versions={[makeSnapshot([evaluationV1]), makeSnapshot([])]}
+        useDelegatedAuth
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Run Evaluation' }))
+
+    await waitFor(() => {
+      expect(screen.getByText('Work IQ の委任認証を確認できませんでした')).toBeInTheDocument()
+    })
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('derives grouped comparison from legacy evaluations and restores builtin metrics', () => {

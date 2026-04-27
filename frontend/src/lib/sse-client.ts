@@ -8,11 +8,22 @@ import {
   type ConversationSettings,
   type ModelSettings,
 } from '../components/SettingsPanel'
-import { getDelegatedApiAuth, getDelegatedApiHeaders } from './api-auth'
+import { getDelegatedApiAuth } from './api-auth'
 
 /** SSE タイムアウト（15 分 — 画像生成と動画待機を考慮） */
 const SSE_TIMEOUT_MS = 900_000
 const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function buildWorkIqAuthError(status: string): { message: string; code: string } {
+  switch (status) {
+    case 'auth_required':
+      return { message: 'Work IQ の利用にはサインインが必要です', code: 'WORKIQ_AUTH_REQUIRED' }
+    case 'consent_required':
+      return { message: 'Work IQ の利用には管理者の同意が必要です', code: 'WORKIQ_CONSENT_REQUIRED' }
+    default:
+      return { message: 'Work IQ の委任認証を確認できませんでした', code: 'WORKIQ_AUTH_UNAVAILABLE' }
+  }
+}
 
 export type SSEEventType =
   | 'agent_progress'
@@ -135,6 +146,7 @@ export async function connectSSE(
   options?: ChatRequestOptions,
 ): Promise<ConnectSSEStartResult> {
   const combinedSignal = buildSignal(signal)
+  const isWorkIqEnabled = conversationSettings?.workIqEnabled === true
 
   const body: Record<string, unknown> = { message, conversation_id: conversationId }
   if (options?.refineContext) {
@@ -166,12 +178,15 @@ export async function connectSSE(
         image_height: settings.imageHeight,
       },
     }
-    body.workflow_settings = {
+    const workflowSettings: Record<string, unknown> = {
       manager_approval_enabled: settings.managerApprovalEnabled,
       manager_email: trimmedManagerEmail,
       marketing_plan_runtime: marketingPlanRuntime,
-      work_iq_runtime: workIqRuntime,
     }
+    if (isWorkIqEnabled) {
+      workflowSettings.work_iq_runtime = workIqRuntime
+    }
+    body.workflow_settings = workflowSettings
   }
   if (conversationSettings && !conversationId) {
     body.conversation_settings = {
@@ -182,17 +197,17 @@ export async function connectSSE(
   }
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  if (conversationSettings?.workIqEnabled) {
+  if (isWorkIqEnabled) {
     const workIqRuntime = settings ? normalizeWorkIqRuntime(settings.workIqRuntime) : 'foundry_tool'
     const interactiveAuth = options?.authInteractionMode !== 'silent'
     const delegatedAuth = await getDelegatedApiAuth({
       interactive: interactiveAuth,
       workIqRuntime,
     })
-    Object.assign(headers, delegatedAuth.headers)
-    headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-    if (delegatedAuth.status !== 'ok' && delegatedAuth.status !== 'redirecting') {
-      headers['X-Work-IQ-Auth-Status'] = delegatedAuth.status
+    if (delegatedAuth.status === 'redirecting') {
+      return 'redirecting'
+    }
+    if (delegatedAuth.status !== 'ok') {
       handlers.tool_event?.({
         tool: workIqRuntime === 'foundry_tool' ? 'workiq_foundry_tool' : 'generate_workplace_context_brief',
         status: delegatedAuth.status,
@@ -201,10 +216,11 @@ export async function connectSSE(
         provider: workIqRuntime === 'foundry_tool' ? 'foundry' : 'workiq',
         source_scope: conversationSettings.workIqSourceScope,
       })
+      handlers.error?.(buildWorkIqAuthError(delegatedAuth.status))
+      return 'blocked'
     }
-    if (delegatedAuth.status === 'redirecting') {
-      return 'redirecting'
-    }
+    Object.assign(headers, delegatedAuth.headers)
+    headers['X-User-Timezone'] = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
   }
 
   let response: Response
@@ -245,7 +261,12 @@ export async function sendApproval(
   const combinedSignal = buildSignal(signal)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (useDelegatedAuth) {
-    Object.assign(headers, await getDelegatedApiHeaders())
+    const delegatedAuth = await getDelegatedApiAuth({ workIqRuntime: 'foundry_tool' })
+    if (delegatedAuth.status !== 'ok') {
+      handlers.error?.(buildWorkIqAuthError(delegatedAuth.status))
+      return
+    }
+    Object.assign(headers, delegatedAuth.headers)
   }
 
   let res: Response

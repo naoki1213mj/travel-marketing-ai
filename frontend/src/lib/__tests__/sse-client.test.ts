@@ -6,14 +6,12 @@ import { DEFAULT_CONVERSATION_SETTINGS } from '../../components/SettingsPanel'
 import { connectSSE, sendApproval, type SSEHandlers } from '../sse-client'
 
 const originalFetch = global.fetch
-const { getDelegatedApiAuth, getDelegatedApiHeaders } = vi.hoisted(() => ({
+const { getDelegatedApiAuth } = vi.hoisted(() => ({
   getDelegatedApiAuth: vi.fn(async () => ({ headers: {}, status: 'ok' })),
-  getDelegatedApiHeaders: vi.fn(async () => ({})),
 }))
 
 vi.mock('../api-auth', () => ({
   getDelegatedApiAuth,
-  getDelegatedApiHeaders,
 }))
 
 function createMockResponse(body: string, status = 200): Response {
@@ -38,8 +36,6 @@ describe('connectSSE', () => {
     mockFetch.mockReset()
     getDelegatedApiAuth.mockReset()
     getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'ok' })
-    getDelegatedApiHeaders.mockReset()
-    getDelegatedApiHeaders.mockResolvedValue({})
   })
 
   afterEach(() => {
@@ -60,6 +56,47 @@ describe('connectSSE', () => {
     expect(options.headers['Content-Type']).toBe('application/json')
     const body = JSON.parse(options.body)
     expect(body.message).toBe('hello')
+  })
+
+  it('does not request delegated auth or send Work IQ runtime when Work IQ is off', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-2',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+        workIqRuntime: 'foundry_tool',
+      },
+      {
+        workIqEnabled: false,
+        workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+      },
+    )
+
+    expect(getDelegatedApiAuth).not.toHaveBeenCalled()
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.workflow_settings.work_iq_runtime).toBeUndefined()
+    expect(body.conversation_settings).toEqual({
+      work_iq_enabled: false,
+      source_scope: DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope,
+      work_iq_source_scope: DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope,
+    })
   })
 
   it('includes marketing plan runtime in workflow settings', async () => {
@@ -94,7 +131,7 @@ describe('connectSSE', () => {
     })
   })
 
-  it('includes work iq runtime in workflow settings when present', async () => {
+  it('omits work iq runtime from workflow settings when Work IQ is disabled', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await connectSSE(
@@ -117,6 +154,46 @@ describe('connectSSE', () => {
         iqScoreThreshold: 0.3,
         marketingPlanRuntime: 'foundry_preprovisioned',
         workIqRuntime: 'foundry_tool',
+      },
+      {
+        workIqEnabled: false,
+        workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
+      },
+    )
+
+    const [, options] = mockFetch.mock.calls[0]
+    const body = JSON.parse(options.body)
+    expect(body.workflow_settings.work_iq_runtime).toBeUndefined()
+    expect(getDelegatedApiAuth).not.toHaveBeenCalled()
+  })
+
+  it('includes work iq runtime in workflow settings when Work IQ is enabled', async () => {
+    mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
+
+    await connectSSE(
+      'hello',
+      {},
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1.5',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+        workIqRuntime: 'foundry_tool',
+      },
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
       },
     )
 
@@ -328,6 +405,47 @@ describe('connectSSE', () => {
     expect(mockFetch).not.toHaveBeenCalled()
   })
 
+  it('fails closed when Work IQ auth is unavailable before chat starts', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'unavailable' })
+    const errorHandler = vi.fn()
+    const toolHandler = vi.fn()
+
+    const result = await connectSSE(
+      'hello',
+      { error: errorHandler, tool_event: toolHandler },
+      undefined,
+      undefined,
+      {
+        model: 'gpt-5.4-mini',
+        temperature: 0.7,
+        maxTokens: 2000,
+        topP: 1,
+        imageModel: 'gpt-image-1.5',
+        imageQuality: 'medium',
+        imageWidth: 1024,
+        imageHeight: 1024,
+        managerApprovalEnabled: false,
+        managerEmail: '',
+        iqSearchResults: 5,
+        iqScoreThreshold: 0.3,
+        marketingPlanRuntime: 'foundry_preprovisioned',
+        workIqRuntime: 'foundry_tool',
+      },
+      {
+        workIqEnabled: true,
+        workIqSourceScope: ['emails'],
+      },
+    )
+
+    expect(result).toBe('blocked')
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({ code: 'WORKIQ_AUTH_UNAVAILABLE' }))
+    expect(toolHandler).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'workiq',
+      status: 'unavailable',
+    }))
+  })
+
   it('omits conversation settings when continuing an existing conversation', async () => {
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
@@ -483,12 +601,22 @@ describe('connectSSE', () => {
   })
 
   it('adds delegated auth headers to approval requests when enabled', async () => {
-    getDelegatedApiHeaders.mockResolvedValue({ Authorization: 'Bearer delegated-token' })
+    getDelegatedApiAuth.mockResolvedValue({ headers: { Authorization: 'Bearer delegated-token' }, status: 'ok' })
     mockFetch.mockResolvedValue(createMockResponse('event: done\ndata: {"conversation_id":"c1","metrics":{}}\n\n'))
 
     await sendApproval('conv-1', '承認', {}, undefined, true)
 
     const [, options] = mockFetch.mock.calls[0]
     expect(options.headers.Authorization).toBe('Bearer delegated-token')
+  })
+
+  it('fails closed when delegated auth is unavailable for approval requests', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'auth_required' })
+    const errorHandler = vi.fn()
+
+    await sendApproval('conv-1', '承認', { error: errorHandler }, undefined, true)
+
+    expect(mockFetch).not.toHaveBeenCalled()
+    expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({ code: 'WORKIQ_AUTH_REQUIRED' }))
   })
 })

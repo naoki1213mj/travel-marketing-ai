@@ -585,8 +585,13 @@ def _extract_latest_evaluation_result(
         data = message.get("data")
         if not isinstance(data, dict):
             continue
-        if artifact_version is not None and int(data.get("version", 0) or 0) != artifact_version:
-            continue
+        if artifact_version is not None:
+            try:
+                event_version = int(data.get("version", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if event_version != artifact_version:
+                continue
         result = data.get("result")
         if isinstance(result, dict):
             latest = result
@@ -1095,11 +1100,17 @@ def _resolve_work_iq_runtime(workflow_settings: WorkflowSettings | None) -> Work
     return _sanitize_work_iq_runtime(get_settings()["work_iq_runtime"]) or "graph_prefetch"
 
 
-def _build_effective_workflow_settings(workflow_settings: WorkflowSettings | None) -> WorkflowSettings:
+def _build_effective_workflow_settings(
+    workflow_settings: WorkflowSettings | None,
+    *,
+    work_iq_enabled: bool = True,
+) -> WorkflowSettings:
     """実行時に使う完全な workflow settings を構築する。"""
     source = workflow_settings or {}
     marketing_plan_runtime = _resolve_marketing_plan_runtime(workflow_settings)
     work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
+    if not work_iq_enabled and work_iq_runtime == "foundry_tool":
+        work_iq_runtime = "graph_prefetch"
     if marketing_plan_runtime != "foundry_preprovisioned" and work_iq_runtime == "foundry_tool":
         raise ValueError(
             "work_iq_runtime=foundry_tool は marketing_plan_runtime=foundry_preprovisioned と組み合わせてください"
@@ -1250,7 +1261,7 @@ def _record_sse_event(collected_events: list[dict], event: str, start: float) ->
     try:
         lines = event.strip().split("\n")
         ev_type = lines[0].replace("event: ", "") if lines else ""
-        ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+        ev_data = json.loads(lines[1].replace("data: ", "", 1)) if len(lines) > 1 else {}
         collected_events.append({"time": round(time.monotonic() - start, 2), "event": ev_type, "data": ev_data})
     except Exception as exc:
         logger.warning("SSE イベント収集のパースに失敗: %s", exc)
@@ -1261,7 +1272,7 @@ def _sse_to_event_dict(event: str, *, background_update: bool = False) -> dict |
     try:
         lines = event.strip().split("\n")
         ev_type = lines[0].replace("event: ", "") if lines else ""
-        ev_data = json.loads(lines[1].replace("data: ", "")) if len(lines) > 1 else {}
+        ev_data = json.loads(lines[1].replace("data: ", "", 1)) if len(lines) > 1 else {}
     except Exception as exc:
         logger.warning("SSE イベントの変換に失敗: %s", exc)
         return None
@@ -3213,6 +3224,7 @@ async def _run_single_agent(
     conversation_id: str,
     model_settings: dict | None = None,
     workflow_settings: WorkflowSettings | None = None,
+    work_iq_access_token: str = "",
 ):
     """個別エージェントを実行して SSE イベントを生成する。"""
     outcome = await _execute_agent_with_runtime(
@@ -3222,6 +3234,7 @@ async def _run_single_agent(
         conversation_id=conversation_id,
         model_settings=model_settings,
         workflow_settings=workflow_settings,
+        work_iq_access_token=work_iq_access_token,
         include_done=True,
     )
     for event in outcome["events"]:
@@ -3464,7 +3477,8 @@ async def _refine_events(
             step,
             refine_text,
             conversation_id,
-            workflow_settings=_build_effective_workflow_settings(None),
+            workflow_settings=_build_effective_workflow_settings(None, work_iq_enabled=False),
+            work_iq_access_token=work_iq_access_token,
         ):
             yield event
     else:
@@ -4386,10 +4400,11 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
     explicit_conversation_settings = has_work_iq_overrides(body.conversation_settings, body.settings)
     try:
         normalized_model_settings = _normalize_model_settings(raw_user_settings)
-        normalized_workflow_settings = _build_effective_workflow_settings(
-            _normalize_workflow_settings(body.settings, body.workflow_settings)
-        )
         normalized_conversation_settings = normalize_conversation_settings(body.conversation_settings, body.settings)
+        normalized_workflow_settings = _build_effective_workflow_settings(
+            _normalize_workflow_settings(body.settings, body.workflow_settings),
+            work_iq_enabled=normalized_conversation_settings["work_iq_enabled"],
+        )
         _validate_manager_approval_configuration(normalized_workflow_settings)
     except ValueError as exc:
         return _error_stream(str(exc), "INVALID_SETTINGS")
@@ -4595,8 +4610,14 @@ async def approve(
             ):
                 yield event
         else:
+            work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
             async for event in _collect_and_yield(
-                _refine_events(body.response, thread_id, owner_id=caller_identity["user_id"])
+                _refine_events(
+                    body.response,
+                    thread_id,
+                    owner_id=caller_identity["user_id"],
+                    work_iq_access_token=work_iq_access_token,
+                )
             ):
                 yield event
 

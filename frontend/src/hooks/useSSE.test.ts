@@ -9,8 +9,8 @@ const { connectSSE, sendApproval } = vi.hoisted(() => ({
   connectSSE: vi.fn(async () => {}),
   sendApproval: vi.fn(async () => {}),
 }))
-const { getDelegatedApiHeaders } = vi.hoisted(() => ({
-  getDelegatedApiHeaders: vi.fn(async () => ({})),
+const { getDelegatedApiAuth } = vi.hoisted(() => ({
+  getDelegatedApiAuth: vi.fn(async () => ({ headers: {}, status: 'ok' })),
 }))
 
 vi.mock('../lib/sse-client', () => ({
@@ -19,7 +19,7 @@ vi.mock('../lib/sse-client', () => ({
 }))
 
 vi.mock('../lib/api-auth', () => ({
-  getDelegatedApiHeaders,
+  getDelegatedApiAuth,
 }))
 
 describe('buildRestoredPipelineState', () => {
@@ -27,7 +27,8 @@ describe('buildRestoredPipelineState', () => {
     globalThis.fetch = vi.fn()
     connectSSE.mockClear()
     sendApproval.mockClear()
-    getDelegatedApiHeaders.mockClear()
+    getDelegatedApiAuth.mockClear()
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'ok' })
     window.sessionStorage.clear()
   })
 
@@ -1228,6 +1229,40 @@ describe('buildRestoredPipelineState', () => {
       workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
     })
     expect(result.current.state.workIq.status).toBe('off')
+  })
+
+  it('fails closed instead of restoring an active Work IQ conversation without delegated auth', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'completed',
+      metadata: {
+        work_iq_session: {
+          enabled: true,
+          status: 'completed',
+          source_scope: ['emails'],
+        },
+      },
+      messages: [],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-workiq-auth')
+    })
+
+    expect(result.current.state.workIq.workIqEnabled).toBe(true)
+
+    getDelegatedApiAuth.mockResolvedValueOnce({ headers: {}, status: 'unavailable' })
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-workiq-auth')
+    })
+
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(result.current.state.status).toBe('error')
+    expect(result.current.state.error).toEqual(expect.objectContaining({
+      code: 'WORKIQ_AUTH_UNAVAILABLE',
+    }))
   })
 
   it('keeps refinement prompts after restore polling completes', async () => {

@@ -17,6 +17,11 @@ def _force_mock_pipeline(monkeypatch):
     monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+    limiter = app.state.limiter
+    was_limiter_enabled = limiter.enabled
+    limiter.enabled = False
+    yield
+    limiter.enabled = was_limiter_enabled
 
 
 def test_chat_returns_sse_stream():
@@ -583,6 +588,71 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
         "秋の京都シニア向けプランを企画して",
         "キャッチコピーをもう少し落ち着かせて",
     ]
+
+
+def test_approve_revision_forwards_work_iq_bearer_token(monkeypatch):
+    """承認待ち修正でも Work IQ delegated token を refine 経路へ渡す"""
+    captured: dict[str, object] = {}
+
+    async def fake_get_conversation(
+        conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        del owner_id, allow_cross_owner
+        assert conversation_id == "workiq-thread"
+        return {
+            "input": "春の沖縄ファミリー向けプランを企画して",
+            "messages": [],
+            "metadata": {
+                "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+                "work_iq_session": {
+                    "enabled": True,
+                    "status": "completed",
+                    "source_scope": ["emails"],
+                },
+            },
+        }
+
+    async def fake_refine_events(
+        _message: str,
+        _conversation_id: str,
+        refine_context=None,
+        owner_id: str | None = None,
+        model_settings_override: dict | None = None,
+        work_iq_session=None,
+        work_iq_access_token: str = "",
+    ):
+        del refine_context, owner_id, model_settings_override, work_iq_session
+        captured["work_iq_access_token"] = work_iq_access_token
+        yield 'event: done\ndata: {"conversation_id": "workiq-thread"}\n\n'
+
+    async def fake_save_conversation(**_kwargs):
+        return None
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr(
+        "src.api.chat.extract_request_identity",
+        lambda _request, expected_tenant_id="": {
+            "user_id": "user-test",
+            "auth_mode": "delegated",
+            "oid": "oid-1",
+            "tid": "tid-1",
+            "upn": "user@example.com",
+            "auth_error": None,
+        },
+    )
+    monkeypatch.setattr("src.api.chat._refine_events", fake_refine_events)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+
+    response = client.post(
+        "/api/chat/workiq-thread/approve",
+        headers={"Authorization": "Bearer delegated-token"},
+        json={"conversation_id": "workiq-thread", "response": "キャッチコピーを少し変更して"},
+    )
+
+    assert response.status_code == 200
+    assert captured["work_iq_access_token"] == "delegated-token"
 
 
 def test_load_pending_approval_context_restores_previous_versions(monkeypatch):

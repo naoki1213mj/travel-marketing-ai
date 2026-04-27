@@ -13,7 +13,7 @@ import {
   type WorkIqUiStatus,
 } from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
-import { getDelegatedApiHeaders } from '../lib/api-auth'
+import { getDelegatedApiAuth } from '../lib/api-auth'
 import { consumeMsalRedirectFailureSentinel } from '../lib/msal-redirect-sentinel'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
@@ -182,6 +182,17 @@ function buildBlockedAuthRedirectError(): ErrorData {
   return {
     message: 'Work IQ の認証リンクが許可された Microsoft ログイン URL ではないためブロックしました。',
     code: 'WORKIQ_AUTH_REDIRECT_BLOCKED',
+  }
+}
+
+function buildWorkIqDelegatedAuthError(status: string): ErrorData {
+  switch (status) {
+    case 'auth_required':
+      return { message: 'Work IQ の利用にはサインインが必要です', code: 'WORKIQ_AUTH_REQUIRED' }
+    case 'consent_required':
+      return { message: 'Work IQ の利用には管理者の同意が必要です', code: 'WORKIQ_CONSENT_REQUIRED' }
+    default:
+      return { message: 'Work IQ の委任認証を確認できませんでした', code: 'WORKIQ_AUTH_UNAVAILABLE' }
   }
 }
 
@@ -1497,7 +1508,18 @@ export function useSSE() {
         'Cache-Control': 'no-cache',
       }
       if (previousState.workIq.workIqEnabled) {
-        Object.assign(headers, await getDelegatedApiHeaders())
+        const delegatedAuth = await getDelegatedApiAuth({ workIqRuntime: 'foundry_tool' })
+        if (delegatedAuth.status !== 'ok') {
+          if (!passive) {
+            setState(prev => ({
+              ...prev,
+              status: 'error',
+              error: buildWorkIqDelegatedAuthError(delegatedAuth.status),
+            }))
+          }
+          return
+        }
+        Object.assign(headers, delegatedAuth.headers)
       }
       const knownEtag = isCurrentConversation ? conversationEtagsRef.current[conversationId] : undefined
       if (knownEtag) {

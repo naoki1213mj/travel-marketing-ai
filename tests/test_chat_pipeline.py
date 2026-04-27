@@ -60,6 +60,36 @@ class TestExtractTerminalToolEvents:
         assert payload["error_message"] == "OpenAI rejected request: Invalid data: field is required"
 
 
+class TestSSEEventPersistenceParsing:
+    """SSE イベント保存用 parser の後方互換テスト"""
+
+    def test_record_sse_event_preserves_data_prefix_inside_json_strings(self) -> None:
+        collected: list[dict] = []
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.TOOL_EVENT,
+            {
+                "tool": "foundry_prompt_agent",
+                "status": "failed",
+                "error_message": "OpenAI rejected request: Invalid data: field is required",
+            },
+        )
+
+        chat_module._record_sse_event(collected, event, 0.0)
+
+        assert collected[0]["data"]["error_message"] == "OpenAI rejected request: Invalid data: field is required"
+
+    def test_sse_to_event_dict_preserves_data_prefix_inside_json_strings(self) -> None:
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.ERROR,
+            {"message": "Invalid data: field is required", "code": "BAD_PAYLOAD"},
+        )
+
+        converted = chat_module._sse_to_event_dict(event)
+
+        assert converted is not None
+        assert converted["data"]["message"] == "Invalid data: field is required"
+
+
 class TestNormalizeModelSettings:
     """_normalize_model_settings のテスト"""
 
@@ -178,6 +208,28 @@ class TestExtractResultText:
         result.contents = [content]
 
         assert chat_module._extract_result_text(result) == "市場は拡大中。"
+
+
+class TestExtractLatestEvaluationResult:
+    """_extract_latest_evaluation_result のテスト"""
+
+    def test_ignores_malformed_version_during_evaluation_rerun(self) -> None:
+        conversation = {
+            "messages": [
+                {
+                    "event": "evaluation_result",
+                    "data": {"version": "draft", "result": {"builtin": {"relevance": {"score": 1}}}},
+                },
+                {
+                    "event": "evaluation_result",
+                    "data": {"version": 2, "result": {"builtin": {"relevance": {"score": 4}}}},
+                },
+            ]
+        }
+
+        result = chat_module._extract_latest_evaluation_result(conversation, artifact_version=2)
+
+        assert result == {"builtin": {"relevance": {"score": 4}}}
 
 
 # --- _extract_brochure_html テスト ---
@@ -320,6 +372,27 @@ class TestMarketingPlanRuntimeSettings:
                     "manager_email": "",
                 }
             )
+
+    def test_build_effective_workflow_settings_ignores_foundry_tool_when_work_iq_off(self, monkeypatch) -> None:
+        """Work IQ OFF では foundry_tool 既定値を legacy runtime の妨げにしない。"""
+        monkeypatch.setattr(
+            chat_module,
+            "get_settings",
+            lambda: {"marketing_plan_runtime": "legacy", "work_iq_runtime": "foundry_tool"},
+        )
+
+        assert chat_module._build_effective_workflow_settings(
+            {
+                "manager_approval_enabled": False,
+                "manager_email": "",
+            },
+            work_iq_enabled=False,
+        ) == {
+            "manager_approval_enabled": False,
+            "manager_email": "",
+            "marketing_plan_runtime": "legacy",
+            "work_iq_runtime": "graph_prefetch",
+        }
 
 
 @pytest.mark.asyncio
@@ -2058,6 +2131,60 @@ async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
     assert "現在の企画書" in str(captured["user_input"])
     assert captured["model_settings"] == {"top_p": 0.9}
     assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
+
+
+@pytest.mark.asyncio
+async def test_refine_events_completed_conversation_ignores_foundry_tool_when_work_iq_not_reused(monkeypatch) -> None:
+    """完了後の通常修正では Work IQ tool を再実行しない runtime に補正する。"""
+
+    captured: dict[str, object] = {}
+
+    async def fake_load_pending_approval_context(_conversation_id: str, owner_id: str | None = None):
+        del owner_id
+        return None
+
+    async def fake_run_single_agent(
+        agent_name: str,
+        step: int,
+        user_input: str,
+        conversation_id: str,
+        workflow_settings: dict | None = None,
+        work_iq_access_token: str = "",
+    ):
+        del agent_name, step, user_input, conversation_id
+        captured["workflow_settings"] = workflow_settings
+        captured["work_iq_access_token"] = work_iq_access_token
+        yield chat_module.format_sse(chat_module.SSEEventType.DONE, {"conversation_id": "conv-completed-refine"})
+
+    monkeypatch.setattr(chat_module, "_load_pending_approval_context", fake_load_pending_approval_context)
+    monkeypatch.setattr(chat_module, "_run_single_agent", fake_run_single_agent)
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test",
+            "marketing_plan_runtime": "legacy",
+            "work_iq_runtime": "foundry_tool",
+        },
+    )
+
+    events = [
+        event
+        async for event in chat_module._refine_events(
+            "キャッチコピーをもっと爽やかに",
+            "conv-completed-refine",
+            work_iq_access_token="delegated-token",
+        )
+    ]
+
+    assert events
+    assert captured["workflow_settings"] == {
+        "manager_approval_enabled": False,
+        "manager_email": "",
+        "marketing_plan_runtime": "legacy",
+        "work_iq_runtime": "graph_prefetch",
+    }
+    assert captured["work_iq_access_token"] == "delegated-token"
 
 
 @pytest.mark.asyncio
