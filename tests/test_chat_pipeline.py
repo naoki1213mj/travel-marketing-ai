@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from starlette.requests import Request
 
+from src import config as config_module
 from src.api import chat as chat_module
 
 
@@ -93,8 +94,12 @@ class TestSSEEventPersistenceParsing:
 class TestNormalizeModelSettings:
     """_normalize_model_settings のテスト"""
 
-    def test_preserves_gpt55_model_and_supported_image_settings(self) -> None:
-        """GPT-5.5 は deployment 名としてそのままバックエンド設定に残す。"""
+    def test_resolves_configured_gpt55_deployment_and_supported_image_settings(self, monkeypatch) -> None:
+        """GPT-5.5 は設定済み deployment 名へ解決して残す。"""
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+        monkeypatch.setenv("ENABLE_GPT_55", "true")
+        monkeypatch.setenv("GPT_55_DEPLOYMENT_NAME", "gpt-5-5-prod")
 
         normalized = chat_module._normalize_model_settings(
             {
@@ -116,7 +121,7 @@ class TestNormalizeModelSettings:
         )
 
         assert normalized == {
-            "model": "gpt-5.5",
+            "model": "gpt-5-5-prod",
             "temperature": 0.4,
             "max_tokens": 4096,
             "top_p": 0.9,
@@ -129,6 +134,30 @@ class TestNormalizeModelSettings:
                 "image_height": 1024,
             },
         }
+
+    def test_resolves_configured_model_router_deployment(self, monkeypatch) -> None:
+        """Model Router は明示有効化時だけ deployment として受け付ける。"""
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.setenv("AZURE_AI_PROJECT_ENDPOINT", "https://example.services.ai.azure.com/api/projects/demo")
+        monkeypatch.setenv("ENABLE_MODEL_ROUTER", "true")
+        monkeypatch.setenv("MODEL_ROUTER_DEPLOYMENT_NAME", "router-prod")
+
+        normalized = chat_module._normalize_model_settings({"model": "model-router"})
+
+        assert normalized == {"model": "router-prod"}
+
+    def test_rejects_unavailable_optional_model(self, monkeypatch) -> None:
+        """未設定の optional model は明示的な MODEL_DEPLOYMENT_UNAVAILABLE にする。"""
+        monkeypatch.setattr(config_module, "_get_azd_env_values", lambda: {})
+        monkeypatch.delenv("AZURE_AI_PROJECT_ENDPOINT", raising=False)
+        monkeypatch.delenv("FOUNDRY_PROJECT_ENDPOINT", raising=False)
+        monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+        monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+        monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+        monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+
+        with pytest.raises(chat_module.ModelDeploymentUnavailableError):
+            chat_module._normalize_model_settings({"model": "gpt-5.5"})
 
 
 # --- _extract_result_text テスト ---

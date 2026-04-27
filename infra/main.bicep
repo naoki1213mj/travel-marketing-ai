@@ -15,6 +15,17 @@ param location string
 @description('コンテナイメージ名（azd が自動設定する）')
 param imageName string = ''
 
+@description('Container Apps Environment を VNet 統合で作成する。既存の非 VNet 統合 CAE では replacement / blue-green 移行の承認後に true にする。')
+param enableContainerAppsVnetIntegration bool = false
+
+@description('既存 CAE の VNet 統合移行を明示承認する確認文字列。既存環境では ENABLE_CONTAINER_APPS_VNET_INTEGRATION=true と併せて CONFIRM_CAE_VNET_MIGRATION を設定する。')
+param containerAppsVnetIntegrationMigrationApproval string = ''
+
+@minValue(1)
+@maxValue(10)
+@description('Container App の最大 replica 数。Cosmos DB private endpoint 経路の疎通確認後に 2 以上へ引き上げる。')
+param containerAppMaxReplicas int = 1
+
 @description('Voice Live SPA アプリの Client ID（postprovision で設定）')
 param voiceSpaClientId string = ''
 
@@ -50,6 +61,7 @@ var defaultModelDeploymentName = 'gpt-5-4-mini'
 var defaultImageModelDeploymentName = 'gpt-image-1.5'
 var aiServicesApiBase = 'https://${abbrs.aiFoundry}${resourceToken}.services.ai.azure.com'
 var improvementMcpEndpoint = 'https://${apimName}.azure-api.net/improvement-mcp/runtime/webhooks/mcp'
+var containerAppsVnetIntegrationApproved = enableContainerAppsVnetIntegration && containerAppsVnetIntegrationMigrationApproval == 'CONFIRM_CAE_VNET_MIGRATION'
 
 // リソースグループ
 resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
@@ -145,7 +157,8 @@ module vnet 'modules/vnet.bicep' = {
 }
 
 // Container Apps Environment
-// VNet 統合は新規作成時のみ適用（既存 CAE への追加は不可）
+// VNet 統合は新規作成時のみ適用（既存 CAE への追加は不可）。
+// 既存の非 VNet 統合 CAE から移行する場合は、CAE/Container App の再作成または blue-green 移行の承認が必要。
 module containerAppsEnv 'modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
   scope: rg
@@ -154,7 +167,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
     location: location
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
-    // subnetId: vnet.outputs.containerAppsSubnetId  // VNet 統合は既存 CAE の再作成が必要。新規環境ではコメント解除
+    subnetId: containerAppsVnetIntegrationApproved ? vnet.outputs.containerAppsSubnetId : ''
   }
 }
 
@@ -184,6 +197,7 @@ module containerApp 'modules/container-app.bicep' = {
     voiceSpaClientId: voiceSpaClientId
     tenantId: tenant().tenantId
     improvementMcpEndpoint: improvementMcpEndpoint
+    maxReplicas: containerAppMaxReplicas
   }
 }
 

@@ -12,6 +12,9 @@ param modelName string = 'gpt-5-4-mini'
 param projectEndpoint string = ''
 param imageProjectEndpointMai string = ''
 param cosmosDbEndpoint string = ''
+@minValue(1)
+@maxValue(10)
+param maxReplicas int = 1
 
 param contentUnderstandingEndpoint string = ''
 param speechServiceEndpoint string = ''
@@ -175,8 +178,8 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: {
         minReplicas: 1
-        // Cosmos DB が private endpoint 前提で到達できるまで、会話状態の replica 分断を避ける。
-        maxReplicas: 1
+        // Cosmos DB private endpoint 経路の疎通確認後に main.bicep の containerAppMaxReplicas を 2 以上へ引き上げる。
+        maxReplicas: maxReplicas
         rules: [
           {
             name: 'http-rule'

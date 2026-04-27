@@ -42,6 +42,19 @@ class AppSettings(TypedDict):
     marketing_plan_prompt_agent_name: str
     work_iq_runtime: str
     enable_github_copilot_review_agent: str
+    enable_model_router: str
+    model_router_endpoint: str
+    model_router_deployment_name: str
+    model_deployment_allowlist: str
+    enable_gpt_55: str
+    gpt_55_deployment_name: str
+    enable_foundry_tracing: str
+    enable_continuous_monitoring: str
+    enable_cost_metrics: str
+    mcp_registry_endpoint: str
+    source_ingestion_endpoint: str
+    enable_voice_talk_to_start: str
+    mai_transcribe_1_deployment_name: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -73,6 +86,23 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "marketing_plan_prompt_agent_name": ("MARKETING_PLAN_PROMPT_AGENT_NAME",),
     "work_iq_runtime": ("WORKIQ_RUNTIME",),
     "enable_github_copilot_review_agent": ("ENABLE_GITHUB_COPILOT_REVIEW_AGENT",),
+    "enable_model_router": ("ENABLE_MODEL_ROUTER", "MODEL_ROUTER_ENABLED"),
+    "model_router_endpoint": ("MODEL_ROUTER_ENDPOINT", "AZURE_AI_MODEL_ROUTER_ENDPOINT"),
+    "model_router_deployment_name": ("MODEL_ROUTER_DEPLOYMENT_NAME", "MODEL_ROUTER_MODEL_NAME"),
+    "model_deployment_allowlist": ("MODEL_DEPLOYMENT_ALLOWLIST", "ALLOWED_MODEL_DEPLOYMENTS"),
+    "enable_gpt_55": ("ENABLE_GPT_55", "GPT_55_AVAILABLE"),
+    "gpt_55_deployment_name": ("GPT_55_DEPLOYMENT_NAME", "GPT_5_5_DEPLOYMENT_NAME"),
+    "enable_foundry_tracing": ("ENABLE_FOUNDRY_TRACING", "FOUNDRY_TRACING_ENABLED"),
+    "enable_continuous_monitoring": (
+        "ENABLE_CONTINUOUS_MONITORING",
+        "CONTINUOUS_MONITORING_ENABLED",
+        "ENABLE_CONTINUOUS_EVALUATIONS",
+    ),
+    "enable_cost_metrics": ("ENABLE_COST_METRICS", "COST_METRICS_ENABLED"),
+    "mcp_registry_endpoint": ("MCP_REGISTRY_ENDPOINT", "MCP_REGISTRY_URL"),
+    "source_ingestion_endpoint": ("SOURCE_INGESTION_ENDPOINT", "SOURCE_INGESTION_URL"),
+    "enable_voice_talk_to_start": ("ENABLE_VOICE_TALK_TO_START", "VOICE_TALK_TO_START_ENABLED"),
+    "mai_transcribe_1_deployment_name": ("MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",),
 }
 
 # デフォルト値（オプショナルな設定のみ）
@@ -88,6 +118,12 @@ _DEFAULTS: dict[str, str] = {
     "marketing_plan_prompt_agent_name": "travel-marketing-plan",
     "work_iq_runtime": "foundry_tool",
     "enable_github_copilot_review_agent": "false",
+    "enable_model_router": "false",
+    "enable_gpt_55": "false",
+    "enable_foundry_tracing": "false",
+    "enable_continuous_monitoring": "false",
+    "enable_cost_metrics": "false",
+    "enable_voice_talk_to_start": "false",
 }
 
 _PRODUCTION_ENVIRONMENTS = {"production", "prod", "staging"}

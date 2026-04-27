@@ -84,6 +84,7 @@ describe('SettingsPanel', () => {
         settings={DEFAULT_SETTINGS}
         conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
         workIqStatus="off"
+        gpt55Available
         onChange={onChange}
         onConversationSettingsChange={() => {}}
         t={t}
@@ -93,13 +94,57 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /モデル設定/ }))
 
     const modelSelect = screen.getByLabelText('モデル')
-    expect(screen.getByRole('option', { name: 'GPT-5.5 (requires deployment)' })).toHaveValue('gpt-5.5')
+    expect(screen.getByRole('option', { name: 'GPT-5.5 (configured deployment)' })).toHaveValue('gpt-5.5')
 
     fireEvent.change(modelSelect, { target: { value: 'gpt-5.5' } })
 
     expect(onChange).toHaveBeenCalledWith({
       ...DEFAULT_SETTINGS,
       model: 'gpt-5.5',
+    })
+  })
+
+  it('hides GPT-5.5 when backend capabilities report it unavailable', () => {
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="off"
+        gpt55Available={false}
+        onChange={() => {}}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /モデル設定/ }))
+
+    expect(screen.queryByRole('option', { name: 'GPT-5.5 (configured deployment)' })).toBeNull()
+  })
+
+  it('shows Model Router only when backend capabilities report it available', () => {
+    const onChange = vi.fn()
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="off"
+        modelRouterAvailable
+        onChange={onChange}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /モデル設定/ }))
+    const modelSelect = screen.getByLabelText('モデル')
+
+    expect(screen.getByRole('option', { name: 'Model Router (configured deployment)' })).toHaveValue('model-router')
+    fireEvent.change(modelSelect, { target: { value: 'model-router' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_SETTINGS,
+      model: 'model-router',
     })
   })
 
@@ -219,5 +264,24 @@ describe('SettingsPanel', () => {
     expect(screen.getByRole('checkbox')).toBeDisabled()
     expect(screen.getByText('新しい会話を開始してください')).toBeInTheDocument()
     expect(screen.getByText('サインインが必要')).toBeInTheDocument()
+  })
+
+  it('disables the Work IQ toggle when backend capabilities report it unavailable', () => {
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={DEFAULT_CONVERSATION_SETTINGS}
+        workIqStatus="ready"
+        workIqAvailable={false}
+        onChange={() => {}}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
+
+    expect(screen.getByRole('checkbox')).toBeDisabled()
+    expect(screen.getByText('現在利用できません')).toBeInTheDocument()
   })
 })

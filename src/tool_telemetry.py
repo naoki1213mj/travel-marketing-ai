@@ -2,13 +2,30 @@
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from contextvars import ContextVar, Token
 from datetime import datetime, timezone
 from typing import TypedDict
+
+from src.foundry_tracing import end_foundry_span, set_foundry_span_attributes, start_foundry_tool_span
+from src.pipeline_schemas import (
+    ChartSpecPayload,
+    DebugEventPayload,
+    EvidenceItemPayload,
+    SourceIngestionStatePayload,
+    TraceEventPayload,
+    WorkIQSourceMetadataPayload,
+    normalize_chart_specs,
+    normalize_debug_events,
+    normalize_evidence_items,
+    normalize_source_ingestion_state,
+    normalize_trace_events,
+    normalize_work_iq_source_metadata,
+)
 
 
 class ToolEventPayload(TypedDict, total=False):
@@ -35,6 +52,17 @@ class ToolEventPayload(TypedDict, total=False):
     error_code: str
     error_message: str
     source_scope: list[str]
+    mcp_server_id: str
+    auth_mode: str
+    access_mode: str
+    approval_policy: str
+    approval_required: bool
+    evidence: list[EvidenceItemPayload]
+    charts: list[ChartSpecPayload]
+    trace_events: list[TraceEventPayload]
+    debug_events: list[DebugEventPayload]
+    source_metadata: list[WorkIQSourceMetadataPayload]
+    source_ingestion: list[SourceIngestionStatePayload]
 
 
 ToolEventCollector = Callable[[ToolEventPayload], None]
@@ -65,6 +93,32 @@ _TOOL_PROVIDERS: dict[str, tuple[str, str]] = {
     "foundry_iq_search": ("foundry", "foundry"),
 }
 
+_REDACTED = "[REDACTED]"
+_SENSITIVE_KEY_MARKERS = (
+    "api_key",
+    "api-key",
+    "authorization",
+    "bearer",
+    "client_secret",
+    "code",
+    "cookie",
+    "key",
+    "ocp-apim-subscription-key",
+    "password",
+    "secret",
+    "sig",
+    "subscription-key",
+    "token",
+    "x-functions-key",
+)
+_BEARER_PATTERN = re.compile(r"(?i)\bBearer\s+[-._~+/A-Za-z0-9=]+")
+_ASSIGNMENT_PATTERN = re.compile(
+    r"(?i)(\b(?:api[_-]?key|client_secret|code|ocp-apim-subscription-key|password|secret|sig|token|x-functions-key)\b\s*[:=]\s*)(\"[^\"]+\"|'[^']+'|[^,\s&}]+)"
+)
+_QUERY_SECRET_PATTERN = re.compile(
+    r"(?i)([?&](?:api[_-]?key|code|ocp-apim-subscription-key|secret|sig|subscription-key|token|x-functions-key)=)([^&#\s]+)"
+)
+
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -74,6 +128,35 @@ def normalize_tool_name(tool_name: str) -> str:
     """UI と backend で共通の canonical tool 名に揃える。"""
     normalized = tool_name.strip()
     return _TOOL_NAME_ALIASES.get(normalized, normalized)
+
+
+def redact_sensitive_text(value: str) -> str:
+    """テレメトリ文字列からトークン・キー・署名を除去する。"""
+    redacted = _BEARER_PATTERN.sub(f"Bearer {_REDACTED}", value)
+    redacted = _QUERY_SECRET_PATTERN.sub(rf"\1{_REDACTED}", redacted)
+    return _ASSIGNMENT_PATTERN.sub(rf"\1{_REDACTED}", redacted)
+
+
+def redact_sensitive_mapping(payload: Mapping[str, object]) -> dict[str, object]:
+    """テレメトリ payload の機密キーと文字列値を再帰的にマスクする。"""
+    redacted: dict[str, object] = {}
+    for key, value in payload.items():
+        normalized_key = key.strip().lower()
+        if any(marker in normalized_key for marker in _SENSITIVE_KEY_MARKERS):
+            redacted[key] = _REDACTED
+            continue
+        if isinstance(value, str):
+            redacted[key] = redact_sensitive_text(value)
+        elif isinstance(value, Mapping):
+            redacted[key] = redact_sensitive_mapping(value)
+        elif isinstance(value, list):
+            redacted[key] = [
+                redact_sensitive_mapping(item) if isinstance(item, Mapping) else redact_sensitive_text(item) if isinstance(item, str) else item
+                for item in value
+            ]
+        else:
+            redacted[key] = value
+    return redacted
 
 
 def resolve_step_key(agent_name: str) -> str:
@@ -126,6 +209,12 @@ def build_tool_event_data(
     error_code: str | None = None,
     error_message: str | None = None,
     source_scope: Sequence[str] | None = None,
+    evidence: Sequence[Mapping[str, object]] | None = None,
+    charts: Sequence[Mapping[str, object]] | None = None,
+    trace_events: Sequence[Mapping[str, object]] | None = None,
+    debug_events: Sequence[Mapping[str, object]] | None = None,
+    source_metadata: Sequence[Mapping[str, object]] | None = None,
+    source_ingestion: Sequence[Mapping[str, object]] | None = None,
 ) -> ToolEventPayload:
     """tool_event payload を canonical schema に整形する。"""
     context = _context_var.get() or {}
@@ -174,9 +263,33 @@ def build_tool_event_data(
     if error_code:
         payload["error_code"] = error_code
     if error_message:
-        payload["error_message"] = error_message
+        payload["error_message"] = redact_sensitive_text(error_message)
     if source_scope:
         payload["source_scope"] = [item for item in source_scope if item]
+    if evidence:
+        normalized_evidence = normalize_evidence_items(list(evidence))
+        if normalized_evidence:
+            payload["evidence"] = normalized_evidence
+    if charts:
+        normalized_charts = normalize_chart_specs(list(charts))
+        if normalized_charts:
+            payload["charts"] = normalized_charts
+    if trace_events:
+        normalized_trace_events = normalize_trace_events(list(trace_events))
+        if normalized_trace_events:
+            payload["trace_events"] = normalized_trace_events
+    if debug_events:
+        normalized_debug_events = normalize_debug_events(list(debug_events))
+        if normalized_debug_events:
+            payload["debug_events"] = normalized_debug_events
+    if source_metadata:
+        normalized_source_metadata = normalize_work_iq_source_metadata(list(source_metadata))
+        if normalized_source_metadata:
+            payload["source_metadata"] = normalized_source_metadata
+    if source_ingestion:
+        normalized_source_ingestion = normalize_source_ingestion_state(list(source_ingestion))
+        if normalized_source_ingestion:
+            payload["source_ingestion"] = normalized_source_ingestion
     return payload
 
 
@@ -235,6 +348,23 @@ async def trace_tool_invocation(
     """local tool 実行の開始・完了・失敗を自動記録する。"""
     started_at = _utc_now_iso()
     started_perf = time.perf_counter()
+    context = _context_var.get() or {}
+    resolved_agent_name = (agent_name or str(context.get("agent_name") or "")).strip()
+    resolved_step = step if step is not None else int(context.get("step") or 0)
+    normalized_tool_name = normalize_tool_name(tool_name)
+    resolved_source, resolved_provider = _resolve_provider(
+        normalized_tool_name,
+        source,
+        provider or str(context.get("provider") or ""),
+    )
+    span = start_foundry_tool_span(
+        tool_name=normalized_tool_name,
+        agent_name=resolved_agent_name,
+        step=resolved_step,
+        source=resolved_source,
+        provider=resolved_provider,
+        source_scope=source_scope,
+    )
     emit_tool_event(
         build_tool_event_data(
             tool_name,
@@ -253,6 +383,15 @@ async def trace_tool_invocation(
         yield
     except Exception as exc:
         duration_ms = max(int((time.perf_counter() - started_perf) * 1000), 0)
+        set_foundry_span_attributes(
+            span,
+            {
+                "app.tool.duration_ms": duration_ms,
+                "app.tool.success": False,
+                "app.tool.error_code": exc.__class__.__name__,
+            },
+        )
+        end_foundry_span(span, success=False, error_code=exc.__class__.__name__)
         emit_tool_event(
             build_tool_event_data(
                 tool_name,
@@ -274,6 +413,8 @@ async def trace_tool_invocation(
         raise
 
     duration_ms = max(int((time.perf_counter() - started_perf) * 1000), 0)
+    set_foundry_span_attributes(span, {"app.tool.duration_ms": duration_ms, "app.tool.success": True})
+    end_foundry_span(span, success=True)
     emit_tool_event(
         build_tool_event_data(
             tool_name,

@@ -12,6 +12,7 @@ from azure.identity import DefaultAzureCredential
 
 from src.agents.marketing_plan import INSTRUCTIONS as MARKETING_PLAN_INSTRUCTIONS
 from src.config import get_settings
+from src.model_deployments import resolve_model_deployment
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,10 @@ def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
     """marketing-plan 用 Prompt Agent を create_version で同期する。"""
     project_client: AIProjectClient | None = None
     try:
+        settings = dict(get_settings())
+        if not settings.get("project_endpoint", "").strip():
+            settings["project_endpoint"] = project_endpoint
+        model_name = resolve_model_deployment(model_name, settings=settings)  # type: ignore[arg-type]
         project_client = AIProjectClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
         agent_name = _resolve_marketing_plan_agent_name(model_name)
         work_iq_tool = _build_work_iq_mcp_tool(project_client)
@@ -238,9 +243,9 @@ def run_marketing_plan_prompt_agent(
     if not project_endpoint:
         raise ValueError("AZURE_AI_PROJECT_ENDPOINT が未設定です")
 
-    model_name = settings["model_name"]
+    model_name = resolve_model_deployment(settings["model_name"], settings=settings)
     if model_settings and isinstance(model_settings.get("model"), str) and model_settings["model"].strip():
-        model_name = model_settings["model"].strip()
+        model_name = resolve_model_deployment(model_settings["model"].strip(), settings=settings)
 
     credential = DefaultAzureCredential()
     project_client = AIProjectClient(endpoint=project_endpoint, credential=credential)

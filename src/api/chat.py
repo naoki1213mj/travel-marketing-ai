@@ -32,8 +32,17 @@ from src.conversations import (
     replace_conversation_metadata,
     save_conversation,
 )
+from src.foundry_tracing import (
+    end_foundry_span,
+    set_foundry_span_attributes,
+    start_foundry_agent_span,
+)
+from src.foundry_tracing import (
+    resolve_model_deployment as resolve_tracing_model_deployment,
+)
 from src.improvement_mcp import ImprovementBriefResult, generate_improvement_brief, is_improvement_mcp_configured
 from src.middleware import check_prompt_shield, check_tool_response
+from src.model_deployments import ModelDeploymentUnavailableError, resolve_model_deployment
 from src.request_identity import extract_request_identity, request_has_bearer_token
 from src.tool_telemetry import (
     ToolEventPayload,
@@ -1150,6 +1159,9 @@ def _normalize_model_settings(raw_settings: dict | None) -> dict | None:
         if key in raw_settings:
             normalized[key] = raw_settings[key]
 
+    if "model" in normalized:
+        normalized["model"] = resolve_model_deployment(str(normalized["model"]))
+
     image_settings = raw_settings.get("image_settings")
     if isinstance(image_settings, dict):
         normalized["image_settings"] = {
@@ -2090,6 +2102,17 @@ def _is_foundry_prompt_agent_unavailable(exc: Exception) -> bool:
     return "AZURE_AI_PROJECT_ENDPOINT" in message or "Foundry Agent が未作成" in message
 
 
+def _is_model_deployment_unavailable_error(exc: Exception) -> bool:
+    """Foundry/OpenAI の deployment 未配置エラーを判定する。"""
+    if isinstance(exc, ModelDeploymentUnavailableError):
+        return True
+    message = str(exc).lower()
+    return (
+        "deployment" in message
+        and any(keyword in message for keyword in ["not found", "notfound", "does not exist", "unavailable"])
+    ) or "model_deployment_unavailable" in message
+
+
 def _is_foundry_work_iq_auth_error(exc: Exception) -> bool:
     """Foundry Work IQ delegated auth の OBO 失敗かを判定する。"""
     message = str(exc).lower()
@@ -2135,22 +2158,50 @@ async def _execute_agent(
         create_video_gen_agent,
     )
 
-    # OpenTelemetry スパン（計測用）
-    span = None
-    try:
-        from opentelemetry import trace
+    work_iq_enabled_for_span = bool(isinstance(work_iq_session, dict) and work_iq_session.get("enabled"))
+    work_iq_status_for_span = (
+        _sanitize_optional_text(work_iq_session.get("status") or work_iq_session.get("warning_code"))
+        if isinstance(work_iq_session, dict)
+        else "disabled"
+    )
+    model_deployment = resolve_tracing_model_deployment(model_settings)
+    span = start_foundry_agent_span(
+        agent_name=agent_name,
+        conversation_id=conversation_id,
+        step=agent_step,
+        model_deployment=model_deployment,
+        work_iq_enabled=work_iq_enabled_for_span,
+        work_iq_status=work_iq_status_for_span or "disabled",
+    )
 
-        tracer = trace.get_tracer("travel-marketing-agents")
-        span = tracer.start_span(
-            f"agent.{agent_name}",
-            attributes={
-                "agent.name": agent_name,
-                "agent.step": agent_step,
-                "conversation.id": conversation_id,
+    def _finish_agent_span(
+        *,
+        success: bool,
+        latency_seconds: float,
+        tool_calls: int = 0,
+        total_tokens: int = 0,
+        tool_events: list[ToolEventPayload] | None = None,
+        error_code: str | None = None,
+    ) -> None:
+        current_work_iq_status = (
+            _sanitize_optional_text(work_iq_session.get("status") or work_iq_session.get("warning_code"))
+            if isinstance(work_iq_session, dict)
+            else "disabled"
+        )
+        set_foundry_span_attributes(
+            span,
+            {
+                "app.agent.latency_ms": int(latency_seconds * 1000),
+                "app.agent.success": success,
+                "app.tool.count": tool_calls,
+                "app.tool.names": sorted(
+                    {str(payload.get("tool", "")) for payload in tool_events or [] if payload.get("tool")}
+                ),
+                "app.work_iq.status": current_work_iq_status or "disabled",
+                "gen_ai.usage.total_tokens": total_tokens,
             },
         )
-    except ImportError, RuntimeError:
-        pass
+        end_foundry_span(span, success=success, error_code=error_code)
 
     # brochure-gen-agent の場合、side-channel の conversation_id と画像設定を設定
     if agent_name == "brochure-gen-agent":
@@ -2246,6 +2297,34 @@ async def _execute_agent(
             collected_tool_events = attempt_tool_events
             break
         except Exception as exc:
+            if _is_model_deployment_unavailable_error(exc):
+                logger.warning("モデル deployment が利用できません: %s", exc)
+                events.append(
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {
+                            "message": "選択されたモデル deployment はこの環境で利用できません。設定を確認してください。",
+                            "code": "MODEL_DEPLOYMENT_UNAVAILABLE",
+                        },
+                    )
+                )
+                for payload in _dedupe_tool_event_payloads(attempt_tool_events):
+                    events.append(_format_tool_event_sse(payload))
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    tool_events=attempt_tool_events,
+                    error_code="MODEL_DEPLOYMENT_UNAVAILABLE",
+                )
+                return {
+                    "events": events,
+                    "text": "",
+                    "success": False,
+                    "latency_seconds": round(time.monotonic() - start_time, 1),
+                    "tool_calls": 0,
+                    "total_tokens": 0,
+                }
+
             if agent_name == "marketing-plan-agent" and marketing_plan_runtime == "foundry_preprovisioned":
                 attempt_tool_events.append(
                     _build_agent_tool_event(
@@ -2286,6 +2365,11 @@ async def _execute_agent(
                         )
                     )
                     events.append(format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error("auth_required")))
+                    _finish_agent_span(
+                        success=False,
+                        latency_seconds=round(time.monotonic() - start_time, 1),
+                        error_code="WORKIQ_OBO_TOKEN_FAILED",
+                    )
                     return {
                         "events": events,
                         "text": "",
@@ -2321,6 +2405,11 @@ async def _execute_agent(
                         )
                     )
                     events.append(format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error("timeout")))
+                    _finish_agent_span(
+                        success=False,
+                        latency_seconds=round(time.monotonic() - start_time, 1),
+                        error_code="WORKIQ_TIMEOUT",
+                    )
                     return {
                         "events": events,
                         "text": "",
@@ -2349,7 +2438,7 @@ async def _execute_agent(
 
             if agent_name == "brochure-gen-agent" and attempt == max_attempts:
                 logger.warning("brochure-gen-agent の通常生成に失敗したためフォールバックを返します: %s", exc)
-                return await _build_brochure_fallback_outcome(
+                fallback_outcome = await _build_brochure_fallback_outcome(
                     events=events,
                     source_text=user_input,
                     conversation_id=conversation_id,
@@ -2359,6 +2448,14 @@ async def _execute_agent(
                     start_time=start_time,
                     model_settings=model_settings,
                 )
+                _finish_agent_span(
+                    success=fallback_outcome["success"],
+                    latency_seconds=fallback_outcome["latency_seconds"],
+                    tool_calls=fallback_outcome["tool_calls"],
+                    total_tokens=fallback_outcome["total_tokens"],
+                    error_code=exc.__class__.__name__,
+                )
+                return fallback_outcome
 
             if attempt == max_attempts or not _is_retryable_agent_error(exc):
                 logger.exception("エージェント(%s)の実行に失敗", agent_name)
@@ -2374,12 +2471,19 @@ async def _execute_agent(
                 )
                 for payload in _dedupe_tool_event_payloads(attempt_tool_events):
                     events.append(_format_tool_event_sse(payload))
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    tool_events=attempt_tool_events,
+                    error_code=exc.__class__.__name__,
+                )
                 return {
                     "events": events,
                     "text": "",
                     "success": False,
                     "latency_seconds": round(time.monotonic() - start_time, 1),
                     "tool_calls": 0,
+                    "total_tokens": 0,
                 }
 
             logger.warning(
@@ -2430,12 +2534,19 @@ async def _execute_agent(
                         },
                     )
                 )
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    tool_events=[consent_payload],
+                    error_code="WORKIQ_CONSENT_REQUIRED",
+                )
                 return {
                     "events": events,
                     "text": "",
                     "success": False,
                     "latency_seconds": round(time.monotonic() - start_time, 1),
                     "tool_calls": 0,
+                    "total_tokens": 0,
                 }
             mcp_approval_request = _find_output_item_by_type(result, "mcp_approval_request")
             if mcp_approval_request is not None:
@@ -2462,12 +2573,19 @@ async def _execute_agent(
                         },
                     )
                 )
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    tool_events=[approval_payload],
+                    error_code="WORKIQ_APPROVAL_REQUIRED",
+                )
                 return {
                     "events": events,
                     "text": "",
                     "success": False,
                     "latency_seconds": round(time.monotonic() - start_time, 1),
                     "tool_calls": 0,
+                    "total_tokens": 0,
                 }
             work_iq_mcp_calls = _extract_mcp_calls(result, server_label=_WORK_IQ_MCP_SERVER_LABEL)
             if not work_iq_mcp_calls:
@@ -2496,12 +2614,18 @@ async def _execute_agent(
                         },
                     )
                 )
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    error_code="WORKIQ_NOT_USED",
+                )
                 return {
                     "events": events,
                     "text": "",
                     "success": False,
                     "latency_seconds": round(time.monotonic() - start_time, 1),
                     "tool_calls": 0,
+                    "total_tokens": 0,
                 }
             collected_tool_events.append(
                 _build_agent_tool_event(
@@ -2539,12 +2663,19 @@ async def _execute_agent(
                 {"message": "ツール応答が安全性チェックに失敗しました", "code": "TOOL_RESPONSE_BLOCKED"},
             )
         )
+        _finish_agent_span(
+            success=False,
+            latency_seconds=round(time.monotonic() - start_time, 1),
+            tool_events=collected_tool_events,
+            error_code="TOOL_RESPONSE_BLOCKED",
+        )
         return {
             "events": events,
             "text": "",
             "success": False,
             "latency_seconds": round(time.monotonic() - start_time, 1),
             "tool_calls": 0,
+            "total_tokens": 0,
         }
 
     events.extend(_build_content_events(agent_name, result_text))
@@ -2636,16 +2767,13 @@ async def _execute_agent(
     elapsed = round(time.monotonic() - start_time, 1)
     tool_calls = sum(1 for payload in all_tool_events if payload.get("status") == "completed")
 
-    # OpenTelemetry スパンに結果を記録
-    if span:
-        try:
-            span.set_attribute("agent.latency_seconds", elapsed)
-            span.set_attribute("agent.total_tokens", total_tokens)
-            span.set_attribute("agent.tool_calls", tool_calls)
-            span.set_attribute("agent.success", True)
-            span.end()
-        except RuntimeError, ValueError:
-            pass
+    _finish_agent_span(
+        success=True,
+        latency_seconds=elapsed,
+        tool_calls=tool_calls,
+        total_tokens=total_tokens,
+        tool_events=all_tool_events,
+    )
 
     if include_done:
         events.append(
@@ -4406,6 +4534,8 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
             work_iq_enabled=normalized_conversation_settings["work_iq_enabled"],
         )
         _validate_manager_approval_configuration(normalized_workflow_settings)
+    except ModelDeploymentUnavailableError as exc:
+        return _error_stream(str(exc), exc.code)
     except ValueError as exc:
         return _error_stream(str(exc), "INVALID_SETTINGS")
     if not work_iq_graph_access_token and _resolve_work_iq_runtime(normalized_workflow_settings) == "graph_prefetch":

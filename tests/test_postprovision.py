@@ -707,6 +707,15 @@ def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+    monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENABLED", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_MODEL_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENDPOINT", raising=False)
     monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
 
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
@@ -717,7 +726,6 @@ def test_sync_marketing_plan_agent_uses_foundry_helper(monkeypatch) -> None:
         ("https://example.test", "gpt-5.4"),
         ("https://example.test", "gpt-4-1-mini"),
         ("https://example.test", "gpt-4.1"),
-        ("https://example.test", "gpt-5.5"),
     ]
 
 
@@ -732,6 +740,15 @@ def test_sync_marketing_plan_agent_includes_requested_model_once(monkeypatch) ->
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5.4-turbo")
+    monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+    monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENABLED", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_MODEL_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENDPOINT", raising=False)
     monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
 
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
@@ -743,7 +760,6 @@ def test_sync_marketing_plan_agent_includes_requested_model_once(monkeypatch) ->
         "gpt-5.4",
         "gpt-4-1-mini",
         "gpt-4.1",
-        "gpt-5.5",
     ]
 
 
@@ -760,6 +776,12 @@ def test_sync_marketing_plan_agent_skips_optional_gpt55_when_not_deployed(monkey
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setenv("ENABLE_GPT_55", "true")
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENABLED", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_MODEL_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENDPOINT", raising=False)
     monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
 
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
@@ -787,6 +809,12 @@ def test_sync_marketing_plan_agent_skips_optional_gpt55_azure_http_error(monkeyp
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setenv("ENABLE_GPT_55", "true")
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENABLED", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_MODEL_NAME", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_ENDPOINT", raising=False)
     monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
 
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
@@ -814,12 +842,45 @@ def test_sync_marketing_plan_agent_fails_when_requested_gpt55_is_not_deployed(mo
         return True
 
     monkeypatch.setenv("MODEL_NAME", "gpt-5.5")
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
     monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
 
     result = postprovision_module.sync_marketing_plan_agent("https://example.test")
 
     assert result is False
     assert captured == ["gpt-5.5"]
+
+
+def test_sync_marketing_plan_agent_includes_model_router_only_when_enabled(monkeypatch) -> None:
+    """Model Router agent は明示設定時だけ optional 同期対象にする。"""
+
+    captured: list[str] = []
+
+    def fake_sync(project_endpoint: str, model_name: str) -> bool:
+        assert project_endpoint == "https://example.test"
+        captured.append(model_name)
+        return True
+
+    monkeypatch.setenv("MODEL_NAME", "gpt-5-4-mini")
+    monkeypatch.setenv("ENABLE_MODEL_ROUTER", "true")
+    monkeypatch.setenv("MODEL_ROUTER_DEPLOYMENT_NAME", "router-prod")
+    monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+    monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.setattr("src.foundry_prompt_agents.sync_marketing_plan_agent", fake_sync)
+
+    result = postprovision_module.sync_marketing_plan_agent("https://example.test")
+
+    assert result is True
+    assert captured == [
+        "gpt-5-4-mini",
+        "gpt-5.4",
+        "gpt-4-1-mini",
+        "gpt-4.1",
+        "router-prod",
+    ]
 
 
 def test_create_voice_agent_returns_true_when_agent_already_exists(monkeypatch) -> None:

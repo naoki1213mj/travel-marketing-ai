@@ -78,6 +78,25 @@ def test_chat_rejects_invalid_manager_email_settings():
     assert "INVALID_SETTINGS" in response.text
 
 
+def test_chat_rejects_unavailable_optional_model(monkeypatch):
+    """未設定の optional model 選択は明確なエラーコードで拒否する。"""
+    monkeypatch.delenv("ENABLE_GPT_55", raising=False)
+    monkeypatch.delenv("GPT_55_AVAILABLE", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_5_5_DEPLOYMENT_NAME", raising=False)
+
+    response = client.post(
+        "/api/chat",
+        json={
+            "message": "春の沖縄ファミリー向けプランを企画して",
+            "settings": {"model": "gpt-5.5"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert "MODEL_DEPLOYMENT_UNAVAILABLE" in response.text
+
+
 def test_chat_rejects_manager_approval_without_trigger_url(monkeypatch):
     """上司承認 workflow URL 未設定でも手動共有リンク前提で受け付ける"""
     monkeypatch.delenv("MANAGER_APPROVAL_TRIGGER_URL", raising=False)

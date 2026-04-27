@@ -8,7 +8,7 @@
 | --- | --- |
 | AI Services | `kind=AIServices`, `allowProjectManagement=true`, `gpt-5-4-mini` 自動配備 |
 | Foundry Project | `accounts/projects@2025-06-01` |
-| Container Apps | System MI, health/readiness probe, 0–3 replicas |
+| Container Apps | System MI, health/readiness probe, optional VNet-integrated CAE (`snet-container-apps`) for approved private-network migration, approval-controlled scale-out |
 | APIM | BasicV2, Managed Identity, AI Gateway policy |
 | Logic Apps | Consumption, HTTP trigger (post-approval actions) |
 | Cosmos DB | Serverless, Private Endpoint, RBAC |
@@ -36,6 +36,13 @@
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
 | Fabric | 完了 | Fabric capacity `fcdemojapaneast001` を resume し、workspace `ws-MG-pod2` に `Travel_Lakehouse` と `sales_results` / `customer_reviews` を再投入済み。`FABRIC_DATA_AGENT_URL` / `FABRIC_SQL_ENDPOINT` も Container App へ反映済み |
 | Logic Apps / Teams / SharePoint | 部分完了 | Teams connection `teams-1` は Connected。`logic-manager-approval-wmbvhdhcsuyb2` と `logic-wmbvhdhcsuyb2` は live で、post-approval の Teams channel 通知は動作確認済みです。manager approval の signed trigger URL 同期も live で再確認済みで、Container App secret は現在の Logic App callback URL と一致しています。残件は SharePoint 保存経路（site permission grant または connector 再認証） |
+
+
+### 4.0 Container Apps / Cosmos DB private endpoint migration note
+
+IaC can place the Container Apps Environment in the dedicated `snet-container-apps` subnet by setting both `ENABLE_CONTAINER_APPS_VNET_INTEGRATION=true` and `CONTAINER_APPS_VNET_INTEGRATION_MIGRATION_APPROVAL=CONFIRM_CAE_VNET_MIGRATION`, and attaches the Cosmos DB private endpoint to `privatelink.documents.azure.com`, with that private DNS zone linked to the same VNet. Cosmos DB remains `publicNetworkAccess: Disabled`.
+
+Azure Container Apps Environment VNet integration is effectively a create-time setting. If an existing environment was created without `properties.vnetConfiguration`, do **not** set the two migration flags in production without approval: plan a CAE/Container App replacement or blue-green migration, validate that the app resolves the Cosmos account through the private DNS zone from the VNet-integrated environment, and only then raise `CONTAINER_APP_MAX_REPLICAS` above the default `1`.
 
 ## 4. 手動設定が必要な項目（新しい tenant を一から立てる場合）
 

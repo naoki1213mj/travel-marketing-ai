@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _MARKETING_PLAN_BASE_MODELS = ("gpt-5-4-mini", "gpt-5.4", "gpt-4-1-mini", "gpt-4.1")
-_MARKETING_PLAN_OPTIONAL_MODELS = ("gpt-5.5",)
+_TRUE_VALUES = {"1", "true", "yes", "y", "on", "enabled"}
 _MCP_SERVER_DIR = _REPO_ROOT / "mcp_server"
 _FUNCTION_RUNTIME = "python"
 _FUNCTION_RUNTIME_VERSION = "3.13"
@@ -40,6 +40,43 @@ _IMPROVEMENT_MCP_PACKAGE_NAME = "improvement-mcp.zip"
 _IMPROVEMENT_MCP_VENDOR_PLATFORM = "x86_64-manylinux2014"
 _MCP_PACKAGE_EXCLUDE_DIRS = {".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".python_packages"}
 _MCP_PACKAGE_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
+
+
+def _is_truthy_env(*names: str) -> bool:
+    """複数 env alias のいずれかが true 系なら True を返す。"""
+    return any(os.environ.get(name, "").strip().lower() in _TRUE_VALUES for name in names)
+
+
+def _first_env_value(*names: str) -> str:
+    """複数 env alias から最初の非空値を返す。"""
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _iter_optional_marketing_plan_models(requested_model: str) -> list[str]:
+    """明示設定された optional model だけを postprovision 同期対象にする。"""
+    optional_models: list[str] = []
+    gpt_55_deployment = _first_env_value("GPT_55_DEPLOYMENT_NAME", "GPT_5_5_DEPLOYMENT_NAME")
+    if (
+        _is_truthy_env("ENABLE_GPT_55", "GPT_55_AVAILABLE")
+        or gpt_55_deployment
+        or requested_model.lower() in {"gpt-5.5", "gpt-5-5", "gpt-55"}
+    ):
+        optional_models.append(gpt_55_deployment or "gpt-5.5")
+
+    model_router_deployment = _first_env_value("MODEL_ROUTER_DEPLOYMENT_NAME", "MODEL_ROUTER_MODEL_NAME")
+    if (
+        _is_truthy_env("ENABLE_MODEL_ROUTER", "MODEL_ROUTER_ENABLED")
+        or _first_env_value("MODEL_ROUTER_ENDPOINT", "AZURE_AI_MODEL_ROUTER_ENDPOINT")
+        or model_router_deployment
+        or requested_model.lower() in {"model-router", "model_router", "router"}
+    ):
+        optional_models.append(model_router_deployment or "model-router")
+
+    return optional_models
 
 
 def _resolve_cli(name: str) -> str:
@@ -1637,7 +1674,7 @@ def sync_marketing_plan_agent(project_endpoint: str) -> bool:
             model_names.append(normalized)
     try:
         results = [sync_agent(project_endpoint, model_name) for model_name in model_names]
-        for model_name in _MARKETING_PLAN_OPTIONAL_MODELS:
+        for model_name in _iter_optional_marketing_plan_models(requested_model):
             normalized = model_name.strip()
             if not normalized or normalized in model_names:
                 continue

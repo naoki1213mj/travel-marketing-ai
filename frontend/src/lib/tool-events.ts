@@ -1,4 +1,18 @@
 import type { WorkIqSourceScope } from '../components/SettingsPanel'
+import {
+  normalizeChartSpecs,
+  normalizeDebugEvents,
+  normalizeEvidenceItems,
+  normalizeSourceIngestionStates,
+  normalizeTraceEvents,
+  normalizeWorkIqSourceMetadata,
+  type ChartSpec,
+  type DebugEvent,
+  type EvidenceItem,
+  type SourceIngestionState,
+  type TraceEvent,
+  type WorkIqSourceMetadata,
+} from './event-schemas'
 
 export interface ToolEvent {
   event_id?: string
@@ -22,6 +36,12 @@ export interface ToolEvent {
   error_code?: string
   error_message?: string
   source_scope?: WorkIqSourceScope[]
+  evidence?: EvidenceItem[]
+  charts?: ChartSpec[]
+  trace_events?: TraceEvent[]
+  debug_events?: DebugEvent[]
+  source_metadata?: WorkIqSourceMetadata[]
+  source_ingestion?: SourceIngestionState[]
 }
 
 const TOOL_ALIASES: Record<string, string> = {
@@ -173,6 +193,12 @@ export function collapseToolEvents(events: ToolEvent[]): ToolEvent[] {
           duration_ms: acc.duration_ms ?? event.duration_ms,
           error_code: acc.error_code ?? event.error_code,
           error_message: acc.error_message ?? event.error_message,
+          evidence: acc.evidence ?? event.evidence,
+          charts: acc.charts ?? event.charts,
+          trace_events: acc.trace_events ?? event.trace_events,
+          debug_events: acc.debug_events ?? event.debug_events,
+          source_metadata: acc.source_metadata ?? event.source_metadata,
+          source_ingestion: acc.source_ingestion ?? event.source_ingestion,
         }),
         { ...winner },
       ),
@@ -215,5 +241,11 @@ export function normalizeToolEventData(
     error_code: String(data.error_code || '').trim() || undefined,
     error_message: String(data.error_message || '').trim() || undefined,
     source_scope: options.parseSourceScope(data.source_scope),
+    evidence: normalizeEvidenceItems(data.evidence),
+    charts: normalizeChartSpecs(data.charts),
+    trace_events: normalizeTraceEvents(data.trace_events),
+    debug_events: normalizeDebugEvents(data.debug_events),
+    source_metadata: normalizeWorkIqSourceMetadata(data.source_metadata),
+    source_ingestion: normalizeSourceIngestionStates(data.source_ingestion),
   }
 }

@@ -1,9 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import type { ReactNode } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 const mockUseSSE = vi.fn()
+const mockVoiceInputProps = vi.fn()
 
 vi.mock('./hooks/useSSE', () => ({
   useSSE: () => mockUseSSE(),
@@ -65,6 +66,15 @@ vi.mock('./hooks/useI18n', () => ({
 
 vi.mock('./hooks/useElapsedTime', () => ({
   useElapsedTime: () => 0,
+}))
+
+vi.mock('./lib/capabilities', () => ({
+  fetchCapabilities: () => new Promise<null>(() => {}),
+  isCapabilityAvailable: (_snapshot: unknown, key: string) => {
+    if (key === 'voice_live') return false
+    if (key === 'voice_talk_to_start') return true
+    return null
+  },
 }))
 
 vi.mock('./components/ArtifactTabs', () => ({
@@ -148,7 +158,15 @@ vi.mock('./components/RefineChat', () => ({ RefineChat: () => null }))
 vi.mock('./components/SettingsPanel', () => ({ SettingsPanel: () => null }))
 vi.mock('./components/ThemeToggle', () => ({ ThemeToggle: () => null }))
 vi.mock('./components/VideoPreview', () => ({ VideoPreview: () => null }))
-vi.mock('./components/VoiceInput', () => ({ VoiceInput: () => null }))
+vi.mock('./components/VoiceInput', () => ({
+  VoiceInput: (props: {
+    voiceLiveAvailable?: boolean
+    voiceTalkToStartAvailable?: boolean
+  }) => {
+    mockVoiceInputProps(props)
+    return null
+  },
+}))
 vi.mock('./components/WorkflowAccordion', () => ({ WorkflowAccordion: () => null }))
 
 function buildState(overrides: Record<string, unknown>) {
@@ -193,6 +211,10 @@ function buildState(overrides: Record<string, unknown>) {
 }
 
 describe('App', () => {
+  beforeEach(() => {
+    mockVoiceInputProps.mockClear()
+  })
+
   it('keeps the live pending version selected while a newer version is generating', () => {
     mockUseSSE.mockReturnValue({
       state: buildState({
@@ -508,6 +530,36 @@ describe('App', () => {
     expect(screen.getByText('Version hint')).toBeInTheDocument()
     expect(screen.getByText('Plan hint')).toBeInTheDocument()
     expect(screen.getByText('Assets hint')).toBeInTheDocument()
+  })
+
+  it('passes voice capability gates to the Talk to start control', () => {
+    mockUseSSE.mockReturnValue({
+      state: buildState({
+        status: 'idle',
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+      }),
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      startNewConversation: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      updateConversationSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(mockVoiceInputProps).toHaveBeenCalledWith(expect.objectContaining({
+      voiceLiveAvailable: false,
+      voiceTalkToStartAvailable: true,
+    }))
   })
 
   it('passes version-scoped user intent to the evaluation panel', () => {

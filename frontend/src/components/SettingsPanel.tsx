@@ -68,7 +68,8 @@ const MANAGER_EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 const AVAILABLE_MODELS = [
   { value: 'gpt-5-4-mini', label: 'GPT-5.4 mini (default)' },
-  { value: 'gpt-5.5', label: 'GPT-5.5 (requires deployment)' },
+  { value: 'model-router', label: 'Model Router (configured deployment)' },
+  { value: 'gpt-5.5', label: 'GPT-5.5 (configured deployment)' },
   { value: 'gpt-5.4', label: 'GPT-5.4' },
   { value: 'gpt-4-1-mini', label: 'GPT-4.1 mini' },
   { value: 'gpt-4.1', label: 'GPT-4.1' },
@@ -120,6 +121,9 @@ interface SettingsPanelProps {
   settings: ModelSettings
   conversationSettings: ConversationSettings
   workIqStatus: WorkIqUiStatus
+  modelRouterAvailable?: boolean
+  gpt55Available?: boolean
+  workIqAvailable?: boolean
   onChange: (settings: ModelSettings) => void
   onConversationSettingsChange: (settings: ConversationSettings) => void
   workIqLocked?: boolean
@@ -191,6 +195,9 @@ export function SettingsPanel({
   settings,
   conversationSettings,
   workIqStatus,
+  modelRouterAvailable,
+  gpt55Available,
+  workIqAvailable,
   onChange,
   onConversationSettingsChange,
   workIqLocked = false,
@@ -202,9 +209,21 @@ export function SettingsPanel({
     && trimmedManagerEmail.length > 0
     && !MANAGER_EMAIL_PATTERN.test(trimmedManagerEmail)
   const isWorkIqEnabled = conversationSettings.workIqEnabled
-  const isResetDisabled = activeSection === 'workiq' && workIqLocked
-  const workIqStatusLabel = t(`settings.workiq.status.${workIqStatus}`)
-  const workIqMessage = t(WORKIQ_STATUS_MESSAGE_KEYS[workIqStatus])
+  const isWorkIqUnavailable = workIqAvailable === false
+  const isWorkIqControlDisabled = workIqLocked || isWorkIqUnavailable
+  const effectiveWorkIqStatus = isWorkIqUnavailable ? 'unavailable' : workIqStatus
+  const isResetDisabled = activeSection === 'workiq' && isWorkIqControlDisabled
+  const workIqStatusLabel = t(`settings.workiq.status.${effectiveWorkIqStatus}`)
+  const workIqMessage = t(WORKIQ_STATUS_MESSAGE_KEYS[effectiveWorkIqStatus])
+  const visibleModels = AVAILABLE_MODELS.filter((model) => {
+    if (model.value === 'model-router') {
+      return modelRouterAvailable === true || settings.model === model.value
+    }
+    if (model.value === 'gpt-5.5') {
+      return gpt55Available === true || settings.model === model.value
+    }
+    return true
+  })
 
   const sectionOptions: Array<{ key: SettingsSection; label: string; Icon: typeof SlidersHorizontal }> = [
     { key: 'model', label: t('settings.title'), Icon: SlidersHorizontal },
@@ -320,8 +339,17 @@ export function SettingsPanel({
                   aria-label={t('settings.model')}
                   className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)]"
                 >
-                  {AVAILABLE_MODELS.map((m) => (
-                    <option key={m.value} value={m.value}>{m.label}</option>
+                  {visibleModels.map((m) => (
+                    <option
+                      key={m.value}
+                      value={m.value}
+                      disabled={
+                        (m.value === 'gpt-5.5' && gpt55Available !== true)
+                        || (m.value === 'model-router' && modelRouterAvailable !== true)
+                      }
+                    >
+                      {m.label}
+                    </option>
                   ))}
                 </select>
               </div>
@@ -528,7 +556,7 @@ export function SettingsPanel({
             <div className="space-y-4">
               <label
                 htmlFor="settings-workiq-enabled"
-                className={`flex items-center justify-between rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2.5 ${workIqLocked ? 'opacity-70' : ''}`}
+                  className={`flex items-center justify-between rounded-xl border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2.5 ${isWorkIqControlDisabled ? 'opacity-70' : ''}`}
               >
                 <div className="pr-4">
                   <p className="text-xs font-medium text-[var(--text-primary)]">{t('settings.workiq.enabled')}</p>
@@ -538,7 +566,7 @@ export function SettingsPanel({
                   id="settings-workiq-enabled"
                   type="checkbox"
                   checked={isWorkIqEnabled}
-                  disabled={workIqLocked}
+                  disabled={isWorkIqControlDisabled}
                   onChange={(e) => onConversationSettingsChange({
                     ...conversationSettings,
                     workIqEnabled: e.target.checked,
@@ -550,16 +578,16 @@ export function SettingsPanel({
               <div className="rounded-xl border border-[var(--panel-border)] bg-[var(--surface)] px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-[11px] font-medium text-[var(--text-muted)]">{t('settings.workiq.status')}</span>
-                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${WORKIQ_STATUS_STYLES[workIqStatus]}`}>
+                   <span className={`rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${WORKIQ_STATUS_STYLES[effectiveWorkIqStatus]}`}>
                     {workIqStatusLabel}
                   </span>
                 </div>
                 <p className="mt-2 text-xs leading-5 text-[var(--text-secondary)]">
                   {workIqMessage}
                 </p>
-                {workIqLocked && (
+                {isWorkIqControlDisabled && (
                   <p className="mt-2 text-[11px] text-[var(--text-muted)]">
-                    {t('settings.workiq.locked')}
+                    {isWorkIqUnavailable ? t('settings.workiq.message.unavailable') : t('settings.workiq.locked')}
                   </p>
                 )}
               </div>

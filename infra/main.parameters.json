@@ -11,6 +11,15 @@
     "imageName": {
       "value": "${SERVICE_WEB_IMAGE_NAME=}"
     },
+    "enableContainerAppsVnetIntegration": {
+      "value": "${ENABLE_CONTAINER_APPS_VNET_INTEGRATION=false}"
+    },
+    "containerAppsVnetIntegrationMigrationApproval": {
+      "value": "${CONTAINER_APPS_VNET_INTEGRATION_MIGRATION_APPROVAL=}"
+    },
+    "containerAppMaxReplicas": {
+      "value": "${CONTAINER_APP_MAX_REPLICAS=1}"
+    },
     "managerApprovalTriggerUrl": {
       "value": "${MANAGER_APPROVAL_TRIGGER_URL=}"
     },

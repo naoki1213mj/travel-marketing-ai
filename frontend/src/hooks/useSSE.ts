@@ -14,12 +14,29 @@ import {
 } from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
 import { getDelegatedApiAuth } from '../lib/api-auth'
+import {
+  normalizeChartSpecs,
+  normalizeDebugEvents,
+  normalizeEvidenceItems,
+  normalizePipelineMetrics,
+  normalizeSourceIngestionStates,
+  normalizeTraceEvents,
+  normalizeWorkIqSourceMetadata,
+  type ChartSpec,
+  type DebugEvent,
+  type EvidenceItem,
+  type PipelineMetrics,
+  type SourceIngestionState,
+  type TraceEvent,
+  type WorkIqSourceMetadata,
+} from '../lib/event-schemas'
 import { consumeMsalRedirectFailureSentinel } from '../lib/msal-redirect-sentinel'
 import { cloneEvaluationRecord, type EvaluationRecord } from '../lib/evaluation'
 import { connectSSE, sendApproval, type ChatRequestOptions, type SSEHandlers } from '../lib/sse-client'
 import { normalizeToolEventData, type ToolEvent } from '../lib/tool-events'
 
 export type { ToolEvent } from '../lib/tool-events'
+export type { PipelineMetrics } from '../lib/event-schemas'
 
 /** toolEvents の最大保持数 */
 const MAX_TOOL_EVENTS = 50
@@ -38,6 +55,12 @@ export interface TextContent {
   content: string
   agent: string
   content_type?: string
+  evidence?: EvidenceItem[]
+  charts?: ChartSpec[]
+  trace_events?: TraceEvent[]
+  debug_events?: DebugEvent[]
+  source_metadata?: WorkIqSourceMetadata[]
+  source_ingestion?: SourceIngestionState[]
 }
 
 export interface ImageContent {
@@ -55,12 +78,6 @@ export interface ApprovalRequest {
   manager_comment?: string
   manager_approval_url?: string
   manager_delivery_mode?: 'manual' | 'workflow'
-}
-
-export interface PipelineMetrics {
-  latency_seconds: number
-  tool_calls: number
-  total_tokens: number
 }
 
 export interface ErrorData {
@@ -224,7 +241,15 @@ const initialState: PipelineState = {
 }
 
 function cloneTextContents(textContents: TextContent[]): TextContent[] {
-  return textContents.map(item => ({ ...item }))
+  return textContents.map(item => ({
+    ...item,
+    evidence: item.evidence ? normalizeEvidenceItems(item.evidence) : undefined,
+    charts: item.charts ? normalizeChartSpecs(item.charts) : undefined,
+    trace_events: item.trace_events ? normalizeTraceEvents(item.trace_events) : undefined,
+    debug_events: item.debug_events ? normalizeDebugEvents(item.debug_events) : undefined,
+    source_metadata: item.source_metadata ? normalizeWorkIqSourceMetadata(item.source_metadata) : undefined,
+    source_ingestion: item.source_ingestion ? normalizeSourceIngestionStates(item.source_ingestion) : undefined,
+  }))
 }
 
 function cloneImages(images: ImageContent[]): ImageContent[] {
@@ -235,7 +260,29 @@ function cloneToolEvents(toolEvents: ToolEvent[]): ToolEvent[] {
   return toolEvents.map(item => ({
     ...item,
     source_scope: item.source_scope ? [...item.source_scope] : undefined,
+    evidence: item.evidence ? normalizeEvidenceItems(item.evidence) : undefined,
+    charts: item.charts ? normalizeChartSpecs(item.charts) : undefined,
+    trace_events: item.trace_events ? normalizeTraceEvents(item.trace_events) : undefined,
+    debug_events: item.debug_events ? normalizeDebugEvents(item.debug_events) : undefined,
   }))
+}
+
+function clonePipelineMetrics(metrics: PipelineMetrics | null): PipelineMetrics | null {
+  return normalizePipelineMetrics(metrics)
+}
+
+function normalizeTextContentData(data: Record<string, unknown>): TextContent {
+  return {
+    content: String(data.content || ''),
+    agent: String(data.agent || ''),
+    content_type: data.content_type ? String(data.content_type) : undefined,
+    evidence: normalizeEvidenceItems(data.evidence),
+    charts: normalizeChartSpecs(data.charts),
+    trace_events: normalizeTraceEvents(data.trace_events),
+    debug_events: normalizeDebugEvents(data.debug_events),
+    source_metadata: normalizeWorkIqSourceMetadata(data.source_metadata),
+    source_ingestion: normalizeSourceIngestionStates(data.source_ingestion),
+  }
 }
 
 function cloneConversationSettings(settings: ConversationSettings): ConversationSettings {
@@ -557,7 +604,7 @@ function preserveViewedCommittedVersion(
     textContents: cloneTextContents(snapshot.textContents),
     images: cloneImages(snapshot.images),
     toolEvents: cloneToolEvents(snapshot.toolEvents),
-    metrics: snapshot.metrics ? { ...snapshot.metrics } : null,
+    metrics: clonePipelineMetrics(snapshot.metrics),
     currentVersion: preservedVersion,
   }
 }
@@ -585,7 +632,7 @@ export function createArtifactSnapshot(source: SnapshotSource): ArtifactSnapshot
     textContents: cloneTextContents(source.textContents),
     images: cloneImages(source.images),
     toolEvents: cloneToolEvents(source.toolEvents),
-    metrics: source.metrics ? { ...source.metrics } : null,
+    metrics: clonePipelineMetrics(source.metrics),
     evaluations: cloneEvaluations(source.evaluations ?? []),
     isDraft: source.isDraft === true,
   }
@@ -677,11 +724,7 @@ export function buildRestoredPipelineState(
         }
         break
       case 'text':
-        textContents.push({
-          content: String(data.content || ''),
-          agent: String(data.agent || ''),
-          content_type: data.content_type ? String(data.content_type) : undefined,
-        })
+        textContents.push(normalizeTextContentData(data))
         if (isBackgroundUpdate(data) && versions.length > 0) {
           versions[versions.length - 1] = createArtifactSnapshot({
             textContents,
@@ -760,7 +803,7 @@ export function buildRestoredPipelineState(
         }
         break
       case 'done':
-        metrics = (data.metrics as PipelineMetrics | undefined) ?? null
+        metrics = normalizePipelineMetrics(data.metrics)
         {
           const versionNumber = versions.length + 1
           versions.push(createArtifactSnapshot({
@@ -1101,7 +1144,7 @@ export function useSSE() {
     text: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       setState(prev => {
-        const textContents = [...prev.textContents, data as TextContent]
+        const textContents = [...prev.textContents, normalizeTextContentData(data as Record<string, unknown>)]
         return {
           ...prev,
           textContents,
@@ -1188,7 +1231,8 @@ export function useSSE() {
     },
     done: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      const doneData = data as { conversation_id: string; metrics: PipelineMetrics; background_updates_pending?: boolean }
+      const doneData = data as { conversation_id: string; metrics?: unknown; background_updates_pending?: boolean }
+      const metrics = normalizePipelineMetrics(doneData.metrics)
       migrateCachedEvaluations(stateRef.current.conversationId, doneData.conversation_id)
       conversationIdRef.current = doneData.conversation_id
       setState(prev => {
@@ -1199,7 +1243,7 @@ export function useSSE() {
           textContents: prev.textContents,
           images: prev.images,
           toolEvents: prev.toolEvents,
-          metrics: doneData.metrics,
+          metrics,
           evaluations: shouldReplaceDraft ? latestSnapshot?.evaluations ?? [] : [],
         })
         const newVersions = shouldReplaceDraft
@@ -1207,7 +1251,7 @@ export function useSSE() {
           : [...prev.versions, snapshot]
         return {
           ...prev,
-          metrics: doneData.metrics,
+          metrics,
           status: 'completed',
           managerApprovalPolling: false,
           backgroundUpdatesPending: doneData.background_updates_pending === true,

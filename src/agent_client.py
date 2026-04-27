@@ -14,6 +14,7 @@ from agent_framework.foundry import FoundryChatClient
 from azure.identity import DefaultAzureCredential
 
 from src.config import get_settings
+from src.model_deployments import resolve_model_deployment
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +43,7 @@ def get_responses_client(deployment_name: str | None = None):
     Prompt Shields や tool-response 介入などの追加 guardrail はこの関数では設定しない。
     """
     settings = get_settings()
-    deployment = deployment_name or settings["model_name"]
+    deployment = resolve_model_deployment(deployment_name or settings["model_name"], settings=settings)
 
     if deployment in _clients:
         return _clients[deployment]

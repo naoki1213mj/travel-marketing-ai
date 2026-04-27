@@ -135,11 +135,11 @@ flowchart TD
 | --- | --- |
 | AI Services | `kind=AIServices`, `allowProjectManagement=true`, `disableLocalAuth=true`, `gpt-5-4-mini` 自動配備 |
 | Foundry Project | `accounts/projects@2025-06-01` |
-| Container Apps | System MI, health/readiness probe, 0–3 replicas |
+| Container Apps | System MI, health/readiness probe, optional VNet-integrated CAE (`snet-container-apps`) for approved private-network migration with explicit confirmation flag, approval-controlled scale-out |
 | APIM | BasicV2, Managed Identity, AI Gateway policy |
 | Azure Functions MCP | Flex Consumption, `mcp_server/` zip 配備 (postprovision) |
 | Logic Apps | Consumption, HTTP trigger (post-approval actions) |
-| Cosmos DB | Serverless, `disableLocalAuth=true`, Private Endpoint, RBAC |
+| Cosmos DB | Serverless, `disableLocalAuth=true`, `publicNetworkAccess=Disabled`, Private Endpoint + `privatelink.documents.azure.com`, RBAC |
 | Key Vault | Private Endpoint, RBAC |
 | Observability | Log Analytics + Application Insights |
 

@@ -36,6 +36,19 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "MANAGER_APPROVAL_TRIGGER_URL",
         "GPT_IMAGE_15_DEPLOYMENT_NAME",
         "GPT_IMAGE_2_DEPLOYMENT_NAME",
+        "ENABLE_MODEL_ROUTER",
+        "MODEL_ROUTER_ENDPOINT",
+        "MODEL_ROUTER_DEPLOYMENT_NAME",
+        "MODEL_DEPLOYMENT_ALLOWLIST",
+        "ENABLE_GPT_55",
+        "GPT_55_DEPLOYMENT_NAME",
+        "ENABLE_FOUNDRY_TRACING",
+        "ENABLE_CONTINUOUS_MONITORING",
+        "ENABLE_COST_METRICS",
+        "MCP_REGISTRY_ENDPOINT",
+        "SOURCE_INGESTION_ENDPOINT",
+        "ENABLE_VOICE_TALK_TO_START",
+        "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
     ]:
         monkeypatch.delenv(key, raising=False)
 
@@ -168,6 +181,66 @@ def test_process_env_overrides_azd_env(monkeypatch):
     settings = config_module.get_settings()
 
     assert settings["improvement_mcp_endpoint"] == "https://process.example/mcp"
+
+
+def test_roadmap_capability_defaults(monkeypatch):
+    """ロードマップ機能は明示設定がない限り既定で無効。"""
+    _disable_azd_env(monkeypatch)
+    for key in [
+        "ENABLE_MODEL_ROUTER",
+        "ENABLE_GPT_55",
+        "ENABLE_FOUNDRY_TRACING",
+        "ENABLE_CONTINUOUS_MONITORING",
+        "ENABLE_COST_METRICS",
+        "ENABLE_VOICE_TALK_TO_START",
+        "MODEL_ROUTER_ENDPOINT",
+        "MODEL_ROUTER_DEPLOYMENT_NAME",
+        "MODEL_DEPLOYMENT_ALLOWLIST",
+        "GPT_55_DEPLOYMENT_NAME",
+        "MCP_REGISTRY_ENDPOINT",
+        "SOURCE_INGESTION_ENDPOINT",
+        "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
+    ]:
+        monkeypatch.delenv(key, raising=False)
+
+    settings = config_module.get_settings()
+
+    assert settings["enable_model_router"] == "false"
+    assert settings["enable_gpt_55"] == "false"
+    assert settings["enable_foundry_tracing"] == "false"
+    assert settings["enable_continuous_monitoring"] == "false"
+    assert settings["enable_cost_metrics"] == "false"
+    assert settings["enable_voice_talk_to_start"] == "false"
+    assert settings["model_router_endpoint"] == ""
+    assert settings["model_router_deployment_name"] == ""
+    assert settings["model_deployment_allowlist"] == ""
+    assert settings["gpt_55_deployment_name"] == ""
+    assert settings["mcp_registry_endpoint"] == ""
+    assert settings["source_ingestion_endpoint"] == ""
+    assert settings["mai_transcribe_1_deployment_name"] == ""
+
+
+def test_roadmap_capability_env_aliases(monkeypatch):
+    """ロードマップ機能の env alias を解決できる。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("ENABLE_MODEL_ROUTER", raising=False)
+    monkeypatch.delenv("MODEL_ROUTER_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.delenv("GPT_55_DEPLOYMENT_NAME", raising=False)
+    monkeypatch.setenv("MODEL_ROUTER_ENABLED", "true")
+    monkeypatch.setenv("MODEL_ROUTER_MODEL_NAME", "model-router")
+    monkeypatch.setenv("ALLOWED_MODEL_DEPLOYMENTS", "custom-a,custom-b")
+    monkeypatch.setenv("GPT_5_5_DEPLOYMENT_NAME", "gpt-5.5")
+    monkeypatch.setenv("MCP_REGISTRY_URL", "https://registry.example/mcp")
+    monkeypatch.setenv("SOURCE_INGESTION_URL", "https://source.example/ingest")
+
+    settings = config_module.get_settings()
+
+    assert settings["enable_model_router"] == "true"
+    assert settings["model_router_deployment_name"] == "model-router"
+    assert settings["model_deployment_allowlist"] == "custom-a,custom-b"
+    assert settings["gpt_55_deployment_name"] == "gpt-5.5"
+    assert settings["mcp_registry_endpoint"] == "https://registry.example/mcp"
+    assert settings["source_ingestion_endpoint"] == "https://source.example/ingest"
 
 
 def test_get_missing_required_settings_accepts_azd_env(monkeypatch):

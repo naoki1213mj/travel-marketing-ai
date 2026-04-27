@@ -10,6 +10,13 @@ import httpx
 
 from src.config import get_settings
 from src.http_client import get_http_client
+from src.mcp_auth_registry import (
+    McpServerRegistryEntry,
+    build_improvement_mcp_registry_entry,
+    build_mcp_auth_headers,
+    decide_mcp_tool_policy,
+    validate_mcp_registry_entry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +61,24 @@ async def generate_improvement_brief(
     if not endpoint:
         return None
 
-    headers = _build_headers(settings)
+    registry_entry = build_improvement_mcp_registry_entry(settings)
+    if registry_entry is None:
+        return None
+    registry_errors = validate_mcp_registry_entry(registry_entry)
+    if registry_errors:
+        logger.warning("improvement MCP registry validation failed: %s", ", ".join(registry_errors))
+        return None
+    policy_decision = decide_mcp_tool_policy(registry_entry, "generate_improvement_brief")
+    if not policy_decision.allowed:
+        logger.warning("improvement MCP tool policy denied call: %s", policy_decision.reason)
+        return None
+
+    try:
+        headers = _build_headers(settings, registry_entry)
+    except ValueError as exc:
+        logger.warning("improvement MCP auth configuration failed: %s", exc)
+        return None
+
     session_id: str | None = None
     protocol_version = _MCP_PROTOCOL_VERSION
 
@@ -83,17 +107,36 @@ async def generate_improvement_brief(
             await _close_session(endpoint, headers, session_id, protocol_version)
 
 
-def _build_headers(settings: dict[str, str]) -> dict[str, str]:
+def _build_headers(
+    settings: dict[str, str],
+    registry_entry: McpServerRegistryEntry | None = None,
+) -> dict[str, str]:
     """MCP 呼び出し用ヘッダーを構築する。"""
     headers = {
         "Accept": "application/json, text/event-stream",
         "Content-Type": "application/json",
     }
-    api_key = settings.get("improvement_mcp_api_key", "").strip()
-    if api_key:
-        header_name = settings.get("improvement_mcp_api_key_header", _DEFAULT_API_KEY_HEADER).strip()
-        headers[header_name or _DEFAULT_API_KEY_HEADER] = api_key
+    registry = registry_entry or build_improvement_mcp_registry_entry(settings)
+    if registry is not None:
+        headers.update(
+            build_mcp_auth_headers(
+                registry.auth,
+                secret_resolver=lambda secret_ref: _resolve_improvement_mcp_secret(settings, secret_ref),
+            )
+        )
+    else:
+        api_key = settings.get("improvement_mcp_api_key", "").strip()
+        if api_key:
+            header_name = settings.get("improvement_mcp_api_key_header", _DEFAULT_API_KEY_HEADER).strip()
+            headers[header_name or _DEFAULT_API_KEY_HEADER] = api_key
     return headers
+
+
+def _resolve_improvement_mcp_secret(settings: dict[str, str], secret_ref: str) -> str:
+    """既存 env 設定から registry の secret reference を解決する。"""
+    if secret_ref == "IMPROVEMENT_MCP_API_KEY":
+        return settings.get("improvement_mcp_api_key", "")
+    return ""
 
 
 async def _initialize_session(endpoint: str, headers: dict[str, str]) -> tuple[str | None, str]:

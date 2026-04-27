@@ -27,6 +27,7 @@ import { useSSE } from './hooks/useSSE'
 import { useTheme } from './hooks/useTheme'
 import { isApprovalResponseText, shouldHidePlanDuringPostApprovalRevision } from './lib/approval-flow'
 import { buildEvaluationQuery } from './lib/evaluation'
+import { fetchCapabilities, isCapabilityAvailable } from './lib/capabilities'
 import { exportAllAsJson, exportBrochureHtml, exportPlanMarkdown } from './lib/export'
 import { buildPlanVersions } from './lib/plan-versions'
 import { classifyVideoWorkflowStatus, extractVideoStatusMessage, extractVideoUrl } from './lib/video-status'
@@ -69,6 +70,7 @@ function App() {
 
   // 音声入力テキスト — InputForm に挿入して確認後に送信
   const [voiceDraft, setVoiceDraft] = useState({ id: 0, text: '' })
+  const [capabilities, setCapabilities] = useState<Awaited<ReturnType<typeof fetchCapabilities>>>(null)
   const [revisionInProgress, setRevisionInProgress] = useState(false)
   const [pendingPreviewSelection, setPendingPreviewSelection] = useState<{
     pendingVersion: number
@@ -83,6 +85,18 @@ function App() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [state.status, reset])
+
+  useEffect(() => {
+    let active = true
+    fetchCapabilities().then((snapshot) => {
+      if (active) {
+        setCapabilities(snapshot)
+      }
+    })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const isRunning = state.status === 'running'
   const isCompleted = state.status === 'completed'
@@ -213,6 +227,11 @@ function App() {
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
   const showManagerApprovalPhase = state.hasManagerApprovalPhase
   const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
+  const modelRouterAvailable = isCapabilityAvailable(capabilities, 'model_router') ?? undefined
+  const gpt55Available = isCapabilityAvailable(capabilities, 'gpt_55') ?? undefined
+  const workIqAvailable = isCapabilityAvailable(capabilities, 'work_iq') ?? undefined
+  const voiceLiveAvailable = isCapabilityAvailable(capabilities, 'voice_live') ?? undefined
+  const voiceTalkToStartAvailable = isCapabilityAvailable(capabilities, 'voice_talk_to_start') ?? undefined
   const shouldPollConversationUpdates = Boolean(state.conversationId)
     && (state.managerApprovalPolling || state.backgroundUpdatesPending)
   const workflowHeaderTags = [
@@ -481,6 +500,9 @@ function App() {
               settings={state.settings}
               conversationSettings={state.conversationSettings}
               workIqStatus={state.workIq.status}
+              modelRouterAvailable={modelRouterAvailable}
+              gpt55Available={gpt55Available}
+              workIqAvailable={workIqAvailable}
               onChange={updateSettings}
               onConversationSettingsChange={updateConversationSettings}
               workIqLocked={workIqLocked}
@@ -505,13 +527,13 @@ function App() {
                     />
                   ) : (
                     <InputForm
-                      key={voiceDraft.id}
                       onSubmit={(msg) => { handleSendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
                       disabled={isRunning}
                       placeholder={t('input.placeholder')}
                       sendLabel={t('input.send')}
                       label={t('input.label')}
                       initialValue={voiceDraft.text}
+                      initialValueVersion={voiceDraft.id}
                       t={t}
                     />
                   )}
@@ -519,6 +541,8 @@ function App() {
                 <VoiceInput
                   onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
                   disabled={isRunning}
+                  voiceLiveAvailable={voiceLiveAvailable}
+                  voiceTalkToStartAvailable={voiceTalkToStartAvailable}
                   t={t}
                 />
                 <PdfUpload disabled={isRunning} t={t} />

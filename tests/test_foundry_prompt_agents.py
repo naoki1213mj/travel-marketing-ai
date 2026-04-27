@@ -91,6 +91,12 @@ def _settings() -> dict[str, str]:
         "project_endpoint": "https://example.test",
         "model_name": "gpt-5-4-mini",
         "marketing_plan_prompt_agent_name": "travel-marketing-plan",
+        "enable_gpt_55": "false",
+        "gpt_55_deployment_name": "",
+        "enable_model_router": "false",
+        "model_router_endpoint": "",
+        "model_router_deployment_name": "",
+        "model_deployment_allowlist": "",
     }
 
 

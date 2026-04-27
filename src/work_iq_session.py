@@ -2,6 +2,8 @@
 
 from typing import NotRequired, TypedDict
 
+from src.pipeline_schemas import WorkIQSourceMetadataPayload as WorkIQSourceMetadata
+from src.pipeline_schemas import normalize_work_iq_source_metadata
 from src.request_identity import RequestIdentity
 
 CONVERSATION_SETTINGS_METADATA_KEY = "conversation_settings"
@@ -31,14 +33,6 @@ class ConversationSettings(TypedDict):
 
     work_iq_enabled: bool
     source_scope: list[str]
-
-
-class WorkIQSourceMetadata(TypedDict):
-    """Work IQ ソース概要の安全な保存形式。"""
-
-    source: str
-    label: NotRequired[str]
-    count: NotRequired[int]
 
 
 class WorkIQSessionMetadata(TypedDict):
@@ -150,20 +144,8 @@ def get_conversation_settings_from_metadata(metadata: dict | None) -> Conversati
 
 def _sanitize_source_metadata_item(value: object) -> WorkIQSourceMetadata | None:
     """brief_source_metadata の 1 要素を allow-list で整形する。"""
-    if not isinstance(value, dict):
-        return None
-    source = _sanitize_text(value.get("source"))
-    if not source:
-        return None
-
-    item: WorkIQSourceMetadata = {"source": source}
-    label = _sanitize_text(value.get("label"))
-    if label:
-        item["label"] = label
-    count = value.get("count")
-    if isinstance(count, int):
-        item["count"] = count
-    return item
+    normalized = normalize_work_iq_source_metadata(value)
+    return normalized[0] if normalized else None
 
 
 def sanitize_work_iq_session_for_storage(value: object) -> WorkIQSessionMetadata | None:

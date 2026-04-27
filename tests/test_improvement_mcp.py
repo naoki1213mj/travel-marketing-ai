@@ -6,6 +6,14 @@ import httpx
 import pytest
 
 from src import improvement_mcp as improvement_mcp_module
+from src.mcp_auth_registry import (
+    McpAccessMode,
+    McpApprovalPolicy,
+    McpAuthConfig,
+    McpAuthMode,
+    McpLeastPrivilegeMetadata,
+    McpServerRegistryEntry,
+)
 
 
 class _FakeMcpClient:
@@ -111,6 +119,55 @@ async def test_generate_improvement_brief_performs_initialize_and_tool_call(monk
         "家族向けの温度感を維持してほしい"
     ]
     assert any(request["method"] == "DELETE" for request in fake_client.requests)
+
+
+@pytest.mark.asyncio
+async def test_generate_improvement_brief_returns_none_on_auth_header_failure(monkeypatch) -> None:
+    """MCP 認証ヘッダーが組み立てられない場合は改善フローを fail closed する。"""
+    registry_entry = McpServerRegistryEntry(
+        server_id="improvement-mcp",
+        display_name="Improvement MCP",
+        endpoint="https://example.test/mcp",
+        allowed_hosts=("example.test",),
+        allowed_tools=("generate_improvement_brief",),
+        auth=McpAuthConfig(
+            mode=McpAuthMode.API_KEY_SECRET_REF,
+            api_key_header_name="Ocp-Apim-Subscription-Key",
+            api_key_secret_ref="MISSING_SECRET",
+        ),
+        access_mode=McpAccessMode.READ_ONLY,
+        approval_policy=McpApprovalPolicy.DENY_WRITES,
+        least_privilege=McpLeastPrivilegeMetadata(
+            purpose="Generate an internal improvement brief.",
+            data_classification="internal",
+            allowed_operations=("generate_improvement_brief",),
+            credential_reference="MISSING_SECRET",
+        ),
+    )
+    fake_client = _FakeMcpClient({})
+
+    monkeypatch.setattr(improvement_mcp_module, "get_http_client", lambda: fake_client)
+    monkeypatch.setattr(improvement_mcp_module, "build_improvement_mcp_registry_entry", lambda _settings: registry_entry)
+    monkeypatch.setattr(
+        improvement_mcp_module,
+        "get_settings",
+        lambda: {
+            "improvement_mcp_endpoint": "https://example.test/mcp",
+            "improvement_mcp_api_key": "",
+            "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
+        },
+    )
+
+    result = await improvement_mcp_module.generate_improvement_brief(
+        plan_markdown="# 春の沖縄旅",
+        evaluation_result={},
+        regulation_summary="",
+        rejection_history=[],
+        user_feedback="改善してください",
+    )
+
+    assert result is None
+    assert fake_client.requests == []
 
 
 def test_parse_tool_result_accepts_text_content() -> None:
