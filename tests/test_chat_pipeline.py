@@ -457,6 +457,50 @@ async def test_execute_agent_maps_foundry_work_iq_obo_failure_to_auth_required(m
 
 
 @pytest.mark.asyncio
+async def test_execute_agent_maps_foundry_work_iq_timeout_to_unavailable(monkeypatch) -> None:
+    """Foundry Work IQ timeout は汎用 Agent エラーではなく Work IQ timeout にする。"""
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        del model_settings
+        raise AssertionError("Legacy marketing agent should not run for Work IQ timeout failures")
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        raise TimeoutError("Foundry Work IQ connector timed out after 95s")
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="沖縄プラン",
+        conversation_id="conv-workiq-timeout",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={
+            "marketing_plan_runtime": "foundry_preprovisioned",
+            "work_iq_runtime": "foundry_tool",
+        },
+        work_iq_session={"enabled": True, "source_scope": ["emails"]},
+        work_iq_access_token="delegated-token",
+    )
+
+    assert outcome["success"] is False
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "timeout"
+        and payload.get("error_code") == "WORKIQ_TIMEOUT"
+        for event_name, payload in parsed
+    )
+    assert any(
+        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "WORKIQ_UNAVAILABLE"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_agent_falls_back_to_legacy_when_foundry_prompt_agent_is_unavailable(monkeypatch) -> None:
     """Foundry Agent 未作成時は Agent Framework 経路へ 1 回だけフォールバックする。"""
 
@@ -2341,8 +2385,8 @@ async def test_refine_events_evaluation_reuses_saved_work_iq_brief(monkeypatch) 
 
 
 @pytest.mark.asyncio
-async def test_refine_events_evaluation_forwards_work_iq_session_and_token(monkeypatch) -> None:
-    """評価ベースの改善再実行でも Foundry Work IQ に delegated token を渡す"""
+async def test_refine_events_evaluation_uses_legacy_runtime_without_work_iq_tool(monkeypatch) -> None:
+    """評価ベースの改善再実行では Work IQ tool を再実行しない"""
 
     async def fake_get_conversation(
         _conversation_id: str,
@@ -2416,19 +2460,19 @@ async def test_refine_events_evaluation_forwards_work_iq_session_and_token(monke
         )
     ]
 
-    assert captured["work_iq_session"] == supplied_work_iq_session
-    assert captured["work_iq_access_token"] == "delegated-token"
+    assert captured["work_iq_session"] is None
+    assert captured["work_iq_access_token"] == ""
     assert captured["workflow_settings"] == {
         "manager_approval_enabled": False,
         "manager_email": "",
-        "marketing_plan_runtime": "foundry_preprovisioned",
-        "work_iq_runtime": "foundry_tool",
+        "marketing_plan_runtime": "legacy",
+        "work_iq_runtime": "graph_prefetch",
     }
 
 
 @pytest.mark.asyncio
-async def test_refine_events_evaluation_blocks_foundry_work_iq_without_token(monkeypatch) -> None:
-    """評価ベース改善で Work IQ token がない場合は実行前に明示エラーを返す"""
+async def test_refine_events_evaluation_does_not_require_work_iq_token(monkeypatch) -> None:
+    """評価ベース改善では既存企画書を使うため Work IQ token を要求しない"""
 
     async def fake_get_conversation(
         _conversation_id: str,
@@ -2458,9 +2502,33 @@ async def test_refine_events_evaluation_blocks_foundry_work_iq_without_token(mon
             },
         }
 
-    async def fake_execute_agent(*args, **kwargs):
-        del args, kwargs
-        raise AssertionError("marketing-plan-agent should not run without a Work IQ token")
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_name, agent_step, conversation_id, model_settings, total_steps, include_done
+        captured["user_input"] = user_input
+        captured["workflow_settings"] = workflow_settings
+        captured["work_iq_session"] = work_iq_session
+        captured["work_iq_access_token"] = work_iq_access_token
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
 
     async def fake_generate_improvement_brief(**kwargs):
         return None
@@ -2480,16 +2548,17 @@ async def test_refine_events_evaluation_blocks_foundry_work_iq_without_token(mon
     ]
     parsed = [_parse_sse(event) for event in events]
 
-    assert any(
-        event_name == chat_module.SSEEventType.TOOL_EVENT
-        and payload.get("tool") == "workiq_foundry_tool"
-        and payload.get("status") == "auth_required"
-        for event_name, payload in parsed
-    )
-    assert any(
-        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "WORKIQ_AUTH_REQUIRED"
-        for event_name, payload in parsed
-    )
+    assert captured["work_iq_session"] is None
+    assert captured["work_iq_access_token"] == ""
+    assert captured["workflow_settings"] == {
+        "manager_approval_enabled": False,
+        "manager_email": "",
+        "marketing_plan_runtime": "legacy",
+        "work_iq_runtime": "graph_prefetch",
+    }
+    assert "Work IQ tool を再実行せず" in str(captured["user_input"])
+    assert not any(event_name == chat_module.SSEEventType.ERROR for event_name, _ in parsed)
+    assert any(event_name == chat_module.SSEEventType.APPROVAL_REQUEST for event_name, _ in parsed)
 
 
 @pytest.mark.asyncio

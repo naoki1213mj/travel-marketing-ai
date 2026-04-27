@@ -766,6 +766,17 @@ def _build_foundry_work_iq_blocked_events(
     ]
 
 
+def _build_evaluation_refine_workflow_settings(workflow_settings: WorkflowSettings | None) -> WorkflowSettings:
+    """評価改善では Work IQ tool を再実行しない Agent Framework 経路に固定する。"""
+    source = workflow_settings or {}
+    return {
+        "manager_approval_enabled": _to_bool(source.get("manager_approval_enabled")),
+        "manager_email": _sanitize_optional_text(source.get("manager_email")),
+        "marketing_plan_runtime": "legacy",
+        "work_iq_runtime": "graph_prefetch",
+    }
+
+
 def _extract_terminal_tool_events(
     raw_events: object,
     *,
@@ -2076,6 +2087,11 @@ def _is_foundry_work_iq_auth_error(exc: Exception) -> bool:
     )
 
 
+def _is_foundry_work_iq_timeout_error(exc: Exception) -> bool:
+    """Foundry Work IQ connector の明示的な timeout かを判定する。"""
+    return isinstance(exc, TimeoutError) and "foundry work iq connector timed out" in str(exc).lower()
+
+
 def _is_code_interpreter_404(exc: Exception) -> bool:
     """Code Interpreter の 404 エラーかを判定する。
 
@@ -2253,6 +2269,41 @@ async def _execute_agent(
                         )
                     )
                     events.append(format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error("auth_required")))
+                    return {
+                        "events": events,
+                        "text": "",
+                        "success": False,
+                        "latency_seconds": round(time.monotonic() - start_time, 1),
+                        "tool_calls": 0,
+                        "total_tokens": 0,
+                    }
+                if _is_foundry_work_iq_timeout_error(exc):
+                    logger.warning("Foundry Work IQ connector がタイムアウトしました: %s", exc)
+                    if isinstance(work_iq_session, dict):
+                        work_iq_session["status"] = "timeout"
+                        work_iq_session["warning_code"] = "timeout"
+                    source_scope = (
+                        list(work_iq_session.get("source_scope", []))
+                        if isinstance(work_iq_session, dict) and isinstance(work_iq_session.get("source_scope"), list)
+                        else []
+                    )
+                    events.append(
+                        _format_tool_event_sse(
+                            _build_agent_tool_event(
+                                "workiq_foundry_tool",
+                                "timeout",
+                                agent_name=agent_name,
+                                step=step,
+                                source="workiq",
+                                provider="foundry",
+                                display_name="Work IQ context tools",
+                                error_code="WORKIQ_TIMEOUT",
+                                error_message="Foundry Work IQ connector timed out.",
+                                source_scope=source_scope,
+                            )
+                        )
+                    )
+                    events.append(format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error("timeout")))
                     return {
                         "events": events,
                         "text": "",
@@ -3276,6 +3327,7 @@ async def _refine_events(
                     data.get("workflow_settings"), dict
                 ):
                     workflow_settings = _parse_saved_workflow_settings(data["workflow_settings"])
+        refine_workflow_settings = _build_evaluation_refine_workflow_settings(workflow_settings)
 
         improvement_instructions = refine_text
         mcp_configured = is_improvement_mcp_configured()
@@ -3321,12 +3373,18 @@ async def _refine_events(
         work_iq_brief = _format_work_iq_brief_for_prompt(effective_work_iq_session)
         if work_iq_brief:
             revision_sections.append(f"{work_iq_brief}\n\n")
+        if isinstance(effective_work_iq_session, dict) and effective_work_iq_session.get("enabled"):
+            revision_sections.append(
+                "## Work IQ 再実行方針\n"
+                "初回企画書には Work IQ の職場コンテキストが反映済みです。"
+                "この評価改善では Work IQ tool を再実行せず、現在の企画書と評価結果を根拠に改善してください。\n\n"
+            )
         revision_sections.append(f"## 改善指示\n{improvement_instructions}")
         revision_prompt = "".join(revision_sections)
 
         blocked_events = _build_foundry_work_iq_blocked_events(
             effective_work_iq_session,
-            workflow_settings=workflow_settings,
+            workflow_settings=refine_workflow_settings,
             work_iq_access_token=work_iq_access_token,
         )
         if blocked_events:
@@ -3340,9 +3398,9 @@ async def _refine_events(
             user_input=revision_prompt,
             conversation_id=conversation_id,
             model_settings=model_settings,
-            workflow_settings=workflow_settings,
-            work_iq_session=effective_work_iq_session,
-            work_iq_access_token=work_iq_access_token,
+            workflow_settings=refine_workflow_settings,
+            work_iq_session=None,
+            work_iq_access_token="",
         )
         for event in outcome["events"]:
             yield event
@@ -3357,7 +3415,7 @@ async def _refine_events(
                 "analysis_markdown": analysis_markdown,
                 "plan_markdown": outcome["text"],
                 "model_settings": model_settings,
-                "workflow_settings": workflow_settings,
+                "workflow_settings": refine_workflow_settings,
                 "approval_scope": "user",
                 "manager_callback_token": None,
                 "owner_id": owner_id or _get_conversation_owner_id(conversation),
@@ -3376,7 +3434,7 @@ async def _refine_events(
                 conversation_id=conversation_id,
                 plan_markdown=outcome["text"],
                 model_settings=model_settings,
-                workflow_settings=workflow_settings,
+                workflow_settings=refine_workflow_settings,
                 approval_scope="user",
             ),
         )
