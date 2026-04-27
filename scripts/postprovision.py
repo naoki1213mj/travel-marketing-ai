@@ -80,10 +80,18 @@ def _is_partial_zip_deploy_success(result: subprocess.CompletedProcess[str]) -> 
         return True
 
     combined_output = "\n".join(part for part in (result.stdout, result.stderr) if part).lower()
-    return (
+    if (
         "deployment was partially successful" in combined_output
         and "uploaded package to storage successfully" in combined_output
         and "[kudu-synctriggerstep] starting" in combined_output
+    ):
+        return True
+
+    return (
+        "deployment was partially successful" in combined_output
+        and "deployment endpoint responded with status code 202" in combined_output
+        and "flex consumption" in combined_output
+        and "logs you are looking for were not found" in combined_output
     )
 
 
