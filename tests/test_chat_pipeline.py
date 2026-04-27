@@ -409,6 +409,54 @@ async def test_execute_agent_does_not_fallback_when_work_iq_token_is_missing(mon
 
 
 @pytest.mark.asyncio
+async def test_execute_agent_maps_foundry_work_iq_obo_failure_to_auth_required(monkeypatch) -> None:
+    """Foundry Work IQ OBO 失敗は汎用 Agent エラーではなく再サインイン要求にする。"""
+
+    def fake_create_marketing_plan_agent(model_settings: dict | None = None):
+        del model_settings
+        raise AssertionError("Legacy marketing agent should not run for Work IQ OBO failures")
+
+    def fake_run_marketing_plan_prompt_agent(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError(
+            "Error code: 400 - {'error': {'message': 'Failed to fetch access token. "
+            'Status: BadRequest. Details: "ARA OBO token request failed with status BadRequest", '
+            "'code': 'tool_user_error'}}"
+        )
+
+    monkeypatch.setattr("src.agents.create_marketing_plan_agent", fake_create_marketing_plan_agent)
+    monkeypatch.setattr("src.foundry_prompt_agents.run_marketing_plan_prompt_agent", fake_run_marketing_plan_prompt_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="marketing-plan-agent",
+        agent_step=2,
+        user_input="沖縄プラン",
+        conversation_id="conv-workiq-obo-failure",
+        model_settings={"model": "gpt-5-4-mini"},
+        workflow_settings={
+            "marketing_plan_runtime": "foundry_preprovisioned",
+            "work_iq_runtime": "foundry_tool",
+        },
+        work_iq_session={"enabled": True, "source_scope": ["emails"]},
+        work_iq_access_token="delegated-token",
+    )
+
+    assert outcome["success"] is False
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "auth_required"
+        and payload.get("error_code") == "WORKIQ_OBO_TOKEN_FAILED"
+        for event_name, payload in parsed
+    )
+    assert any(
+        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "WORKIQ_AUTH_REQUIRED"
+        for event_name, payload in parsed
+    )
+
+
+@pytest.mark.asyncio
 async def test_execute_agent_falls_back_to_legacy_when_foundry_prompt_agent_is_unavailable(monkeypatch) -> None:
     """Foundry Agent 未作成時は Agent Framework 経路へ 1 回だけフォールバックする。"""
 
@@ -2284,11 +2332,164 @@ async def test_refine_events_evaluation_reuses_saved_work_iq_brief(monkeypatch) 
             "品質評価を踏まえて改善してください",
             "conv-eval-workiq",
             chat_module.RefineContext(source="evaluation"),
+            work_iq_access_token="delegated-token",
         )
     ]
 
     assert "Work IQ の職場コンテキスト" in str(captured["user_input"])
     assert "値引き訴求は弱める方針" in str(captured["user_input"])
+
+
+@pytest.mark.asyncio
+async def test_refine_events_evaluation_forwards_work_iq_session_and_token(monkeypatch) -> None:
+    """評価ベースの改善再実行でも Foundry Work IQ に delegated token を渡す"""
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "input": "北海道の春プランを作って",
+            "messages": [
+                {"event": "text", "data": {"agent": "marketing-plan-agent", "content": "現在の企画書"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"temperature": 0.2},
+                        "workflow_settings": {
+                            "manager_approval_enabled": False,
+                            "manager_email": "",
+                            "marketing_plan_runtime": "foundry_preprovisioned",
+                            "work_iq_runtime": "foundry_tool",
+                        },
+                    },
+                },
+                {"event": "evaluation_result", "data": {"result": {"builtin": {}}}},
+            ],
+        }
+
+    captured: dict[str, object] = {}
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_name, agent_step, user_input, conversation_id, model_settings, total_steps, include_done
+        captured["workflow_settings"] = workflow_settings
+        captured["work_iq_session"] = work_iq_session
+        captured["work_iq_access_token"] = work_iq_access_token
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    async def fake_generate_improvement_brief(**kwargs):
+        return None
+
+    supplied_work_iq_session = {"enabled": True, "source_scope": ["emails"], "auth_mode": "delegated"}
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: False)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    _ = [
+        event
+        async for event in chat_module._refine_events(
+            "品質評価を踏まえて改善してください",
+            "conv-eval-workiq-token",
+            chat_module.RefineContext(source="evaluation"),
+            work_iq_session=supplied_work_iq_session,
+            work_iq_access_token="delegated-token",
+        )
+    ]
+
+    assert captured["work_iq_session"] == supplied_work_iq_session
+    assert captured["work_iq_access_token"] == "delegated-token"
+    assert captured["workflow_settings"] == {
+        "manager_approval_enabled": False,
+        "manager_email": "",
+        "marketing_plan_runtime": "foundry_preprovisioned",
+        "work_iq_runtime": "foundry_tool",
+    }
+
+
+@pytest.mark.asyncio
+async def test_refine_events_evaluation_blocks_foundry_work_iq_without_token(monkeypatch) -> None:
+    """評価ベース改善で Work IQ token がない場合は実行前に明示エラーを返す"""
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "input": "北海道の春プランを作って",
+            "messages": [
+                {"event": "text", "data": {"agent": "marketing-plan-agent", "content": "現在の企画書"}},
+                {
+                    "event": "approval_request",
+                    "data": {
+                        "model_settings": {"temperature": 0.2},
+                        "workflow_settings": {
+                            "manager_approval_enabled": False,
+                            "manager_email": "",
+                            "marketing_plan_runtime": "foundry_preprovisioned",
+                            "work_iq_runtime": "foundry_tool",
+                        },
+                    },
+                },
+                {"event": "evaluation_result", "data": {"result": {"builtin": {}}}},
+            ],
+            "metadata": {
+                "work_iq_session": {"enabled": True, "source_scope": ["emails"], "auth_mode": "delegated"}
+            },
+        }
+
+    async def fake_execute_agent(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("marketing-plan-agent should not run without a Work IQ token")
+
+    async def fake_generate_improvement_brief(**kwargs):
+        return None
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: False)
+    monkeypatch.setattr(chat_module, "generate_improvement_brief", fake_generate_improvement_brief)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    events = [
+        event
+        async for event in chat_module._refine_events(
+            "品質評価を踏まえて改善してください",
+            "conv-eval-workiq-no-token",
+            chat_module.RefineContext(source="evaluation"),
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    assert any(
+        event_name == chat_module.SSEEventType.TOOL_EVENT
+        and payload.get("tool") == "workiq_foundry_tool"
+        and payload.get("status") == "auth_required"
+        for event_name, payload in parsed
+    )
+    assert any(
+        event_name == chat_module.SSEEventType.ERROR and payload.get("code") == "WORKIQ_AUTH_REQUIRED"
+        for event_name, payload in parsed
+    )
 
 
 @pytest.mark.asyncio

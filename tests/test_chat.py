@@ -337,6 +337,8 @@ def test_chat_refine_forwards_evaluation_context(monkeypatch):
         refine_context=None,
         owner_id: str | None = None,
         model_settings_override: dict | None = None,
+        work_iq_session=None,
+        work_iq_access_token: str = "",
     ):
         captured["source"] = getattr(refine_context, "source", None)
         captured["artifact_version"] = getattr(refine_context, "artifact_version", None)
@@ -365,6 +367,78 @@ def test_chat_refine_forwards_evaluation_context(monkeypatch):
     assert captured == {"source": "evaluation", "artifact_version": 2}
 
 
+def test_chat_refine_forwards_work_iq_session_and_token(monkeypatch):
+    """既存会話の改善再実行でも Work IQ delegated token を引き継ぐ"""
+    captured: dict[str, object] = {}
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "input": "春の沖縄ファミリー向けプランを企画して",
+            "messages": [],
+            "metadata": {
+                "conversation_settings": {"work_iq_enabled": True, "source_scope": ["emails"]},
+                "work_iq_session": {
+                    "enabled": True,
+                    "source_scope": ["emails"],
+                    "brief_summary": "過去メールではファミリー向け訴求が重視されています。",
+                },
+            },
+        }
+
+    async def fake_refine_events(
+        _message: str,
+        _conversation_id: str,
+        refine_context=None,
+        owner_id: str | None = None,
+        model_settings_override: dict | None = None,
+        work_iq_session=None,
+        work_iq_access_token: str = "",
+    ):
+        captured["work_iq_access_token"] = work_iq_access_token
+        captured["work_iq_session"] = work_iq_session
+        yield 'event: done\ndata: {"conversation_id": "existing-conv"}\n\n'
+
+    async def fake_save_conversation(**_kwargs):
+        return None
+
+    monkeypatch.setattr("src.api.chat.get_conversation", fake_get_conversation)
+    monkeypatch.setattr(
+        "src.api.chat.extract_request_identity",
+        lambda _request, expected_tenant_id="": {
+            "user_id": "user-test",
+            "auth_mode": "delegated",
+            "oid": "oid-1",
+            "tid": "tid-1",
+            "upn": "user@example.com",
+            "auth_error": None,
+        },
+    )
+    monkeypatch.setattr("src.api.chat._refine_events", fake_refine_events)
+    monkeypatch.setattr("src.api.chat.save_conversation", fake_save_conversation)
+
+    response = client.post(
+        "/api/chat",
+        headers={"Authorization": "Bearer delegated-token"},
+        json={
+            "message": "以下の評価結果に基づいて改善してください",
+            "conversation_id": "existing-conv",
+            "refine_context": {"source": "evaluation", "artifact_version": 2},
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["work_iq_access_token"] == "delegated-token"
+    session = captured["work_iq_session"]
+    assert isinstance(session, dict)
+    assert session["enabled"] is True
+    assert session["source_scope"] == ["emails"]
+    assert session["auth_mode"] == "delegated"
+
+
 def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
     """既存 conversation_id での修正時も確定済み履歴を保持して保存する"""
     saved: dict[str, object] = {}
@@ -390,6 +464,7 @@ def test_chat_refine_preserves_existing_messages_when_saving(monkeypatch):
         _refine_context=None,
         owner_id: str | None = None,
         model_settings_override: dict | None = None,
+        **_kwargs,
     ):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "確認してください", "conversation_id": "existing-conv", "plan_markdown": "# Plan v2"}\n\n'
@@ -468,6 +543,7 @@ def test_approve_revision_preserves_user_message_history(monkeypatch):
         _refine_context=None,
         owner_id: str | None = None,
         model_settings_override: dict | None = None,
+        **_kwargs,
     ):
         yield 'event: text\ndata: {"content": "# Plan v2", "agent": "marketing-plan-agent"}\n\n'
         yield 'event: approval_request\ndata: {"prompt": "再確認してください", "conversation_id": "test-thread", "plan_markdown": "# Plan v2"}\n\n'

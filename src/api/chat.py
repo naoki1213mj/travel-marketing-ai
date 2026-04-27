@@ -733,6 +733,39 @@ def _build_work_iq_blocked_error(status: str) -> dict[str, str]:
     }
 
 
+def _build_foundry_work_iq_blocked_events(
+    work_iq_session: WorkIQSessionMetadata | None,
+    *,
+    workflow_settings: WorkflowSettings | None,
+    work_iq_access_token: str,
+) -> list[str]:
+    """Foundry Work IQ が未認証なら agent 実行前に明示的な SSE error を返す。"""
+    work_iq_runtime = _resolve_work_iq_runtime(workflow_settings)
+    blocking_status = _resolve_foundry_work_iq_blocking_status(
+        work_iq_session,
+        work_iq_runtime=work_iq_runtime,
+        work_iq_access_token=work_iq_access_token,
+    )
+    if not blocking_status or not isinstance(work_iq_session, dict):
+        return []
+
+    work_iq_session["status"] = blocking_status
+    work_iq_session["warning_code"] = blocking_status
+    tool_event = _build_work_iq_tool_event_data(
+        work_iq_session,
+        blocking_status,
+        work_iq_runtime=work_iq_runtime,
+    )
+    if blocking_status in {"auth_required", "consent_required", "identity_mismatch"}:
+        tool_event["error_code"] = "WORKIQ_AUTH_REQUIRED"
+    else:
+        tool_event["error_code"] = "WORKIQ_UNAVAILABLE"
+    return [
+        _format_tool_event_sse(tool_event),
+        format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error(blocking_status)),
+    ]
+
+
 def _extract_terminal_tool_events(
     raw_events: object,
     *,
@@ -2035,6 +2068,14 @@ def _is_foundry_prompt_agent_unavailable(exc: Exception) -> bool:
     return "AZURE_AI_PROJECT_ENDPOINT" in message or "Foundry Agent が未作成" in message
 
 
+def _is_foundry_work_iq_auth_error(exc: Exception) -> bool:
+    """Foundry Work IQ delegated auth の OBO 失敗かを判定する。"""
+    message = str(exc).lower()
+    return "tool_user_error" in message and (
+        "ara obo token request failed" in message or "failed to fetch access token" in message
+    )
+
+
 def _is_code_interpreter_404(exc: Exception) -> bool:
     """Code Interpreter の 404 エラーかを判定する。
 
@@ -2185,6 +2226,41 @@ async def _execute_agent(
                         error_message=str(exc),
                     )
                 )
+                if _is_foundry_work_iq_auth_error(exc):
+                    logger.warning("Foundry Work IQ delegated auth に失敗: %s", exc)
+                    if isinstance(work_iq_session, dict):
+                        work_iq_session["status"] = "auth_required"
+                        work_iq_session["warning_code"] = "auth_required"
+                    source_scope = (
+                        list(work_iq_session.get("source_scope", []))
+                        if isinstance(work_iq_session, dict) and isinstance(work_iq_session.get("source_scope"), list)
+                        else []
+                    )
+                    events.append(
+                        _format_tool_event_sse(
+                            _build_agent_tool_event(
+                                "workiq_foundry_tool",
+                                "auth_required",
+                                agent_name=agent_name,
+                                step=step,
+                                source="workiq",
+                                provider="foundry",
+                                display_name="Work IQ context tools",
+                                error_code="WORKIQ_OBO_TOKEN_FAILED",
+                                error_message="Foundry Work IQ delegated auth failed during OBO token exchange.",
+                                source_scope=source_scope,
+                            )
+                        )
+                    )
+                    events.append(format_sse(SSEEventType.ERROR, _build_work_iq_blocked_error("auth_required")))
+                    return {
+                        "events": events,
+                        "text": "",
+                        "success": False,
+                        "latency_seconds": round(time.monotonic() - start_time, 1),
+                        "tool_calls": 0,
+                        "total_tokens": 0,
+                    }
                 # Foundry 設定・プロビジョニング不備の場合は初回のみ
                 # Agent Framework にフォールバックしてリトライ回数を消費しない
                 if attempt == 1 and _is_foundry_prompt_agent_unavailable(exc):
@@ -3101,11 +3177,25 @@ async def _refine_events(
     refine_context: RefineContext | None = None,
     owner_id: str | None = None,
     model_settings_override: dict | None = None,
+    work_iq_session: WorkIQSessionMetadata | None = None,
+    work_iq_access_token: str = "",
 ):
     """完了後のマルチターン修正リクエストを処理する SSE イベント"""
     pending_context = await _load_pending_approval_context(conversation_id, owner_id)
     if pending_context is not None:
         effective_model_settings = model_settings_override or pending_context.get("model_settings")
+        pending_work_iq_session = work_iq_session or pending_context.get("work_iq_session")
+        if isinstance(pending_work_iq_session, dict):
+            pending_context["work_iq_session"] = pending_work_iq_session
+        blocked_events = _build_foundry_work_iq_blocked_events(
+            pending_work_iq_session if isinstance(pending_work_iq_session, dict) else None,
+            workflow_settings=pending_context.get("workflow_settings"),
+            work_iq_access_token=work_iq_access_token,
+        )
+        if blocked_events:
+            for event in blocked_events:
+                yield event
+            return
         outcome = await _execute_agent_with_runtime(
             agent_name="marketing-plan-agent",
             agent_step=2,
@@ -3113,6 +3203,8 @@ async def _refine_events(
             conversation_id=conversation_id,
             model_settings=effective_model_settings,
             workflow_settings=pending_context.get("workflow_settings"),
+            work_iq_session=pending_work_iq_session if isinstance(pending_work_iq_session, dict) else None,
+            work_iq_access_token=work_iq_access_token,
         )
         for event in outcome["events"]:
             yield event
@@ -3163,7 +3255,8 @@ async def _refine_events(
         original_plan = _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
         analysis_markdown = _extract_latest_agent_text(conversation, {"data-search-agent"})
         regulation_summary = _extract_latest_agent_text(conversation, {"regulation-check-agent"})
-        work_iq_session = _get_work_iq_session_from_conversation(conversation)
+        saved_work_iq_session = _get_work_iq_session_from_conversation(conversation)
+        effective_work_iq_session = work_iq_session or saved_work_iq_session
         latest_evaluation_result = _extract_latest_evaluation_result(
             conversation,
             refine_context.artifact_version if refine_context is not None else None,
@@ -3225,11 +3318,21 @@ async def _refine_events(
             f"## 元の依頼\n{user_input}\n\n",
             f"## 現在の企画書\n{original_plan}\n\n",
         ]
-        work_iq_brief = _format_work_iq_brief_for_prompt(work_iq_session)
+        work_iq_brief = _format_work_iq_brief_for_prompt(effective_work_iq_session)
         if work_iq_brief:
             revision_sections.append(f"{work_iq_brief}\n\n")
         revision_sections.append(f"## 改善指示\n{improvement_instructions}")
         revision_prompt = "".join(revision_sections)
+
+        blocked_events = _build_foundry_work_iq_blocked_events(
+            effective_work_iq_session,
+            workflow_settings=workflow_settings,
+            work_iq_access_token=work_iq_access_token,
+        )
+        if blocked_events:
+            for event in blocked_events:
+                yield event
+            return
 
         outcome = await _execute_agent_with_runtime(
             agent_name="marketing-plan-agent",
@@ -3238,6 +3341,8 @@ async def _refine_events(
             conversation_id=conversation_id,
             model_settings=model_settings,
             workflow_settings=workflow_settings,
+            work_iq_session=effective_work_iq_session,
+            work_iq_access_token=work_iq_access_token,
         )
         for event in outcome["events"]:
             yield event
@@ -3257,7 +3362,7 @@ async def _refine_events(
                 "manager_callback_token": None,
                 "owner_id": owner_id or _get_conversation_owner_id(conversation),
                 "conversation_settings": _get_conversation_settings(conversation),
-                "work_iq_session": _get_work_iq_session_from_conversation(conversation),
+                "work_iq_session": effective_work_iq_session,
             },
         )
         yield format_sse(
@@ -4286,6 +4391,8 @@ async def chat(request: Request, body: ChatRequest) -> StreamingResponse:
                     body.refine_context,
                     owner_id=caller_identity["user_id"],
                     model_settings_override=normalized_model_settings,
+                    work_iq_session=effective_work_iq_session,
+                    work_iq_access_token=work_iq_access_token,
                 )
             ):
                 yield event
