@@ -527,13 +527,13 @@ function App() {
                     />
                   ) : (
                     <InputForm
+                      key={voiceDraft.id}
                       onSubmit={(msg) => { handleSendMessage(msg); setVoiceDraft(prev => ({ ...prev, text: '' })) }}
                       disabled={isRunning}
                       placeholder={t('input.placeholder')}
                       sendLabel={t('input.send')}
                       label={t('input.label')}
                       initialValue={voiceDraft.text}
-                      initialValueVersion={voiceDraft.id}
                       t={t}
                     />
                   )}

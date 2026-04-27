@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useState, type FormEvent } from 'react'
 
 const MAX_LENGTH = 5000
 const WARN_THRESHOLD = 4500
@@ -10,7 +10,6 @@ interface InputFormProps {
   sendLabel: string
   label: string
   initialValue?: string
-  initialValueVersion?: number
   t: (key: string) => string
 }
 
@@ -21,7 +20,6 @@ export function InputForm({
   sendLabel,
   label,
   initialValue,
-  initialValueVersion,
   t,
 }: InputFormProps) {
   const [message, setMessage] = useState(initialValue ?? '')
@@ -35,12 +33,6 @@ export function InputForm({
   const isOverLimit = message.length > MAX_LENGTH
   const isNearLimit = message.length > WARN_THRESHOLD
   const canSubmit = !disabled && message.trim().length > 0 && !isOverLimit
-
-  useEffect(() => {
-    if (initialValue !== undefined) {
-      setMessage(initialValue)
-    }
-  }, [initialValue, initialValueVersion])
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault()
