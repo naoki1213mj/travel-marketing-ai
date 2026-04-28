@@ -3,21 +3,21 @@
 
 :root {
   color-scheme: light;
-  --app-bg: #eef3f1;
-  --bg-accent: rgba(13, 148, 136, 0.16);
-  --bg-accent-strong: rgba(14, 116, 144, 0.12);
-  --panel-bg: rgba(255, 255, 255, 0.82);
-  --panel-strong: rgba(248, 250, 252, 0.94);
-  --surface: rgba(255, 255, 255, 0.7);
-  --panel-border: rgba(15, 23, 42, 0.08);
+  --app-bg: #e8eef5;
+  --bg-accent: rgba(14, 116, 144, 0.18);
+  --bg-accent-strong: rgba(15, 118, 110, 0.14);
+  --panel-bg: rgba(255, 255, 255, 0.94);
+  --panel-strong: rgba(248, 250, 252, 0.98);
+  --surface: rgba(255, 255, 255, 0.98);
+  --panel-border: rgba(15, 23, 42, 0.14);
   --text-primary: #0f172a;
-  --text-secondary: #334155;
-  --text-muted: #64748b;
-  --accent: #0f766e;
-  --accent-strong: #115e59;
-  --accent-soft: rgba(15, 118, 110, 0.14);
-  --input-bg: #f1f5f9;
-  --input-border: rgba(15, 23, 42, 0.15);
+  --text-secondary: #1e293b;
+  --text-muted: #475569;
+  --accent: #0e7490;
+  --accent-strong: #0f766e;
+  --accent-soft: rgba(14, 116, 144, 0.16);
+  --input-bg: #ffffff;
+  --input-border: rgba(15, 23, 42, 0.22);
   --user-bubble-bg: #115e59;
   --user-bubble-text: #ffffff;
   --warning-surface: #fff7ed;

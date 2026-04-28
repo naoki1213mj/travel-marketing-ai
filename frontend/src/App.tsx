@@ -539,7 +539,7 @@ function App() {
                   : t('approval.awaiting_action')}
               </div>
             ) : (
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
+              <div className="flex flex-col gap-3">
                 <div className="flex-1">
                   {state.status === 'completed' ? (
                     <RefineChat
@@ -562,19 +562,26 @@ function App() {
                     />
                   )}
                 </div>
-                <VoiceInput
-                  onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
-                  disabled={isRunning}
-                  voiceLiveAvailable={voiceLiveAvailable}
-                  voiceTalkToStartAvailable={voiceTalkToStartAvailable}
-                  t={t}
-                />
-                <PdfUpload
-                  disabled={isRunning}
-                  conversationId={state.conversationId ?? draftSourceConversationId}
-                  onConversationId={setDraftSourceConversationId}
-                  t={t}
-                />
+                <div className="flex flex-col gap-2 rounded-[22px] border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-3 sm:flex-row sm:items-start sm:justify-between">
+                  <span className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-muted)]">
+                    {t('input.tools.label')}
+                  </span>
+                  <div className="flex flex-1 flex-wrap items-start gap-3 sm:justify-end">
+                    <VoiceInput
+                      onTranscript={(text) => setVoiceDraft(prev => ({ id: prev.id + 1, text }))}
+                      disabled={isRunning}
+                      voiceLiveAvailable={voiceLiveAvailable}
+                      voiceTalkToStartAvailable={voiceTalkToStartAvailable}
+                      t={t}
+                    />
+                    <PdfUpload
+                      disabled={isRunning}
+                      conversationId={state.conversationId ?? draftSourceConversationId}
+                      onConversationId={setDraftSourceConversationId}
+                      t={t}
+                    />
+                  </div>
+                </div>
               </div>
             )}
           </div>
