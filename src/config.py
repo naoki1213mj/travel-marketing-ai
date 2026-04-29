@@ -30,6 +30,7 @@ class AppSettings(TypedDict):
     fabric_lakehouse_database: str
     fabric_sales_table: str
     fabric_reviews_table: str
+    fabric_data_agent_runtime: str
     allowed_origins: str
     content_understanding_endpoint: str
     speech_service_endpoint: str
@@ -94,6 +95,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "fabric_lakehouse_database": ("FABRIC_LAKEHOUSE_DATABASE", "FABRIC_DATABASE_NAME"),
     "fabric_sales_table": ("FABRIC_SALES_TABLE",),
     "fabric_reviews_table": ("FABRIC_REVIEWS_TABLE",),
+    "fabric_data_agent_runtime": ("FABRIC_DATA_AGENT_RUNTIME", "ENABLE_FABRIC_DATA_AGENT_REST"),
     "allowed_origins": ("ALLOWED_ORIGINS",),
     "content_understanding_endpoint": ("CONTENT_UNDERSTANDING_ENDPOINT",),
     "speech_service_endpoint": ("SPEECH_SERVICE_ENDPOINT",),
@@ -154,6 +156,7 @@ _DEFAULTS: dict[str, str] = {
     "fabric_lakehouse_database": "Travel_Lakehouse",
     "fabric_sales_table": "sales_results",
     "fabric_reviews_table": "customer_reviews",
+    "fabric_data_agent_runtime": "sql",
     "allowed_origins": "http://localhost:5173",
     "gpt_image_15_deployment_name": "gpt-image-1.5",
     "gpt_image_2_deployment_name": "gpt-image-2",

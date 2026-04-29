@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import struct
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -88,6 +89,7 @@ _DATA_AGENT_RESULT_TOOL_NAMES = {
     "trace.analyze_ontology",
     "analyze.database.execute",
 }
+_DATA_AGENT_POLL_TIMEOUT_SECONDS = 90
 _KNOWN_DESTINATIONS = (
     "沖縄",
     "北海道",
@@ -123,6 +125,16 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
     has_weak_phrase = any(pattern.lower() in normalized for pattern in _LOW_CONFIDENCE_DATA_AGENT_PATTERNS)
     has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|★|/5)", answer))
     return has_weak_phrase and not has_specific_metric
+
+
+def _resolve_fabric_data_agent_runtime() -> str:
+    """Fabric Data Agent REST を使うか、安定した SQL 経路を優先するかを返す。"""
+    raw = str(get_settings().get("fabric_data_agent_runtime", "") or "").strip().lower()
+    if raw in {"true", "1", "yes", "enabled", "rest", "data_agent"}:
+        return "rest"
+    if raw in {"auto"}:
+        return "rest"
+    return "sql"
 
 
 def _build_data_agent_question(question: str) -> str:
@@ -338,12 +350,23 @@ async def _query_data_agent(question: str) -> str | None:
     try:
         from openai import OpenAI
 
-        # Fabric Data Agent は OpenAI Assistants API 互換エンドポイントを公開する
+        # Fabric Data Agent は OpenAI Assistants API 互換エンドポイントを公開する。
+        # SDK と同じ Fabric 固有ヘッダーを付与し、Published URL 直呼び出しでも
+        # production Data Agent として扱われるようにする。
+        activity_id = str(uuid.uuid4())
         client = OpenAI(
             base_url=base_url,
             api_key="",
-            default_headers={"Authorization": f"Bearer {token.token}"},
+            default_headers={
+                "Authorization": f"Bearer {token.token}",
+                "Accept": "application/json",
+                "ActivityId": activity_id,
+                "x-ms-workload-resource-moniker": activity_id,
+                "x-ms-ai-assistant-scenario": "aiskill",
+                "x-ms-ai-aiskill-stage": "production",
+            },
             default_query={"api-version": "2024-05-01-preview"},
+            timeout=_DATA_AGENT_POLL_TIMEOUT_SECONDS + 15,
         )
 
         # スレッド作成 → メッセージ送信 → 実行 → 結果取得
@@ -359,20 +382,22 @@ async def _query_data_agent(question: str) -> str | None:
             assistant_id=assistant.id,
         )
 
-        # ポーリング（最大 60 秒）
+        # ポーリング（最大 90 秒）。Fabric Data Agent は NL2SQL 生成と検証で
+        # 60 秒を超えることがあるため、デモ中の不要な SQL 退避を避ける。
         import time as _time
 
         terminal_states = {"completed", "failed", "cancelled", "requires_action"}
         start = _time.time()
         while run.status not in terminal_states:
-            if _time.time() - start > 60:
+            if _time.time() - start > _DATA_AGENT_POLL_TIMEOUT_SECONDS:
                 logger.warning("Fabric Data Agent: ポーリングタイムアウト (status=%s)", run.status)
                 break
             run = client.beta.threads.runs.retrieve(thread_id=thread.id, run_id=run.id)
             await __import__("asyncio").sleep(2)
 
         if run.status != "completed":
-            logger.warning("Fabric Data Agent: run 失敗 (status=%s)", run.status)
+            last_error = getattr(run, "last_error", None)
+            logger.warning("Fabric Data Agent: run 失敗 (status=%s, last_error=%s)", run.status, last_error)
             # クリーンアップ
             try:
                 client.beta.threads.delete(thread.id)
@@ -844,7 +869,8 @@ async def query_data_agent(question: str) -> str:
         question: データに関する質問（例: 「沖縄プランの季節別売上推移は？」）
     """
     async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
-        result = await _query_data_agent(question)
+        runtime = _resolve_fabric_data_agent_runtime()
+        result = await _query_data_agent(question) if runtime == "rest" else None
         if result and not _is_low_confidence_data_agent_answer(result):
             _emit_evidence_event(
                 "query_data_agent",
@@ -867,10 +893,13 @@ async def query_data_agent(question: str) -> str:
         fabric_sql_answer = _build_fabric_sql_analysis(question)
         if fabric_sql_answer:
             answer = fabric_sql_answer
-            source = "Fabric SQL fallback"
-            metadata = {"runtime": "fabric_sql_fallback"}
-            title = "Fabric SQL フォールバック"
-            relevance = 0.75
+            source = "Fabric SQL primary" if runtime != "rest" else "Fabric SQL fallback"
+            metadata = {
+                "runtime": "fabric_sql_primary" if runtime != "rest" else "fabric_sql_fallback",
+                "data_agent_rest": "disabled" if runtime != "rest" else "unavailable",
+            }
+            title = "Fabric SQL 分析" if runtime != "rest" else "Fabric SQL フォールバック"
+            relevance = 0.88 if runtime != "rest" else 0.75
             if result:
                 answer = (
                     "Fabric Data Agent の回答が十分な具体データを含まなかったため、"
@@ -881,6 +910,12 @@ async def query_data_agent(question: str) -> str:
                 metadata = {"runtime": "fabric_sql_supplement", "data_agent_quality": "low_confidence"}
                 title = "Fabric SQL 補強"
                 relevance = 0.9
+            elif runtime != "rest":
+                answer = (
+                    "Fabric Data Agent REST 経路は preview の thread 再利用で不安定なため、"
+                    "デモ安定性を優先して同じ ws-3iq-demo Lakehouse の SQL endpoint で直接分析しました。\n"
+                    f"{fabric_sql_answer}"
+                )
             _emit_evidence_event(
                 "query_data_agent",
                 evidence=[

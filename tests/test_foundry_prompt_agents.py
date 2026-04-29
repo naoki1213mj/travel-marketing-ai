@@ -196,12 +196,21 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_
     assert "ユーザー入力:\ntest input" in kwargs["input"]
     assert kwargs["extra_body"] == {
         "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
-        "tool_choice": {"type": "mcp", "server_label": "mcp_M365Copilot"},
     }
-    assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]
+    assert kwargs["tool_choice"] == {"type": "mcp", "server_label": "mcp_M365Copilot"}
+    assert kwargs["tools"] == [
+        {
+            "type": "mcp",
+            "server_label": "mcp_M365Copilot",
+            "server_url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            "project_connection_id": "WorkIQCopilot",
+            "authorization": "Bearer delegated-token",
+            "require_approval": "never",
+            "server_description": "Microsoft 365 workplace context tools for organizational emails, meetings, chats, and documents.",
+        }
+    ]
+    assert fake_client.openai_client_kwargs == [{}]
     assert "instructions" not in kwargs
-    assert "tools" not in kwargs
-    assert "tool_choice" not in kwargs
 
 
 def test_build_work_iq_responses_tool_keeps_existing_bearer_prefix() -> None:

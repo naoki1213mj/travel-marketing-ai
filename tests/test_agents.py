@@ -228,6 +228,7 @@ class TestDataSearchTools:
             return None
 
         monkeypatch.setattr(ds, "_query_data_agent", unavailable_data_agent)
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
         monkeypatch.setattr(
             ds,
             "_get_sales_data_from_fabric",
@@ -257,6 +258,44 @@ class TestDataSearchTools:
         assert "ws-3iq-demo Lakehouse" in parsed["answer"]
 
     @pytest.mark.asyncio
+    async def test_query_data_agent_uses_fabric_sql_primary_when_rest_disabled(self, monkeypatch):
+        """Data Agent REST 無効時は不安定な preview 経路を呼ばず SQL 分析を primary にする。"""
+        import src.agents.data_search as ds
+
+        async def unexpected_data_agent(question: str) -> str:
+            raise AssertionError("Data Agent REST should be skipped")
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "sql"})
+        monkeypatch.setattr(ds, "_query_data_agent", unexpected_data_agent)
+        monkeypatch.setattr(
+            ds,
+            "_get_sales_data_from_fabric",
+            lambda **_kwargs: [
+                {
+                    "plan_name": "沖縄 2泊3日",
+                    "destination": "沖縄",
+                    "season": "spring",
+                    "revenue": 1022000,
+                    "pax": 17,
+                    "customer_segment": "30代",
+                    "booking_count": 6,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            ds,
+            "_get_reviews_from_fabric",
+            lambda **_kwargs: [{"plan_name": "沖縄", "rating": 5, "comment": "海がとても綺麗でした！"}],
+        )
+
+        result = await ds.query_data_agent("春の沖縄ファミリー向け施策を分析して")
+        parsed = json.loads(result)
+
+        assert parsed["source"] == "Fabric SQL primary"
+        assert "Fabric Data Agent REST 経路は preview" in parsed["answer"]
+        assert "沖縄 2泊3日" in parsed["answer"]
+
+    @pytest.mark.asyncio
     async def test_query_data_agent_supplements_low_confidence_answer_with_fabric_sql(self, monkeypatch):
         """Data Agent が弱い回答を返した場合は Fabric SQL の具体データで補強する。"""
         import src.agents.data_search as ds
@@ -264,6 +303,7 @@ class TestDataSearchTools:
         async def weak_data_agent(question: str) -> str:
             return "指定された条件で売上トレンドやレビュー評価の詳細は提示できませんでした。必要であれば追加提示してください。"
 
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
         monkeypatch.setattr(ds, "_query_data_agent", weak_data_agent)
         monkeypatch.setattr(
             ds,
@@ -403,6 +443,16 @@ class TestDataSearchTools:
         monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_sales_table": "travel_sales;DROP TABLE x"})
 
         assert ds._fabric_table_name("fabric_sales_table", "sales_results") == "sales_results"
+
+    def test_resolve_fabric_data_agent_runtime_defaults_to_sql(self, monkeypatch):
+        """Data Agent REST preview は明示 opt-in のときだけ使う。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {})
+        assert ds._resolve_fabric_data_agent_runtime() == "sql"
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
+        assert ds._resolve_fabric_data_agent_runtime() == "rest"
 
 
 class TestRegulationCheckTools:

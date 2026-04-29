@@ -100,18 +100,22 @@ az containerapp update --name <app> --resource-group <rg> \
     SPEECH_SERVICE_REGION=eastus2
 ```
 
-### 4.4 Fabric Data Agent
+### 4.4 Fabric Data Agent / Fabric SQL
 
-Agent1 は `FABRIC_DATA_AGENT_URL` を最優先で使用します:
+Agent1 のデモ既定は `FABRIC_DATA_AGENT_RUNTIME=sql` です。Fabric Data Agent の `aiassistant/openai`
+Published URL は preview の thread / active run 再利用で不安定になる場合があるため、Web UI では
+同じ Lakehouse の `FABRIC_SQL_ENDPOINT` を primary として使い、決定的な集計結果を返します。
+
+Fabric Data Agent REST 経路を実験的に有効化する場合だけ `FABRIC_DATA_AGENT_RUNTIME=rest` を設定します:
 
 ```bash
 az containerapp update --name <app> --resource-group <rg> \
-  --set-env-vars FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<ws>/dataagents/<da>/aiassistant/openai
+  --set-env-vars FABRIC_DATA_AGENT_RUNTIME=rest FABRIC_DATA_AGENT_URL=https://api.fabric.microsoft.com/v1/workspaces/<ws>/dataagents/<da>/aiassistant/openai
 ```
 
-利用不可の場合は `FABRIC_SQL_ENDPOINT` → CSV の順でフォールバックします。
+`FABRIC_SQL_ENDPOINT` が利用不可の場合は CSV にフォールバックします。
 GitHub Actions の Deploy workflow は production environment / repository variables の
-`FABRIC_DATA_AGENT_URL`, `FABRIC_SQL_ENDPOINT`, `FABRIC_LAKEHOUSE_DATABASE`, `FABRIC_SALES_TABLE`, `FABRIC_REVIEWS_TABLE` を Container App に同期します。
+`FABRIC_DATA_AGENT_URL`, `FABRIC_DATA_AGENT_RUNTIME`, `FABRIC_SQL_ENDPOINT`, `FABRIC_LAKEHOUSE_DATABASE`, `FABRIC_SALES_TABLE`, `FABRIC_REVIEWS_TABLE` を Container App に同期します。
 
 #### 4.4.1 デモ向け Data Agent チューニング
 

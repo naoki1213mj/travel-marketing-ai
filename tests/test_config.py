@@ -32,6 +32,8 @@ def test_get_settings_returns_all_fields(monkeypatch):
         "FABRIC_DATABASE_NAME",
         "FABRIC_SALES_TABLE",
         "FABRIC_REVIEWS_TABLE",
+        "FABRIC_DATA_AGENT_RUNTIME",
+        "ENABLE_FABRIC_DATA_AGENT_REST",
         "ALLOWED_ORIGINS",
         "CONTENT_UNDERSTANDING_ENDPOINT",
         "SPEECH_SERVICE_ENDPOINT",
@@ -152,6 +154,17 @@ def test_fabric_table_defaults(monkeypatch):
 
     assert settings["fabric_sales_table"] == "sales_results"
     assert settings["fabric_reviews_table"] == "customer_reviews"
+
+
+def test_fabric_data_agent_runtime_defaults_to_sql(monkeypatch):
+    """Fabric Data Agent REST preview は既定で使わず SQL primary にする。"""
+    _disable_azd_env(monkeypatch)
+    monkeypatch.delenv("FABRIC_DATA_AGENT_RUNTIME", raising=False)
+    monkeypatch.delenv("ENABLE_FABRIC_DATA_AGENT_REST", raising=False)
+
+    settings = get_settings()
+
+    assert settings["fabric_data_agent_runtime"] == "sql"
 
 
 def test_identity_boundary_defaults_to_untrusted_header_claims(monkeypatch):
