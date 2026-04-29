@@ -60,7 +60,7 @@ describe('getDelegatedApiAuth', () => {
     })
   })
 
-  it('requires Graph fallback auth for interactive foundry_tool requests', async () => {
+  it('does not block interactive foundry_tool requests when optional Graph fallback auth is unavailable', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockResolvedValue({ token: '', status: 'auth_required' })
 
@@ -68,8 +68,10 @@ describe('getDelegatedApiAuth', () => {
 
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
     expect(result).toEqual({
-      headers: {},
-      status: 'auth_required',
+      headers: {
+        Authorization: 'Bearer foundry-token',
+      },
+      status: 'ok',
     })
   })
 
@@ -116,7 +118,7 @@ describe('getDelegatedApiAuth', () => {
     expect(warnSpy).toHaveBeenCalledWith('Optional Work IQ Graph auth failed:', expect.any(Error))
   })
 
-  it('fails closed when interactive foundry_tool Graph fallback auth throws', async () => {
+  it('does not block interactive foundry_tool requests when optional Graph fallback auth throws', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockRejectedValue(new Error('graph cache failed'))
@@ -124,8 +126,10 @@ describe('getDelegatedApiAuth', () => {
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
 
     expect(result).toEqual({
-      headers: {},
-      status: 'unavailable',
+      headers: {
+        Authorization: 'Bearer foundry-token',
+      },
+      status: 'ok',
     })
     expect(warnSpy).toHaveBeenCalledWith('Optional Work IQ Graph auth failed:', expect.any(Error))
   })

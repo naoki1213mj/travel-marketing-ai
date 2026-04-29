@@ -199,17 +199,8 @@ def _build_marketing_plan_responses_web_search_tool() -> dict[str, object]:
     }
 
 
-def _normalize_mcp_authorization_value(access_token: str) -> str:
-    """MCP authorization に渡す値を Bearer 形式へ正規化する。"""
-    token = access_token.strip()
-    if token.lower().startswith("bearer "):
-        return token
-    return f"Bearer {token}"
-
-
 def _build_work_iq_responses_tool(
     server_url: str,
-    access_token: str,
     *,
     connection_name: str,
 ) -> dict[str, object]:
@@ -219,7 +210,6 @@ def _build_work_iq_responses_tool(
         "server_label": _WORK_IQ_SERVER_LABEL,
         "server_url": server_url,
         "project_connection_id": connection_name,
-        "authorization": _normalize_mcp_authorization_value(access_token),
         "require_approval": "never",
         "server_description": _WORK_IQ_SERVER_DESCRIPTION,
     }
@@ -264,7 +254,6 @@ def run_marketing_plan_prompt_agent(
                 )
             work_iq_tool = _build_work_iq_responses_tool(
                 work_iq_connection["server_url"],
-                access_token,
                 connection_name=work_iq_connection["connection_name"],
             )
             response_kwargs: dict[str, object] = {
@@ -279,7 +268,7 @@ def run_marketing_plan_prompt_agent(
                     "agent_reference": {"name": agent.name, "type": "agent_reference"},
                 },
             }
-            openai_client = project_client.get_openai_client()
+            openai_client = project_client.get_openai_client(api_key=access_token)
         else:
             response_kwargs = {
                 "model": model_name,

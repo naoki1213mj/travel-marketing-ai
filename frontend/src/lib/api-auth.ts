@@ -102,7 +102,7 @@ export async function getDelegatedApiAuth(
     const graphResult = await getWorkIqGraphAuth(config, options?.interactive === true)
     if (graphResult.status === 'ok' && graphResult.token) {
       headers['X-Work-IQ-Graph-Authorization'] = `Bearer ${graphResult.token}`
-    } else if (options?.interactive === true) {
+    } else if (graphResult.status === 'redirecting') {
       return {
         headers: {},
         status: graphResult.status,
@@ -110,9 +110,6 @@ export async function getDelegatedApiAuth(
     }
   } catch (error) {
     console.warn('Optional Work IQ Graph auth failed:', error)
-    if (options?.interactive === true) {
-      return { headers: {}, status: 'unavailable' }
-    }
   }
   return {
     headers,

@@ -204,24 +204,23 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_
             "server_label": "mcp_M365Copilot",
             "server_url": "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
             "project_connection_id": "WorkIQCopilot",
-            "authorization": "Bearer delegated-token",
             "require_approval": "never",
             "server_description": "Microsoft 365 workplace context tools for organizational emails, meetings, chats, and documents.",
         }
     ]
-    assert fake_client.openai_client_kwargs == [{}]
+    assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]
     assert "instructions" not in kwargs
 
 
-def test_build_work_iq_responses_tool_keeps_existing_bearer_prefix() -> None:
-    """Bearer 付き token は二重 prefix しない。"""
+def test_build_work_iq_responses_tool_uses_connection_without_inline_token() -> None:
+    """Work IQ MCP は connection の OAuth passthrough を使い、token を tool に直書きしない。"""
     tool = module._build_work_iq_responses_tool(
         "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
-        "Bearer delegated-token",
         connection_name="WorkIQCopilot",
     )
 
-    assert tool["authorization"] == "Bearer delegated-token"
+    assert tool["project_connection_id"] == "WorkIQCopilot"
+    assert "authorization" not in tool
 
 
 def test_run_marketing_plan_prompt_agent_raises_when_work_iq_token_missing(monkeypatch) -> None:
