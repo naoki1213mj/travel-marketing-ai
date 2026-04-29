@@ -71,6 +71,7 @@ from src.work_iq_session import (
 router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
+_BROCHURE_AGENT_MAX_WAIT_SECONDS = 240.0
 
 _APPROVAL_KEYWORDS = {
     "approve",
@@ -2134,42 +2135,15 @@ async def _build_brochure_fallback_outcome(
     model_settings: dict | None = None,
 ) -> AgentExecutionOutcome:
     """Agent4 が失敗したときに最低限の販促物を返す。"""
-    from src.agents.brochure_gen import (
-        _FALLBACK_IMAGE,
-        generate_banner_image,
-        generate_hero_image,
-        pop_pending_images,
-        set_current_conversation_id,
-        set_current_image_settings,
-    )
+    from src.agents.brochure_gen import _FALLBACK_IMAGE, set_current_conversation_id, set_current_image_settings
 
     title = _extract_plan_title(source_text)
     set_current_conversation_id(conversation_id)
     if model_settings and model_settings.get("image_settings"):
         set_current_image_settings(model_settings["image_settings"])
-    await generate_hero_image(
-        prompt="Bright family travel campaign hero image with resort atmosphere",
-        destination=title,
-        style="photorealistic",
-    )
-    await generate_banner_image(
-        prompt=(
-            f"Instagram square travel promotion for {title}, premium travel campaign, "
-            "strong focal subject, clean visual hierarchy"
-        ),
-        platform="instagram",
-    )
-    await generate_banner_image(
-        prompt=(
-            f"Wide X social banner for {title}, cinematic horizontal travel landscape, "
-            "clear safe margins for overlay copy"
-        ),
-        platform="x",
-    )
-    pending_images = pop_pending_images(conversation_id)
-    hero_image = pending_images.get("hero", _FALLBACK_IMAGE)
-    instagram_banner_image = pending_images.get("banner_instagram", _FALLBACK_IMAGE)
-    x_banner_image = pending_images.get("banner_x", pending_images.get("banner_twitter", _FALLBACK_IMAGE))
+    hero_image = _FALLBACK_IMAGE
+    instagram_banner_image = _FALLBACK_IMAGE
+    x_banner_image = _FALLBACK_IMAGE
     escaped_source = escape(source_text).replace("\n", "<br />")
     html_content = f"""<!DOCTYPE html>
 <html lang=\"ja\">
@@ -2788,7 +2762,16 @@ async def _execute_agent(
                     step=step,
                     step_key=resolve_step_key(agent_name),
                 ):
-                    result = await agent.run(user_input)
+                    run_agent = agent.run(user_input)
+                    if agent_name == "brochure-gen-agent":
+                        try:
+                            result = await asyncio.wait_for(run_agent, timeout=_BROCHURE_AGENT_MAX_WAIT_SECONDS)
+                        except TimeoutError as exc:
+                            raise TimeoutError(
+                                f"brochure-gen-agent timed out after {_BROCHURE_AGENT_MAX_WAIT_SECONDS:.0f}s"
+                            ) from exc
+                    else:
+                        result = await run_agent
             collected_tool_events = attempt_tool_events
             break
         except Exception as exc:
@@ -2931,7 +2914,9 @@ async def _execute_agent(
                     logger.warning("Code Interpreter 404 を検出。無効化してリトライします: %s", exc)
                     continue
 
-            if agent_name == "brochure-gen-agent" and attempt == max_attempts:
+            if agent_name == "brochure-gen-agent" and (
+                isinstance(exc, TimeoutError) or attempt == max_attempts
+            ):
                 logger.warning("brochure-gen-agent の通常生成に失敗したためフォールバックを返します: %s", exc)
                 fallback_outcome = await _build_brochure_fallback_outcome(
                     events=events,

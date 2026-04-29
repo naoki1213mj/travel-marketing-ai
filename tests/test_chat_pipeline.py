@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import urllib.parse
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -596,6 +597,45 @@ async def test_execute_agent_uses_legacy_marketing_agent_when_work_iq_is_off(mon
         and payload.get("tool") in {"foundry_prompt_agent", "workiq_foundry_tool"}
         for event_name, payload in parsed
     )
+
+
+@pytest.mark.asyncio
+async def test_execute_agent_brochure_timeout_returns_fallback(monkeypatch) -> None:
+    """ブローシャ生成が長時間化しても bounded fallback で SSE を完了する。"""
+
+    class _SlowBrochureAgent:
+        async def run(self, user_input: str):
+            del user_input
+            await asyncio.sleep(1)
+            return SimpleNamespace(output_text="<html><body>too late</body></html>")
+
+    def fake_create_brochure_agent(model_settings: dict | None = None):
+        del model_settings
+        return _SlowBrochureAgent()
+
+    monkeypatch.setattr(chat_module, "_BROCHURE_AGENT_MAX_WAIT_SECONDS", 0.01)
+    monkeypatch.setattr("src.agents.create_brochure_gen_agent", fake_create_brochure_agent)
+
+    outcome = await chat_module._execute_agent(
+        agent_name="brochure-gen-agent",
+        agent_step=5,
+        user_input="# テスト旅行プラン\n規制チェック済みの企画書本文",
+        conversation_id="conv-brochure-timeout",
+        model_settings={"model": "gpt-5-4-mini"},
+        include_done=True,
+    )
+
+    parsed = [_parse_sse(event) for event in outcome["events"]]
+
+    assert outcome["success"] is True
+    assert "フォールバック生成" in outcome["text"]
+    assert any(
+        event_name == chat_module.SSEEventType.AGENT_PROGRESS
+        and payload.get("agent") == "brochure-gen-agent"
+        and payload.get("status") == "completed"
+        for event_name, payload in parsed
+    )
+    assert parsed[-1][0] == chat_module.SSEEventType.DONE
 
 
 @pytest.mark.asyncio
@@ -1689,29 +1729,10 @@ def test_inject_images_into_html_adds_platform_specific_banner_gallery() -> None
 
 
 @pytest.mark.asyncio
-async def test_build_brochure_fallback_outcome_generates_instagram_and_x_banners(monkeypatch) -> None:
-    """フォールバック販促物でも Instagram と X の両バナーを生成する"""
-    banner_calls: list[tuple[str, str]] = []
-
-    async def fake_generate_hero_image(prompt: str, destination: str, style: str = "photorealistic") -> str:
-        return json.dumps({"status": "generated", "type": "hero"})
-
-    async def fake_generate_banner_image(prompt: str, platform: str = "instagram") -> str:
-        banner_calls.append((prompt, platform))
-        return json.dumps({"status": "generated", "type": "banner", "platform": platform})
-
-    monkeypatch.setattr("src.agents.brochure_gen.generate_hero_image", fake_generate_hero_image)
-    monkeypatch.setattr("src.agents.brochure_gen.generate_banner_image", fake_generate_banner_image)
+async def test_build_brochure_fallback_outcome_uses_static_fallback_banners(monkeypatch) -> None:
+    """フォールバック販促物は外部画像 API を呼ばずに即時完了する。"""
     monkeypatch.setattr("src.agents.brochure_gen.set_current_conversation_id", lambda _conversation_id: None)
     monkeypatch.setattr("src.agents.brochure_gen.set_current_image_settings", lambda _settings: None)
-    monkeypatch.setattr(
-        "src.agents.brochure_gen.pop_pending_images",
-        lambda _conversation_id: {
-            "hero": "data:image/png;base64,hero",
-            "banner_instagram": "data:image/png;base64,instagram",
-            "banner_x": "data:image/png;base64,xbanner",
-        },
-    )
 
     outcome = await chat_module._build_brochure_fallback_outcome(
         events=[],
@@ -1723,19 +1744,10 @@ async def test_build_brochure_fallback_outcome_generates_instagram_and_x_banners
         start_time=0.0,
     )
 
-    assert banner_calls == [
-        (
-            "Instagram square travel promotion for 雪灯りのご褒美ステイ北海道, premium travel campaign, strong focal subject, clean visual hierarchy",
-            "instagram",
-        ),
-        (
-            "Wide X social banner for 雪灯りのご褒美ステイ北海道, cinematic horizontal travel landscape, clear safe margins for overlay copy",
-            "x",
-        ),
-    ]
     assert outcome["tool_calls"] == 3
     assert "Instagram 投稿用" in outcome["text"]
     assert "X 投稿用" in outcome["text"]
+    assert "Image unavailable" in urllib.parse.unquote(outcome["text"])
     image_events = [event for event in outcome["events"] if event.startswith("event: image")]
     assert len(image_events) == 3
 
