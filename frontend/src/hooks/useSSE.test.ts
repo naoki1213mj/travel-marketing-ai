@@ -7,7 +7,7 @@ import { buildRestoredPipelineState, useSSE } from './useSSE'
 const originalFetch = globalThis.fetch
 const { connectSSE, sendApproval } = vi.hoisted(() => ({
   connectSSE: vi.fn(async () => {}),
-  sendApproval: vi.fn(async () => {}),
+  sendApproval: vi.fn(async () => 'started'),
 }))
 const { getDelegatedApiAuth } = vi.hoisted(() => ({
   getDelegatedApiAuth: vi.fn(async () => ({ headers: {}, status: 'ok' })),
@@ -615,7 +615,7 @@ describe('buildRestoredPipelineState', () => {
         expect.any(AbortSignal),
         expect.objectContaining({ workIqRuntime: 'foundry_tool' }),
         { workIqEnabled: true, workIqSourceScope: ['emails'] },
-        expect.objectContaining({ authInteractionMode: 'silent' }),
+        expect.not.objectContaining({ authInteractionMode: 'silent' }),
       )
     })
 
@@ -945,6 +945,104 @@ describe('buildRestoredPipelineState', () => {
       expect.any(AbortSignal),
       true,
     )
+  })
+
+  it('restores approval state when Work IQ approval needs an interactive auth redirect', async () => {
+    sendApproval.mockResolvedValueOnce('redirecting')
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      status: 'awaiting_approval',
+      input: '京都の秋プランを企画して',
+      metadata: {
+        work_iq_session: {
+          enabled: true,
+          status: 'completed',
+          source_scope: ['emails'],
+        },
+      },
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-workiq-redirect',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    })))
+
+    const { result } = renderHook(() => useSSE())
+
+    await act(async () => {
+      await result.current.restoreConversation('conv-workiq-redirect')
+    })
+
+    await act(async () => {
+      await result.current.approve('approve')
+    })
+
+    expect(result.current.state.status).toBe('approval')
+    expect(result.current.state.approvalRequest?.conversation_id).toBe('conv-workiq-redirect')
+  })
+
+  it('resumes a pending Work IQ approval after the auth redirect round-trip', async () => {
+    const approvalDocument = {
+      status: 'awaiting_approval',
+      input: '京都の秋プランを企画して',
+      metadata: {
+        work_iq_session: {
+          enabled: true,
+          status: 'completed',
+          source_scope: ['emails'],
+        },
+      },
+      messages: [
+        { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+        {
+          event: 'approval_request',
+          data: {
+            prompt: '確認してください',
+            conversation_id: 'conv-workiq-approval-resume',
+            plan_markdown: '# Plan v1',
+          },
+        },
+      ],
+    }
+    sendApproval
+      .mockResolvedValueOnce('redirecting')
+      .mockResolvedValueOnce('started')
+    vi.mocked(globalThis.fetch)
+      .mockResolvedValueOnce(new Response(JSON.stringify(approvalDocument)))
+      .mockResolvedValueOnce(new Response(JSON.stringify(approvalDocument)))
+
+    const initialHook = renderHook(() => useSSE())
+
+    await act(async () => {
+      await initialHook.result.current.restoreConversation('conv-workiq-approval-resume')
+    })
+
+    await act(async () => {
+      await initialHook.result.current.approve('approve')
+    })
+
+    expect(window.sessionStorage.getItem('workIqPendingApprovalRequest')).toContain('conv-workiq-approval-resume')
+
+    initialHook.unmount()
+
+    renderHook(() => useSSE())
+
+    await waitFor(() => {
+      expect(sendApproval).toHaveBeenCalledTimes(2)
+    })
+    expect(sendApproval).toHaveBeenLastCalledWith(
+      'conv-workiq-approval-resume',
+      'approve',
+      expect.any(Object),
+      expect.any(AbortSignal),
+      true,
+    )
+    expect(window.sessionStorage.getItem('workIqPendingApprovalRequest')).toBeNull()
   })
 
   it('restores conversations with cache-busting fetch options', async () => {

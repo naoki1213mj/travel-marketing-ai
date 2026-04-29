@@ -278,14 +278,17 @@ export async function sendApproval(
   handlers: SSEHandlers,
   signal?: AbortSignal,
   useDelegatedAuth = false,
-): Promise<void> {
+): Promise<ConnectSSEStartResult> {
   const combinedSignal = buildSignal(signal)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (useDelegatedAuth) {
-    const delegatedAuth = await getDelegatedApiAuth({ workIqRuntime: 'foundry_tool' })
+    const delegatedAuth = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
+    if (delegatedAuth.status === 'redirecting') {
+      return 'redirecting'
+    }
     if (delegatedAuth.status !== 'ok') {
       handlers.error?.(buildWorkIqAuthError(delegatedAuth.status))
-      return
+      return 'blocked'
     }
     Object.assign(headers, delegatedAuth.headers)
   }
@@ -301,15 +304,15 @@ export async function sendApproval(
   } catch (err: unknown) {
     if (isAbortError(err, combinedSignal)) {
       handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
-      return
+      return 'blocked'
     }
     handlers.error?.(buildNetworkError(err))
-    return
+    return 'blocked'
   }
 
   if (!res.ok) {
     handlers.error?.({ message: `HTTP ${res.status}`, code: 'HTTP_ERROR' })
-    return
+    return 'blocked'
   }
 
   try {
@@ -317,8 +320,10 @@ export async function sendApproval(
   } catch (err: unknown) {
     if (isAbortError(err, combinedSignal)) {
       handlers.error?.({ message: 'リクエストがタイムアウトまたはキャンセルされました', code: 'ABORT' })
-      return
+      return 'blocked'
     }
     handlers.error?.(buildNetworkError(err))
+    return 'blocked'
   }
+  return 'started'
 }

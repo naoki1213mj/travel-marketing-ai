@@ -43,6 +43,7 @@ const MAX_TOOL_EVENTS = 50
 const PIPELINE_TOTAL_STEPS = 5
 const DRAFT_EVALUATION_CACHE_KEY = '__draft__'
 const PENDING_WORKIQ_REQUEST_KEY = 'workIqPendingChatRequest'
+const PENDING_WORKIQ_APPROVAL_KEY = 'workIqPendingApprovalRequest'
 
 export interface AgentProgress {
   agent: string
@@ -335,6 +336,13 @@ interface PendingWorkIqRequest {
   options?: ChatRequestOptions
 }
 
+interface PendingWorkIqApprovalRequest {
+  threadId: string
+  response: string
+  settings: ModelSettings
+  conversationSettings: ConversationSettings
+}
+
 function loadPendingWorkIqRequest(): PendingWorkIqRequest | null {
   try {
     const raw = window.sessionStorage.getItem(PENDING_WORKIQ_REQUEST_KEY)
@@ -379,6 +387,54 @@ function savePendingWorkIqRequest(request: PendingWorkIqRequest): void {
 function clearPendingWorkIqRequest(): void {
   try {
     window.sessionStorage.removeItem(PENDING_WORKIQ_REQUEST_KEY)
+  } catch {
+    // no-op
+  }
+}
+
+function loadPendingWorkIqApprovalRequest(): PendingWorkIqApprovalRequest | null {
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_WORKIQ_APPROVAL_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PendingWorkIqApprovalRequest>
+    if (typeof parsed.threadId !== 'string' || !parsed.threadId.trim()) return null
+    if (typeof parsed.response !== 'string') return null
+    if (!parsed.settings || typeof parsed.settings !== 'object') return null
+    if (!parsed.conversationSettings || typeof parsed.conversationSettings !== 'object') return null
+
+    return {
+      threadId: parsed.threadId,
+      response: parsed.response,
+      settings: normalizeModelSettings({ ...DEFAULT_SETTINGS, ...parsed.settings }),
+      conversationSettings: cloneConversationSettings({
+        workIqEnabled: parsed.conversationSettings.workIqEnabled === true,
+        workIqSourceScope: parseWorkIqSourceScope(parsed.conversationSettings.workIqSourceScope),
+      }),
+    }
+  } catch {
+    return null
+  }
+}
+
+function savePendingWorkIqApprovalRequest(request: PendingWorkIqApprovalRequest): void {
+  try {
+    window.sessionStorage.setItem(
+      PENDING_WORKIQ_APPROVAL_KEY,
+      JSON.stringify({
+        threadId: request.threadId,
+        response: request.response,
+        settings: normalizeModelSettings(request.settings),
+        conversationSettings: cloneConversationSettings(request.conversationSettings),
+      }),
+    )
+  } catch {
+    // no-op
+  }
+}
+
+function clearPendingWorkIqApprovalRequest(): void {
+  try {
+    window.sessionStorage.removeItem(PENDING_WORKIQ_APPROVAL_KEY)
   } catch {
     // no-op
   }
@@ -1095,6 +1151,7 @@ export function useSSE() {
   const activeRestoreRequestIdRef = useRef(0)
   const localEvaluationCacheRef = useRef<Record<string, EvaluationRecord[]>>({})
   const attemptedPendingResumeRef = useRef(false)
+  const attemptedPendingApprovalResumeRef = useRef(false)
 
   const cacheEvaluationRecord = useCallback((conversationId: string | null | undefined, record: EvaluationRecord) => {
     const cacheKey = getEvaluationCacheKey(conversationId)
@@ -1426,6 +1483,7 @@ export function useSSE() {
     if (redirectFailure) {
       console.warn('Skipping pending Work IQ resume after MSAL redirect failure:', redirectFailure)
       clearPendingWorkIqRequest()
+      clearPendingWorkIqApprovalRequest()
       setState(prev => ({
         ...prev,
         status: 'error',
@@ -1451,7 +1509,6 @@ export function useSSE() {
 
     void sendMessage(pendingRequest.message, {
       ...(pendingRequest.options ?? {}),
-      authInteractionMode: 'silent',
       resumeState: {
         settings: restoredSettings,
         conversationSettings: restoredConversationSettings,
@@ -1470,6 +1527,15 @@ export function useSSE() {
     const requestId = activeRequestIdRef.current + 1
     activeRequestIdRef.current = requestId
     activeRestoreRequestIdRef.current += 1
+    const previousState = stateRef.current
+    if (stateRef.current.workIq.workIqEnabled) {
+      savePendingWorkIqApprovalRequest({
+        threadId,
+        response: normalizedResponse,
+        settings: stateRef.current.settings,
+        conversationSettings: stateRef.current.conversationSettings,
+      })
+    }
     setState(prev => ({
       ...prev,
       status: 'running',
@@ -1484,13 +1550,22 @@ export function useSSE() {
     }))
     const handlers = createHandlers(requestId)
     try {
-      await sendApproval(
+      const approvalStartResult = await sendApproval(
         threadId,
         normalizedResponse,
         handlers,
         controller.signal,
         stateRef.current.workIq.workIqEnabled,
       )
+      if (approvalStartResult !== 'redirecting') {
+        clearPendingWorkIqApprovalRequest()
+      }
+      if (approvalStartResult === 'redirecting' && requestId === activeRequestIdRef.current) {
+        setState(previousState)
+      }
+    } catch (error) {
+      clearPendingWorkIqApprovalRequest()
+      throw error
     } finally {
       if (abortControllerRef.current === controller) {
         abortControllerRef.current = null
@@ -1502,6 +1577,7 @@ export function useSSE() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     clearPendingWorkIqRequest()
+    clearPendingWorkIqApprovalRequest()
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
     setState({
@@ -1520,6 +1596,7 @@ export function useSSE() {
     abortControllerRef.current?.abort()
     abortControllerRef.current = null
     clearPendingWorkIqRequest()
+    clearPendingWorkIqApprovalRequest()
     activeRequestIdRef.current += 1
     activeRestoreRequestIdRef.current += 1
     const preservedSettings = { ...stateRef.current.settings }
@@ -1666,6 +1743,59 @@ export function useSSE() {
       console.warn('会話の復元に失敗:', err)
     }
   }, [getCachedEvaluationRecords])
+
+  useEffect(() => {
+    if (attemptedPendingApprovalResumeRef.current) return
+    if (state.status !== 'idle' || state.conversationId || state.userMessages.length > 0) return
+    if (loadPendingWorkIqRequest()) return
+
+    attemptedPendingApprovalResumeRef.current = true
+    const pendingApproval = loadPendingWorkIqApprovalRequest()
+    if (!pendingApproval) return
+
+    const redirectFailure = consumeMsalRedirectFailureSentinel()
+    if (redirectFailure) {
+      console.warn('Skipping pending Work IQ approval resume after MSAL redirect failure:', redirectFailure)
+      clearPendingWorkIqApprovalRequest()
+      setState(prev => ({
+        ...prev,
+        status: 'error',
+        error: {
+          message: redirectFailure.message,
+          code: 'WORKIQ_REDIRECT_FAILED',
+        },
+        settings: pendingApproval.settings,
+        conversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+        draftConversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+        workIq: createWorkIqState(pendingApproval.conversationSettings, pendingApproval.conversationSettings.workIqEnabled ? 'unavailable' : 'off', redirectFailure.stage),
+      }))
+      return
+    }
+
+    const pendingWorkIqState = createWorkIqState(
+      pendingApproval.conversationSettings,
+      pendingApproval.conversationSettings.workIqEnabled ? 'ready' : 'off',
+    )
+    stateRef.current = {
+      ...stateRef.current,
+      settings: pendingApproval.settings,
+      conversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+      draftConversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+      workIq: pendingWorkIqState,
+    }
+    setState(prev => ({
+      ...prev,
+      settings: pendingApproval.settings,
+      conversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+      draftConversationSettings: cloneConversationSettings(pendingApproval.conversationSettings),
+      workIq: pendingWorkIqState,
+    }))
+
+    void (async () => {
+      await restoreConversation(pendingApproval.threadId)
+      await approve(pendingApproval.response)
+    })()
+  }, [approve, restoreConversation, state.conversationId, state.status, state.userMessages.length])
 
   return {
     state,

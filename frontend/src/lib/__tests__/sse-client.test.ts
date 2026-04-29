@@ -597,7 +597,7 @@ describe('connectSSE', () => {
 
     const errorHandler = vi.fn()
 
-    await expect(sendApproval('conv-1', '承認', { error: errorHandler })).resolves.toBeUndefined()
+    await expect(sendApproval('conv-1', '承認', { error: errorHandler })).resolves.toBe('blocked')
 
     expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({
       code: 'NETWORK_ERROR',
@@ -632,15 +632,24 @@ describe('connectSSE', () => {
 
     await sendApproval('conv-1', '承認', {}, undefined, true)
 
+    expect(getDelegatedApiAuth).toHaveBeenCalledWith({ interactive: true, workIqRuntime: 'foundry_tool' })
     const [, options] = mockFetch.mock.calls[0]
     expect(options.headers.Authorization).toBe('Bearer delegated-token')
+  })
+
+  it('does not send approval after starting an interactive Work IQ auth redirect', async () => {
+    getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'redirecting' })
+
+    await expect(sendApproval('conv-1', '承認', {}, undefined, true)).resolves.toBe('redirecting')
+
+    expect(mockFetch).not.toHaveBeenCalled()
   })
 
   it('fails closed when delegated auth is unavailable for approval requests', async () => {
     getDelegatedApiAuth.mockResolvedValue({ headers: {}, status: 'auth_required' })
     const errorHandler = vi.fn()
 
-    await sendApproval('conv-1', '承認', { error: errorHandler }, undefined, true)
+    await expect(sendApproval('conv-1', '承認', { error: errorHandler }, undefined, true)).resolves.toBe('blocked')
 
     expect(mockFetch).not.toHaveBeenCalled()
     expect(errorHandler).toHaveBeenCalledWith(expect.objectContaining({ code: 'WORKIQ_AUTH_REQUIRED' }))

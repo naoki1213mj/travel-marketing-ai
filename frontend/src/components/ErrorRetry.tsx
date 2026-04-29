@@ -17,10 +17,14 @@ export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
   const resolvedMessage = translatedMessageKey ? t(translatedMessageKey) : error.message
 
   return (
-    <div className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-surface)] p-5">
-      <div className="flex items-start gap-3">
-        <AlertTriangle className="h-5 w-5 text-[var(--danger-text)]" />
-        <div className="flex-1">
+    <div
+      role="alert"
+      aria-live="assertive"
+      className="rounded-[24px] border border-[var(--danger-border)] bg-[var(--danger-surface)] p-5"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-3">
+        <AlertTriangle className="h-5 w-5 shrink-0 text-[var(--danger-text)]" aria-hidden="true" />
+        <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-[var(--danger-text)]">
             {t('error.title')}
           </p>
@@ -36,7 +40,7 @@ export function ErrorRetry({ error, onRetry, retryLabel, t }: ErrorRetryProps) {
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-lg border border-[var(--danger-border)] bg-[var(--panel-bg)] px-3 py-1.5 text-sm text-[var(--danger-text)]"
+          className="inline-flex w-full items-center justify-center rounded-lg border border-[var(--danger-border)] bg-[var(--panel-bg)] px-3 py-2 text-sm font-medium text-[var(--danger-text)] transition-colors hover:bg-[var(--surface)] sm:w-auto sm:shrink-0"
         >
           {retryLabel}
         </button>

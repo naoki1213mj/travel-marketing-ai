@@ -43,6 +43,7 @@ describe('ApprovalBanner', () => {
     expect(screen.getByText('New copy')).toBeInTheDocument()
     expect(container.querySelectorAll('[data-diff-kind="removed"]')).toHaveLength(1)
     expect(container.querySelectorAll('[data-diff-kind="added"]')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: /修正/ })).toHaveFocus()
 
     fireEvent.click(screen.getByRole('button', { name: /承認/ }))
 
