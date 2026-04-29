@@ -113,6 +113,10 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
         return True
     if any(pattern in normalized for pattern in _PLACEHOLDER_DATA_AGENT_PATTERNS):
         return True
+    has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|人|★|/5)", answer))
+    has_sales_metric = bool(re.search(r"\d[\d,]*(?:\s*)円", answer)) and bool(
+        re.search(r"\d[\d,]*(?:\s*)(?:件|名|人)", answer)
+    )
     if any(pattern in answer for pattern in _MISSING_SALES_DATA_AGENT_PATTERNS) and (
         "データなし" in answer
         or "データ不足" in answer
@@ -121,9 +125,8 @@ def _is_low_confidence_data_agent_answer(answer: str) -> bool:
         or "存在しません" in answer
         or "利用可能なデータが無い" in answer
     ):
-        return True
+        return not has_sales_metric
     has_weak_phrase = any(pattern.lower() in normalized for pattern in _LOW_CONFIDENCE_DATA_AGENT_PATTERNS)
-    has_specific_metric = bool(re.search(r"\d[\d,]*(?:\s*)(?:円|件|名|★|/5)", answer))
     return has_weak_phrase and not has_specific_metric
 
 

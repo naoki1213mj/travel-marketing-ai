@@ -454,6 +454,19 @@ class TestDataSearchTools:
         monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
         assert ds._resolve_fabric_data_agent_runtime() == "rest"
 
+    def test_data_agent_answer_with_sales_metrics_is_not_low_confidence(self):
+        """一部項目がデータなしでも売上実数があれば Data Agent 成功として扱う。"""
+        import src.agents.data_search as ds
+
+        answer = (
+            "売上サマリ表\n"
+            "| 旅行先 | 日程 | 売上合計 | 予約件数 | 合計人数 |\n"
+            "| 沖縄 | 2泊3日 | 1,022,000円 | 6件 | 17人 |\n"
+            "平均評価・レビュー傾向: 安全に算出できるデータなし"
+        )
+
+        assert ds._is_low_confidence_data_agent_answer(answer) is False
+
 
 class TestRegulationCheckTools:
     """Agent3 の規制チェックツールテスト"""
