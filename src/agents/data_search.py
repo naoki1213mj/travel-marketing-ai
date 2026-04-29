@@ -378,6 +378,20 @@ def _fabric_table_name(setting_key: str, default_name: str) -> str:
     return value
 
 
+def _fabric_table_lookup_name(table_name: str) -> str:
+    """INFORMATION_SCHEMA で参照する table 名を取得する。"""
+    return table_name.rsplit(".", 1)[-1]
+
+
+def _fabric_table_columns(table_name: str) -> set[str]:
+    """Fabric table の列名を小文字化して取得する。"""
+    rows = _query_fabric(
+        "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = ?",
+        [_fabric_table_lookup_name(table_name)],
+    )
+    return {str(row.get("COLUMN_NAME", "")).lower() for row in rows}
+
+
 # --- デモデータ読み込み（Fabric Lakehouse 未接続時は CSV から読み込む） ---
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -401,12 +415,21 @@ def _get_sales_data_from_fabric(
     SQL 側で季節・地域フィルタと集約を実行し、結果を返す。
     取得できなかった場合は空リストを返す。
     """
-    # departure_date から季節を SQL で導出して集約
+    sales_table = _fabric_table_name("fabric_sales_table", "sales_results")
+    table_columns = _fabric_table_columns(sales_table)
+    is_ws3iq_schema = {
+        "travel_destination",
+        "date",
+        "price",
+        "number_of_people",
+        "age_group",
+    }.issubset(table_columns)
+
     where_clauses: list[str] = []
     params: list = []
 
     if region:
-        where_clauses.append("destination LIKE ?")
+        where_clauses.append("Travel_destination LIKE ?" if is_ws3iq_schema else "destination LIKE ?")
         params.append(f"%{region}%")
 
     if season:
@@ -419,38 +442,65 @@ def _get_sales_data_from_fabric(
         months = season_months.get(season)
         if months:
             placeholders = ", ".join("?" for _ in months)
-            where_clauses.append(f"MONTH(departure_date) IN ({placeholders})")
+            date_expr = "TRY_CONVERT(date, [Date], 111)" if is_ws3iq_schema else "departure_date"
+            where_clauses.append(f"MONTH({date_expr}) IN ({placeholders})")
             params.extend(months)
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    sales_table = _fabric_table_name("fabric_sales_table", "sales_results")
-    query = f"""
-        SELECT
-            plan_name,
-            destination,
+    if is_ws3iq_schema:
+        date_expr = "TRY_CONVERT(date, [Date], 111)"
+        season_expr = f"""
             CASE
-                WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
-                WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
-                WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
-                ELSE 'winter'
-            END AS season,
-            SUM(CAST(revenue AS BIGINT)) AS revenue,
-            SUM(CAST(pax AS INT)) AS pax,
-            MIN(customer_segment) AS customer_segment,
-            COUNT(*) AS booking_count
-        FROM {sales_table}
-        {where_sql}
-        GROUP BY
-            plan_name,
-            destination,
-            CASE
-                WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
-                WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
-                WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                WHEN MONTH({date_expr}) IN (3, 4, 5) THEN 'spring'
+                WHEN MONTH({date_expr}) IN (6, 7, 8) THEN 'summer'
+                WHEN MONTH({date_expr}) IN (9, 10, 11) THEN 'autumn'
                 ELSE 'winter'
             END
-    """
+        """
+        query = f"""
+            SELECT
+                CONCAT(Travel_destination, ' ', Schedule) AS plan_name,
+                Travel_destination AS destination,
+                {season_expr} AS season,
+                SUM(CAST(Price AS BIGINT)) AS revenue,
+                SUM(CAST(Number_of_people AS INT)) AS pax,
+                MIN(Age_group) AS customer_segment,
+                COUNT(*) AS booking_count
+            FROM {sales_table}
+            {where_sql}
+            GROUP BY
+                Travel_destination,
+                Schedule,
+                {season_expr}
+        """
+    else:
+        query = f"""
+            SELECT
+                plan_name,
+                destination,
+                CASE
+                    WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                    WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                    WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                    ELSE 'winter'
+                END AS season,
+                SUM(CAST(revenue AS BIGINT)) AS revenue,
+                SUM(CAST(pax AS INT)) AS pax,
+                MIN(customer_segment) AS customer_segment,
+                COUNT(*) AS booking_count
+            FROM {sales_table}
+            {where_sql}
+            GROUP BY
+                plan_name,
+                destination,
+                CASE
+                    WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                    WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                    WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                    ELSE 'winter'
+                END
+        """
 
     return _query_fabric(query, params if params else None)
 
@@ -463,28 +513,72 @@ def _get_reviews_from_fabric(
 
     取得できなかった場合は空リストを返す。
     """
+    reviews_table = _fabric_table_name("fabric_reviews_table", "customer_reviews")
+    table_columns = _fabric_table_columns(reviews_table)
+    is_ws3iq_schema = {"travel_destination", "rating", "comments"}.issubset(table_columns)
+
     where_clauses: list[str] = []
     params: list = []
 
     if plan_name:
-        where_clauses.append("plan_name LIKE ?")
+        where_clauses.append("Travel_destination LIKE ?" if is_ws3iq_schema else "plan_name LIKE ?")
         params.append(f"%{plan_name}%")
 
     if min_rating is not None:
-        where_clauses.append("rating >= ?")
+        where_clauses.append("Rating >= ?" if is_ws3iq_schema else "rating >= ?")
         params.append(min_rating)
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    reviews_table = _fabric_table_name("fabric_reviews_table", "customer_reviews")
-    query = f"""
-        SELECT plan_name, rating, comment
-        FROM {reviews_table}
-        {where_sql}
-        ORDER BY review_date DESC
-    """
+    if is_ws3iq_schema:
+        query = f"""
+            SELECT
+                Travel_destination AS plan_name,
+                Rating AS rating,
+                Comments AS comment
+            FROM {reviews_table}
+            {where_sql}
+            ORDER BY Transaction_ID DESC
+        """
+    else:
+        query = f"""
+            SELECT plan_name, rating, comment
+            FROM {reviews_table}
+            {where_sql}
+            ORDER BY review_date DESC
+        """
 
     return _query_fabric(query, params if params else None)
+
+
+def _build_fabric_sql_analysis(question: str) -> str | None:
+    """Data Agent が使えない場合に Fabric SQL から分析要約を生成する。"""
+    sales = _get_sales_data_from_fabric()
+    reviews = _get_reviews_from_fabric()
+    if not sales and not reviews:
+        return None
+
+    top_sales = sorted(sales, key=lambda row: int(row.get("revenue") or 0), reverse=True)[:5]
+    lines = [
+        "Fabric Data Agent endpoint が利用できないため、同じ ws-3iq-demo Lakehouse の SQL endpoint から分析しました。",
+        f"質問: {question}",
+    ]
+    if top_sales:
+        lines.append("売上上位:")
+        for row in top_sales:
+            lines.append(
+                "- "
+                f"{row.get('plan_name', row.get('destination', '旅行プラン'))}: "
+                f"売上 {int(row.get('revenue') or 0):,} 円 / "
+                f"人数 {int(row.get('pax') or 0):,} 名 / "
+                f"予約 {int(row.get('booking_count') or 0):,} 件"
+            )
+    if reviews:
+        avg_rating = sum(int(row.get("rating") or 0) for row in reviews) / len(reviews)
+        lines.append(f"レビュー件数: {len(reviews)} 件、平均評価: {avg_rating:.1f}")
+        for row in reviews[:3]:
+            lines.append(f"- {row.get('plan_name', '旅行先')} ({row.get('rating', '-')}/5): {row.get('comment', '')}")
+    return "\n".join(lines)
 
 
 def _get_sales_data() -> list[dict]:
@@ -591,6 +685,26 @@ async def query_data_agent(question: str) -> str:
             )
             return json.dumps(
                 {"source": "Fabric Data Agent", "answer": result},
+                ensure_ascii=False,
+            )
+        fabric_sql_answer = _build_fabric_sql_analysis(question)
+        if fabric_sql_answer:
+            _emit_evidence_event(
+                "query_data_agent",
+                evidence=[
+                    {
+                        "id": "fabric-sql-data-agent-fallback",
+                        "title": "Fabric SQL フォールバック",
+                        "source": "fabric",
+                        "quote": _safe_evidence_quote(fabric_sql_answer),
+                        "relevance": 0.75,
+                        "retrieved_at": _utc_now_iso(),
+                        "metadata": {"runtime": "fabric_sql_fallback"},
+                    }
+                ],
+            )
+            return json.dumps(
+                {"source": "Fabric SQL fallback", "answer": fabric_sql_answer},
                 ensure_ascii=False,
             )
         _emit_evidence_event(

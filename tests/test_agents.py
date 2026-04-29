@@ -159,6 +159,7 @@ class TestDataSearchTools:
                 "fabric_reviews_table": "travel_review",
             },
         )
+        monkeypatch.setattr(ds, "_fabric_table_columns", lambda table_name: set())
         monkeypatch.setattr(ds, "_query_fabric", lambda query, params=None: captured.append(query) or [])
 
         ds._get_sales_data_from_fabric()
@@ -166,6 +167,94 @@ class TestDataSearchTools:
 
         assert "FROM travel_sales" in captured[0]
         assert "FROM travel_review" in captured[1]
+
+    def test_fabric_sales_query_supports_ws3iq_schema(self, monkeypatch):
+        """ws-3iq-demo の販売 table schema を既存出力 schema に正規化する。"""
+        import src.agents.data_search as ds
+
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_sales_table": "travel_sales"})
+        monkeypatch.setattr(
+            ds,
+            "_fabric_table_columns",
+            lambda table_name: {"travel_destination", "date", "price", "number_of_people", "age_group"},
+        )
+
+        def fake_query(query, params=None):
+            captured["query"] = query
+            captured["params"] = params
+            return [{"plan_name": "京都 2泊3日", "destination": "京都", "season": "winter"}]
+
+        monkeypatch.setattr(ds, "_query_fabric", fake_query)
+
+        result = ds._get_sales_data_from_fabric(season="winter", region="京都")
+
+        assert result[0]["plan_name"] == "京都 2泊3日"
+        assert "Travel_destination AS destination" in str(captured["query"])
+        assert "TRY_CONVERT(date, [Date], 111)" in str(captured["query"])
+        assert "SUM(CAST(Price AS BIGINT)) AS revenue" in str(captured["query"])
+        assert captured["params"] == ["%京都%", 12, 1, 2]
+
+    def test_fabric_reviews_query_supports_ws3iq_schema(self, monkeypatch):
+        """ws-3iq-demo のレビュー table schema を既存出力 schema に正規化する。"""
+        import src.agents.data_search as ds
+
+        captured: dict[str, object] = {}
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_reviews_table": "travel_review"})
+        monkeypatch.setattr(ds, "_fabric_table_columns", lambda table_name: {"travel_destination", "rating", "comments"})
+
+        def fake_query(query, params=None):
+            captured["query"] = query
+            captured["params"] = params
+            return [{"plan_name": "京都", "rating": 3, "comment": "寺社仏閣が素晴らしかった"}]
+
+        monkeypatch.setattr(ds, "_query_fabric", fake_query)
+
+        result = ds._get_reviews_from_fabric(plan_name="京都", min_rating=3)
+
+        assert result[0]["comment"] == "寺社仏閣が素晴らしかった"
+        assert "Travel_destination AS plan_name" in str(captured["query"])
+        assert "Comments AS comment" in str(captured["query"])
+        assert captured["params"] == ["%京都%", 3]
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_uses_fabric_sql_fallback(self, monkeypatch):
+        """Data Agent endpoint 不可時も Fabric SQL で分析できれば local 扱いにしない。"""
+        import src.agents.data_search as ds
+
+        async def unavailable_data_agent(question: str) -> None:
+            return None
+
+        monkeypatch.setattr(ds, "_query_data_agent", unavailable_data_agent)
+        monkeypatch.setattr(
+            ds,
+            "_get_sales_data_from_fabric",
+            lambda: [
+                {
+                    "plan_name": "京都 2泊3日",
+                    "destination": "京都",
+                    "season": "winter",
+                    "revenue": 64000,
+                    "pax": 2,
+                    "customer_segment": "20代",
+                    "booking_count": 1,
+                }
+            ],
+        )
+        monkeypatch.setattr(
+            ds,
+            "_get_reviews_from_fabric",
+            lambda: [{"plan_name": "京都", "rating": 3, "comment": "寺社仏閣が素晴らしかった"}],
+        )
+
+        result = await ds.query_data_agent("人気の旅行先を教えて")
+        parsed = json.loads(result)
+
+        assert parsed["source"] == "Fabric SQL fallback"
+        assert "京都 2泊3日" in parsed["answer"]
+        assert "ws-3iq-demo Lakehouse" in parsed["answer"]
 
     def test_fabric_table_names_reject_invalid_identifiers(self, monkeypatch):
         """Fabric table 名は SQL injection にならない identifier だけ許可する。"""
