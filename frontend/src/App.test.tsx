@@ -5,6 +5,7 @@ import App from './App'
 
 const mockUseSSE = vi.fn()
 const mockVoiceInputProps = vi.fn()
+const mockVideoPreviewProps = vi.fn()
 
 vi.mock('./hooks/useSSE', () => ({
   useSSE: () => mockUseSSE(),
@@ -157,7 +158,19 @@ vi.mock('./components/PlanVersionTabs', () => ({ PlanVersionTabs: () => null }))
 vi.mock('./components/RefineChat', () => ({ RefineChat: () => null }))
 vi.mock('./components/SettingsPanel', () => ({ SettingsPanel: () => null }))
 vi.mock('./components/ThemeToggle', () => ({ ThemeToggle: () => null }))
-vi.mock('./components/VideoPreview', () => ({ VideoPreview: () => null }))
+vi.mock('./components/VideoPreview', () => ({
+  VideoPreview: (props: { videoUrl?: string; statusMessage?: string; backgroundPending?: boolean }) => {
+    mockVideoPreviewProps(props)
+    return (
+      <div
+        data-testid="video-preview"
+        data-video-url={props.videoUrl ?? ''}
+        data-status-message={props.statusMessage ?? ''}
+        data-background-pending={String(props.backgroundPending ?? false)}
+      />
+    )
+  },
+}))
 vi.mock('./components/VoiceInput', () => ({
   VoiceInput: (props: {
     voiceLiveAvailable?: boolean
@@ -213,6 +226,7 @@ function buildState(overrides: Record<string, unknown>) {
 describe('App', () => {
   beforeEach(() => {
     mockVoiceInputProps.mockClear()
+    mockVideoPreviewProps.mockClear()
   })
 
   it('keeps the live pending version selected while a newer version is generating', () => {
@@ -299,6 +313,128 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'pending-2' }))
 
     expect(screen.queryByTestId('evaluation-panel')).toBeNull()
+  })
+
+  it('keeps committed version videos visible while a newer pending version is generating', () => {
+    mockUseSSE.mockReturnValue({
+      state: buildState({
+        status: 'running',
+        conversationId: 'conv-video-versions',
+        agentProgress: {
+          agent: 'brochure-gen-agent',
+          status: 'running',
+          step: 4,
+          total_steps: 5,
+        },
+        textContents: [
+          { agent: 'marketing-plan-agent', content: '# Plan v1' },
+          { agent: 'video-gen-agent', content_type: 'video', content: 'https://example.com/v1.mp4' },
+          { agent: 'marketing-plan-agent', content: '# Plan v2' },
+          { agent: 'video-gen-agent', content_type: 'video', content: 'https://example.com/v2.mp4' },
+          { agent: 'marketing-plan-agent', content: '# Plan v3 draft' },
+        ],
+        versions: [
+          {
+            textContents: [
+              { agent: 'marketing-plan-agent', content: '# Plan v1' },
+              { agent: 'video-gen-agent', content_type: 'video', content: 'https://example.com/v1.mp4' },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+          {
+            textContents: [
+              { agent: 'marketing-plan-agent', content: '# Plan v1' },
+              { agent: 'video-gen-agent', content_type: 'video', content: 'https://example.com/v1.mp4' },
+              { agent: 'marketing-plan-agent', content: '# Plan v2' },
+              { agent: 'video-gen-agent', content_type: 'video', content: 'https://example.com/v2.mp4' },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 2,
+        pendingVersion: {
+          version: 3,
+          textOffset: 4,
+          imageOffset: 0,
+          toolEventOffset: 0,
+        },
+        userMessages: ['初回', '改善', 'さらに改善'],
+      }),
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(screen.getByTestId('video-preview')).toHaveAttribute('data-video-url', '')
+
+    fireEvent.click(screen.getByRole('button', { name: 'v1' }))
+
+    expect(screen.getByTestId('video-preview')).toHaveAttribute('data-video-url', 'https://example.com/v1.mp4')
+
+    fireEvent.click(screen.getByRole('button', { name: 'v2' }))
+
+    expect(screen.getByTestId('video-preview')).toHaveAttribute('data-video-url', 'https://example.com/v2.mp4')
+  })
+
+  it('does not show the latest video background-pending placeholder on an older selected version', () => {
+    mockUseSSE.mockReturnValue({
+      state: buildState({
+        status: 'completed',
+        conversationId: 'conv-video-pending-scope',
+        backgroundUpdatesPending: true,
+        textContents: [
+          { agent: 'marketing-plan-agent', content: '# Plan v1' },
+        ],
+        versions: [
+          {
+            textContents: [
+              { agent: 'marketing-plan-agent', content: '# Plan v1' },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+          {
+            textContents: [
+              { agent: 'marketing-plan-agent', content: '# Plan v1' },
+              { agent: 'marketing-plan-agent', content: '# Plan v2' },
+            ],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 1,
+        userMessages: ['初回', '改善'],
+      }),
+      sendMessage: vi.fn(),
+      approve: vi.fn(),
+      reset: vi.fn(),
+      startNewConversation: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      updateConversationSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    expect(screen.getByTestId('video-preview')).toHaveAttribute('data-background-pending', 'false')
   })
 
   it('keeps the latest committed evaluation visible after generation completes', () => {

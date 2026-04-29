@@ -82,6 +82,11 @@ const MARKETING_RUNTIME_OPTIONS = [
   { value: 'foundry_preprovisioned', labelKey: 'settings.marketingRuntime.foundry_preprovisioned' },
 ] as const
 
+const WORKIQ_RUNTIME_OPTIONS = [
+  { value: 'foundry_tool', labelKey: 'settings.workiq.runtime.foundry_tool' },
+  { value: 'graph_prefetch', labelKey: 'settings.workiq.runtime.graph_prefetch' },
+] as const
+
 const AVAILABLE_IMAGE_MODELS = [
   { value: 'gpt-image-2', label: 'GPT Image 2 (default)' },
   { value: 'gpt-image-1.5', label: 'GPT Image 1.5' },
@@ -271,6 +276,10 @@ export function SettingsPanel({
 
     if (section === 'workiq') {
       if (workIqLocked) return
+      onChange({
+        ...settings,
+        workIqRuntime: DEFAULT_SETTINGS.workIqRuntime,
+      })
       onConversationSettingsChange({
         workIqEnabled: DEFAULT_CONVERSATION_SETTINGS.workIqEnabled,
         workIqSourceScope: [...DEFAULT_CONVERSATION_SETTINGS.workIqSourceScope],
@@ -580,6 +589,29 @@ export function SettingsPanel({
                   className="h-4 w-4 rounded border-[var(--panel-border)] text-[var(--accent-strong)] focus:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
                 />
               </label>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="settings-workiq-runtime"
+                  className="text-xs font-medium text-[var(--text-secondary)]"
+                  title={t('settings.workiq.runtime.desc')}
+                >
+                  {t('settings.workiq.runtime')}
+                  <span className="ml-1 cursor-help text-[var(--text-muted)]" title={t('settings.workiq.runtime.desc')}>ⓘ</span>
+                </label>
+                <select
+                  id="settings-workiq-runtime"
+                  value={normalizeWorkIqRuntime(settings.workIqRuntime)}
+                  disabled={isWorkIqControlDisabled}
+                  onChange={(e) => update('workIqRuntime', e.target.value)}
+                  aria-label={t('settings.workiq.runtime')}
+                  className="w-full rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1.5 text-xs font-mono text-[var(--text-primary)] accent-[var(--accent-strong)] cursor-pointer focus:outline-none focus:ring-1 focus:ring-[var(--accent-strong)] disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {WORKIQ_RUNTIME_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{t(option.labelKey)}</option>
+                  ))}
+                </select>
+              </div>
 
               <div className="rounded-xl border border-[var(--panel-border)] bg-[var(--surface)] px-3 py-3">
                 <div className="flex flex-wrap items-center gap-2">

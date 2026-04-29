@@ -776,7 +776,11 @@ async def _persist_evaluation_result(
         data = event.get("data", {})
         if not isinstance(data, dict):
             continue
-        if int(data.get("version", 0)) != artifact_version:
+        try:
+            event_version = int(data.get("version", 0) or 0)
+        except (TypeError, ValueError):
+            continue
+        if event_version != artifact_version:
             continue
         current_round = max(current_round, int(data.get("round", 0)))
 

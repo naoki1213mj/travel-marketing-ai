@@ -550,6 +550,44 @@ def test_evaluate_endpoint_persists_grouped_result_for_version(monkeypatch):
     assert persisted["custom"]["conversion_potential"]["score"] >= 0
 
 
+@pytest.mark.asyncio
+async def test_persist_evaluation_result_ignores_malformed_saved_version(monkeypatch):
+    """保存済み評価イベントの version が不正でも評価保存を継続する。"""
+    persisted: list[dict] = []
+
+    async def fake_get_conversation(conversation_id: str, owner_id: str | None = None):
+        return {
+            "id": conversation_id,
+            "user_id": owner_id or "anonymous",
+            "input": "初回",
+            "status": "completed",
+            "metadata": {},
+            "messages": [
+                {"event": "done", "data": {}},
+                {"event": "evaluation_result", "data": {"version": "draft", "round": 1, "result": {}}},
+            ],
+        }
+
+    async def fake_append_conversation_events(**kwargs):
+        persisted.append(kwargs)
+        return None
+
+    monkeypatch.setattr(evaluate_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(evaluate_module, "append_conversation_events", fake_append_conversation_events)
+
+    meta = await evaluate_module._persist_evaluation_result(
+        "conv-eval-malformed",
+        1,
+        {"plan_quality": {"overall": 4.0}},
+        owner_id="user-a",
+    )
+
+    assert meta is not None
+    assert meta["version"] == 1
+    assert meta["round"] == 1
+    assert len(persisted) == 1
+
+
 def test_evaluate_endpoint_detects_regression_against_previous_version(monkeypatch):
     async def fake_builtin(_query: str, _response: str) -> dict:
         return {

@@ -787,6 +787,95 @@ function isBackgroundUpdate(data: Record<string, unknown>): boolean {
   return data.background_update === true
 }
 
+function getPositiveVersion(value: unknown): number | null {
+  const version = Number(value || 0)
+  return Number.isFinite(version) && version > 0 ? version : null
+}
+
+function applyVersionedBackgroundTextUpdate(
+  versions: ArtifactSnapshot[],
+  targetVersion: number,
+  textContent: TextContent,
+): ArtifactSnapshot[] {
+  const targetIndex = targetVersion - 1
+  const targetSnapshot = versions[targetIndex]
+  if (!targetSnapshot) {
+    return versions
+  }
+
+  const insertIndex = targetSnapshot.textContents.length
+  return versions.map((snapshot, index) => {
+    if (index < targetIndex) {
+      return snapshot
+    }
+    const boundedInsertIndex = Math.min(insertIndex, snapshot.textContents.length)
+    return createArtifactSnapshot({
+      ...snapshot,
+      textContents: [
+        ...snapshot.textContents.slice(0, boundedInsertIndex),
+        textContent,
+        ...snapshot.textContents.slice(boundedInsertIndex),
+      ],
+    })
+  })
+}
+
+function applyVersionedBackgroundImageUpdate(
+  versions: ArtifactSnapshot[],
+  targetVersion: number,
+  image: ImageContent,
+): ArtifactSnapshot[] {
+  const targetIndex = targetVersion - 1
+  const targetSnapshot = versions[targetIndex]
+  if (!targetSnapshot) {
+    return versions
+  }
+
+  const insertIndex = targetSnapshot.images.length
+  return versions.map((snapshot, index) => {
+    if (index < targetIndex) {
+      return snapshot
+    }
+    const boundedInsertIndex = Math.min(insertIndex, snapshot.images.length)
+    return createArtifactSnapshot({
+      ...snapshot,
+      images: [
+        ...snapshot.images.slice(0, boundedInsertIndex),
+        image,
+        ...snapshot.images.slice(boundedInsertIndex),
+      ],
+    })
+  })
+}
+
+function applyVersionedBackgroundToolEventUpdate(
+  versions: ArtifactSnapshot[],
+  targetVersion: number,
+  toolEvent: ToolEvent,
+): ArtifactSnapshot[] {
+  const targetIndex = targetVersion - 1
+  const targetSnapshot = versions[targetIndex]
+  if (!targetSnapshot) {
+    return versions
+  }
+
+  const insertIndex = targetSnapshot.toolEvents.length
+  return versions.map((snapshot, index) => {
+    if (index < targetIndex) {
+      return snapshot
+    }
+    const boundedInsertIndex = Math.min(insertIndex, snapshot.toolEvents.length)
+    return createArtifactSnapshot({
+      ...snapshot,
+      toolEvents: [
+        ...snapshot.toolEvents.slice(0, boundedInsertIndex),
+        toolEvent,
+        ...snapshot.toolEvents.slice(boundedInsertIndex),
+      ],
+    })
+  })
+}
+
 function syncLatestCompletedSnapshot(
   prev: PipelineState,
   source: SnapshotSource,
@@ -836,15 +925,25 @@ export function buildRestoredPipelineState(
         }
         break
       case 'text':
-        textContents.push(normalizeTextContentData(data))
-        if (isBackgroundUpdate(data) && versions.length > 0) {
-          versions[versions.length - 1] = createArtifactSnapshot({
-            textContents,
-            images,
-            toolEvents,
-            metrics: versions[versions.length - 1].metrics,
-            evaluations: versions[versions.length - 1].evaluations,
-          })
+        {
+          const textContent = normalizeTextContentData(data)
+          textContents.push(textContent)
+          const requestedVersion = getPositiveVersion(data.version)
+          if (isBackgroundUpdate(data) && requestedVersion !== null) {
+            versions.splice(
+              0,
+              versions.length,
+              ...applyVersionedBackgroundTextUpdate(versions, requestedVersion, textContent),
+            )
+          } else if (isBackgroundUpdate(data) && versions.length > 0) {
+            versions[versions.length - 1] = createArtifactSnapshot({
+              textContents,
+              images,
+              toolEvents,
+              metrics: versions[versions.length - 1].metrics,
+              evaluations: versions[versions.length - 1].evaluations,
+            })
+          }
         }
         break
       case 'image':
@@ -852,33 +951,47 @@ export function buildRestoredPipelineState(
           const image = normalizeImageContentData(data)
           if (!image) break
           images.push(image)
-        }
-        if (isBackgroundUpdate(data) && versions.length > 0) {
-          versions[versions.length - 1] = createArtifactSnapshot({
-            textContents,
-            images,
-            toolEvents,
-            metrics: versions[versions.length - 1].metrics,
-            evaluations: versions[versions.length - 1].evaluations,
-          })
+          const requestedVersion = getPositiveVersion(data.version)
+          if (isBackgroundUpdate(data) && requestedVersion !== null) {
+            versions.splice(
+              0,
+              versions.length,
+              ...applyVersionedBackgroundImageUpdate(versions, requestedVersion, image),
+            )
+          } else if (isBackgroundUpdate(data) && versions.length > 0) {
+            versions[versions.length - 1] = createArtifactSnapshot({
+              textContents,
+              images,
+              toolEvents,
+              metrics: versions[versions.length - 1].metrics,
+              evaluations: versions[versions.length - 1].evaluations,
+            })
+          }
         }
         break
       case 'tool_event': {
-        const requestedVersion = Number(data.version || 0)
-        const resolvedVersion = Number.isFinite(requestedVersion) && requestedVersion > 0
+        const requestedVersion = getPositiveVersion(data.version)
+        const resolvedVersion = requestedVersion !== null
           ? requestedVersion
           : isBackgroundUpdate(data) && versions.length > 0
             ? versions.length
             : activeVersion
+        const toolEvent = normalizeToolEventData(data, {
+          fallbackVersion: resolvedVersion,
+          parseSourceScope: (raw) => (raw === undefined ? undefined : parseWorkIqSourceScope(raw)),
+        })
         toolEvents = [
           ...toolEvents,
-          normalizeToolEventData(data, {
-            fallbackVersion: resolvedVersion,
-            parseSourceScope: (raw) => (raw === undefined ? undefined : parseWorkIqSourceScope(raw)),
-          }),
+          toolEvent,
         ].slice(-MAX_TOOL_EVENTS)
         workIq = applyWorkIqToolEvent(workIq, toolEvents[toolEvents.length - 1])
-        if (isBackgroundUpdate(data) && versions.length > 0) {
+        if (isBackgroundUpdate(data) && requestedVersion !== null) {
+          versions.splice(
+            0,
+            versions.length,
+            ...applyVersionedBackgroundToolEventUpdate(versions, requestedVersion, toolEvent),
+          )
+        } else if (isBackgroundUpdate(data) && versions.length > 0) {
           versions[versions.length - 1] = createArtifactSnapshot({
             textContents,
             images,
@@ -1239,6 +1352,15 @@ export function useSSE() {
               workIqSourceScope: [...workIq.workIqSourceScope],
             }
           : prev.conversationSettings
+        if (isBackgroundUpdate(rawToolEvent) && toolEvent.version) {
+          return {
+            ...prev,
+            toolEvents,
+            conversationSettings,
+            workIq,
+            versions: applyVersionedBackgroundToolEventUpdate(prev.versions, toolEvent.version, toolEvent),
+          }
+        }
         return {
           ...prev,
           toolEvents,
@@ -1257,7 +1379,17 @@ export function useSSE() {
     text: (data) => {
       if (requestId !== activeRequestIdRef.current) return
       setState(prev => {
-        const textContents = [...prev.textContents, normalizeTextContentData(data as Record<string, unknown>)]
+        const textData = data as Record<string, unknown>
+        const textContent = normalizeTextContentData(textData)
+        const textContents = [...prev.textContents, textContent]
+        const requestedVersion = getPositiveVersion(textData.version)
+        if (isBackgroundUpdate(textData) && requestedVersion !== null) {
+          return {
+            ...prev,
+            textContents,
+            versions: applyVersionedBackgroundTextUpdate(prev.versions, requestedVersion, textContent),
+          }
+        }
         return {
           ...prev,
           textContents,
@@ -1273,10 +1405,19 @@ export function useSSE() {
     },
     image: (data) => {
       if (requestId !== activeRequestIdRef.current) return
-      const image = normalizeImageContentData(data as Record<string, unknown>)
+      const imageData = data as Record<string, unknown>
+      const image = normalizeImageContentData(imageData)
       if (!image) return
       setState(prev => {
         const images = [...prev.images, image]
+        const requestedVersion = getPositiveVersion(imageData.version)
+        if (isBackgroundUpdate(imageData) && requestedVersion !== null) {
+          return {
+            ...prev,
+            images,
+            versions: applyVersionedBackgroundImageUpdate(prev.versions, requestedVersion, image),
+          }
+        }
         return {
           ...prev,
           images,

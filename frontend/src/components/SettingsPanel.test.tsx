@@ -32,6 +32,10 @@ const translations: Record<string, string> = {
   'settings.workiq.title': 'Work IQ',
   'settings.workiq.enabled': 'Work IQ を有効化',
   'settings.workiq.enabled.desc': 'Work IQ 説明',
+  'settings.workiq.runtime': 'Work IQ ランタイム',
+  'settings.workiq.runtime.desc': 'Work IQ ランタイム説明',
+  'settings.workiq.runtime.foundry_tool': 'Foundry tool',
+  'settings.workiq.runtime.graph_prefetch': 'Graph 先読み',
   'settings.workiq.status': '状態',
   'settings.workiq.status.off': 'オフ',
   'settings.workiq.status.ready': '次の会話で確認',
@@ -237,6 +241,28 @@ describe('SettingsPanel', () => {
     expect(screen.getAllByText('確認待ち')).toHaveLength(4)
   })
 
+  it('updates the Work IQ runtime from the Work IQ panel', () => {
+    const onChange = vi.fn()
+    render(
+      <SettingsPanel
+        settings={DEFAULT_SETTINGS}
+        conversationSettings={{ ...DEFAULT_CONVERSATION_SETTINGS, workIqEnabled: true }}
+        workIqStatus="ready"
+        onChange={onChange}
+        onConversationSettingsChange={() => {}}
+        t={t}
+      />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
+    fireEvent.change(screen.getByLabelText('Work IQ ランタイム'), { target: { value: 'graph_prefetch' } })
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_SETTINGS,
+      workIqRuntime: 'graph_prefetch',
+    })
+  })
+
   it('shows sanitized Work IQ source summaries and used counts', () => {
     render(
       <SettingsPanel
@@ -302,6 +328,7 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
 
     expect(screen.getByRole('checkbox')).toBeDisabled()
+    expect(screen.getByLabelText('Work IQ ランタイム')).toBeDisabled()
     expect(screen.getByText('新しい会話を開始してください')).toBeInTheDocument()
     expect(screen.getByText('サインインが必要')).toBeInTheDocument()
   })
@@ -322,6 +349,7 @@ describe('SettingsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
 
     expect(screen.getByRole('checkbox')).toBeDisabled()
+    expect(screen.getByLabelText('Work IQ ランタイム')).toBeDisabled()
     expect(screen.getByText('現在利用できません')).toBeInTheDocument()
   })
 })

@@ -130,15 +130,15 @@ function App() {
     : state.pendingVersion
       ? state.images.slice(state.pendingVersion.imageOffset)
       : state.images
-  const previewVideoContents = state.pendingVersion
-    ? state.textContents.slice(state.pendingVersion.textOffset)
-    : previewSnapshot && selectedPendingPreviewVersion
-      ? (() => {
-          const previousTextOffset = selectedPendingPreviewVersion > 1
-            ? state.versions[selectedPendingPreviewVersion - 2]?.textContents.length ?? 0
-            : 0
-          return previewSnapshot.textContents.slice(previousTextOffset)
-        })()
+  const previewVideoContents = previewSnapshot && selectedPendingPreviewVersion
+    ? (() => {
+        const previousTextOffset = selectedPendingPreviewVersion > 1
+          ? state.versions[selectedPendingPreviewVersion - 2]?.textContents.length ?? 0
+          : 0
+        return previewSnapshot.textContents.slice(previousTextOffset)
+      })()
+    : state.pendingVersion
+      ? state.textContents.slice(state.pendingVersion.textOffset)
       : state.currentVersion > 0
         ? (() => {
             const previousTextOffset = state.currentVersion > 1
@@ -233,6 +233,9 @@ function App() {
   const previewVideoUrl = extractVideoUrl(previewVideoContents)
   const previewVideoStatus = extractVideoStatusMessage(previewVideoContents)
   const videoWorkflowStatus = classifyVideoWorkflowStatus(stepperVideoContents, state.backgroundUpdatesPending)
+  const previewBackgroundPending = state.backgroundUpdatesPending
+    && !state.pendingVersion
+    && previewVersionNumber === state.versions.length
   const isManagerApproval = state.approvalRequest?.approval_scope === 'manager'
   const showManagerApprovalPhase = state.hasManagerApprovalPhase
   const isManagerApprovalStepActive = state.status === 'approval' && isManagerApproval
@@ -729,7 +732,7 @@ function App() {
                 <VideoPreview
                   videoUrl={previewVideoUrl}
                   statusMessage={previewVideoStatus}
-                  backgroundPending={state.backgroundUpdatesPending}
+                  backgroundPending={previewBackgroundPending}
                   t={t}
                 />
               )},

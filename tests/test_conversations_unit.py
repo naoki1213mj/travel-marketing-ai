@@ -268,6 +268,65 @@ class TestSaveConversationDetails:
             "latency": 1.23,
         }
 
+    async def test_save_conversation_preserves_background_video_from_stale_full_save(self):
+        """stale full-save が先に append 済みの background video を消さない。"""
+        base_events = [
+            {
+                "event": "text",
+                "data": {"agent": "brochure-gen-agent", "content_type": "html", "content": "<html>v1</html>"},
+            },
+            {"event": "done", "data": {"conversation_id": "conv-version-race"}},
+        ]
+        await save_conversation(
+            conversation_id="conv-version-race",
+            user_input="初回",
+            events=base_events,
+            owner_id="user-a",
+        )
+
+        await append_conversation_events(
+            conversation_id="conv-version-race",
+            user_input=None,
+            new_events=[
+                {
+                    "event": "text",
+                    "data": {
+                        "agent": "video-gen-agent",
+                        "content_type": "video",
+                        "content": "https://example.com/v1.mp4",
+                        "background_update": True,
+                        "version": 1,
+                    },
+                }
+            ],
+            owner_id="user-a",
+        )
+
+        stale_refine_save_events = [
+            *base_events,
+            {
+                "event": "text",
+                "data": {"agent": "brochure-gen-agent", "content_type": "html", "content": "<html>v2</html>"},
+            },
+            {"event": "done", "data": {"conversation_id": "conv-version-race"}},
+        ]
+        await save_conversation(
+            conversation_id="conv-version-race",
+            user_input="初回",
+            events=stale_refine_save_events,
+            owner_id="user-a",
+        )
+
+        doc = await get_conversation("conv-version-race", owner_id="user-a")
+        assert doc is not None
+        messages = doc["messages"]
+        assert any(
+            event.get("data", {}).get("content") == "https://example.com/v1.mp4"
+            and event.get("data", {}).get("version") == 1
+            for event in messages
+        )
+        assert any(event.get("data", {}).get("content") == "<html>v2</html>" for event in messages)
+
 
 class TestGetConversationEdgeCases:
     """会話取得のエッジケーステスト"""

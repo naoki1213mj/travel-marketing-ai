@@ -113,6 +113,104 @@ describe('buildRestoredPipelineState', () => {
     expect(state.versions[0].images[0].charts?.[0].title).toBe('Image latency')
   })
 
+  it('restores versioned background videos into their original artifact snapshot', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-video-restore' } },
+          { event: 'text', data: { content: '# Plan v2', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-video-restore' } },
+          {
+            event: 'text',
+            data: {
+              content: 'https://example.com/v1.mp4',
+              agent: 'video-gen-agent',
+              content_type: 'video',
+              background_update: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+      'conv-video-restore',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.versions[0].textContents.map(item => item.content)).toEqual([
+      '# Plan v1',
+      'https://example.com/v1.mp4',
+    ])
+    expect(state.versions[1].textContents.map(item => item.content)).toEqual([
+      '# Plan v1',
+      'https://example.com/v1.mp4',
+      '# Plan v2',
+    ])
+  })
+
+  it('restores versioned background images into their original artifact snapshot', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-image-restore' } },
+          { event: 'text', data: { content: '# Plan v2', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-image-restore' } },
+          {
+            event: 'image',
+            data: {
+              url: 'data:image/png;base64,v1hero',
+              alt: 'v1 hero',
+              agent: 'brochure-gen-agent',
+              background_update: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+      'conv-image-restore',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.versions[0].images.map(item => item.alt)).toEqual(['v1 hero'])
+    expect(state.versions[1].images.map(item => item.alt)).toEqual(['v1 hero'])
+  })
+
+  it('restores versioned background tool events into their original artifact snapshot', () => {
+    const state = buildRestoredPipelineState(
+      {
+        status: 'completed',
+        input: '沖縄の家族旅行を企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-tool-restore' } },
+          { event: 'text', data: { content: '# Plan v2', agent: 'plan-revision-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-tool-restore' } },
+          {
+            event: 'tool_event',
+            data: {
+              tool: 'review_plan_quality',
+              status: 'completed',
+              agent: 'quality-review-agent',
+              background_update: true,
+              version: 1,
+            },
+          },
+        ],
+      },
+      'conv-tool-restore',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.versions[0].toolEvents.map(item => item.tool)).toEqual(['review_plan_quality'])
+    expect(state.versions[1].toolEvents.map(item => item.tool)).toEqual(['review_plan_quality'])
+    expect(state.versions[0].toolEvents[0].version).toBe(1)
+  })
+
   it('restores manager approval conversations with manager scope', () => {
     const state = buildRestoredPipelineState(
       {

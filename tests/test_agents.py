@@ -335,6 +335,9 @@ class TestDataSearchTools:
         prompt = ds._build_data_agent_question("春の沖縄ファミリー施策を分析して")
 
         assert "Number_of_people >= 3" in prompt
+        assert "yyyy/MM/dd" in prompt
+        assert "Category は 国内/海外" in prompt
+        assert "「学生」は Age_group が 20代" in prompt
         assert "Age_group が 30代/40代" in prompt
         assert "SUM(Price)" in prompt
         assert "Rating 分布" in prompt
@@ -345,12 +348,14 @@ class TestDataSearchTools:
         import src.agents.data_search as ds
 
         weak_answer = "30代ファミリー向けの売上トレンドは提示できませんでした。必要であれば追加提示してください。"
+        technical_failure_answer = "Lakehouse上で該当クエリを実行しましたが、技術的な理由（内部エラー）により必要なデータを取得できませんでした。"
         placeholder_answer = "合計売上は ¥X,XXX,XXX、予約件数は XX件です。以下は分析例です。"
         missing_sales_answer = "売上上位・合計売上・予約件数の具体的数値はデータ不足のためデータなしです。レビュー件数は18件です。"
         missing_sales_variant = "売上上位プラン、合計売上金額、予約件数に該当するデータが存在しませんでした。"
         concrete_answer = "沖縄 2泊3日が売上上位。合計売上 1,022,000 円、予約 8 件。"
 
         assert ds._is_low_confidence_data_agent_answer(weak_answer) is True
+        assert ds._is_low_confidence_data_agent_answer(technical_failure_answer) is True
         assert ds._is_low_confidence_data_agent_answer(placeholder_answer) is True
         assert ds._is_low_confidence_data_agent_answer(missing_sales_answer) is True
         assert ds._is_low_confidence_data_agent_answer(missing_sales_variant) is True

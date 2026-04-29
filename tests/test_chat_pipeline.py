@@ -92,6 +92,24 @@ class TestSSEEventPersistenceParsing:
         assert converted is not None
         assert converted["data"]["message"] == "Invalid data: field is required"
 
+    def test_sse_to_event_dict_adds_background_version(self) -> None:
+        event = chat_module.format_sse(
+            chat_module.SSEEventType.TEXT,
+            {"content": "品質レビュー", "agent": "quality-review-agent"},
+        )
+
+        converted = chat_module._sse_to_event_dict(event, background_update=True, artifact_version=2)
+
+        assert converted == {
+            "event": chat_module.SSEEventType.TEXT.value,
+            "data": {
+                "content": "品質レビュー",
+                "agent": "quality-review-agent",
+                "background_update": True,
+                "version": 2,
+            },
+        }
+
 
 class TestNormalizeModelSettings:
     """_normalize_model_settings のテスト"""
@@ -3165,6 +3183,51 @@ def test_build_video_poll_completion_events_returns_failure_detail() -> None:
     ]
 
 
+class TestVersionArtifactRetention:
+    """成果物 version ごとの動画・企画書保持の回帰テスト。"""
+
+    def test_video_background_events_include_artifact_version(self) -> None:
+        events = chat_module._build_video_poll_completion_events(
+            "https://example.com/video-v1.mp4",
+            background_update=True,
+            artifact_version=1,
+        )
+
+        assert events == [
+            {
+                "event": chat_module.SSEEventType.TEXT.value,
+                "data": {
+                    "content": "https://example.com/video-v1.mp4",
+                    "agent": "video-gen-agent",
+                    "content_type": "video",
+                    "background_update": True,
+                    "version": 1,
+                },
+            }
+        ]
+
+    def test_extract_agent_text_for_requested_version(self) -> None:
+        conversation = {
+            "messages": [
+                {"event": "text", "data": {"agent": "plan-revision-agent", "content": "# Plan v1"}},
+                {"event": "done", "data": {}},
+                {"event": "text", "data": {"agent": "plan-revision-agent", "content": "# Plan v2"}},
+                {"event": "done", "data": {}},
+            ]
+        }
+
+        assert chat_module._extract_agent_text_for_version(
+            conversation,
+            {"plan-revision-agent"},
+            1,
+        ) == "# Plan v1"
+        assert chat_module._extract_agent_text_for_version(
+            conversation,
+            {"plan-revision-agent"},
+            2,
+        ) == "# Plan v2"
+
+
 @pytest.mark.asyncio
 async def test_post_approval_emits_video_timeout_message_when_polling_times_out(monkeypatch) -> None:
     """動画 polling が完了しない場合でも、永続化用の warning を SSE に流す"""
@@ -3249,12 +3312,13 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
     assert poll_waits == [420]
     assert (
         "text",
-        {
-            "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
-            "agent": "video-gen-agent",
-            "content_type": "text",
-        },
-    ) in parsed_events
+            {
+                "content": "⚠️ アバター動画の生成完了を確認できませんでした。Photo Avatar ジョブがタイムアウトまたは失敗した可能性があります。",
+                "agent": "video-gen-agent",
+                "content_type": "text",
+                "version": 1,
+            },
+        ) in parsed_events
 
 
 @pytest.mark.asyncio

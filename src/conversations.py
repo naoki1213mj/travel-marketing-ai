@@ -1,6 +1,7 @@
 """会話履歴の永続化。Cosmos DB またはインメモリ辞書にフォールバックする。"""
 
 import asyncio
+import json
 import logging
 import os
 import time
@@ -30,6 +31,35 @@ def _normalize_owner_id(owner_id: str | None) -> str:
 def _build_memory_key(owner_id: str, document_id: str) -> str:
     """インメモリ保存用の複合キーを返す。"""
     return f"{owner_id}:{document_id}"
+
+
+def _event_identity(event: object) -> str:
+    """イベント重複排除用の安定した identity を返す。"""
+    try:
+        return json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(event)
+
+
+def _merge_event_histories(existing_events: object, incoming_events: object) -> list[dict]:
+    """stale full-save で既存イベントを失わないよう、順序保持でマージする。"""
+    existing_list = existing_events if isinstance(existing_events, list) else []
+    incoming_list = incoming_events if isinstance(incoming_events, list) else []
+
+    if not existing_list:
+        return list(incoming_list)
+    if not incoming_list:
+        return list(existing_list)
+
+    merged = list(existing_list)
+    seen = {_event_identity(event) for event in merged}
+    for event in incoming_list:
+        key = _event_identity(event)
+        if key in seen:
+            continue
+        merged.append(event)
+        seen.add(key)
+    return merged
 
 
 def _get_owner_id_from_document(doc: dict | None) -> str:
@@ -225,7 +255,7 @@ def _build_conversation_doc(
         "updated_at": now,
         "status": status,
         "input": user_input,
-        "messages": events,
+        "messages": _merge_event_histories(existing.get("messages", []) if existing else [], events),
         "artifacts": artifact_versions,
         "metadata": merged_metadata,
     }

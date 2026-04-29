@@ -147,7 +147,12 @@ _VIDEO_POLL_TIMEOUT_MESSAGE = (
 )
 
 
-def _build_video_poll_completion_events(video_url: str | dict | None, *, background_update: bool = False) -> list[dict]:
+def _build_video_poll_completion_events(
+    video_url: str | dict | None,
+    *,
+    background_update: bool = False,
+    artifact_version: int | None = None,
+) -> list[dict]:
     """動画ジョブのポーリング結果を保存用イベントへ正規化する。"""
 
     def _build_text_event(content: str, content_type: str) -> dict:
@@ -158,6 +163,8 @@ def _build_video_poll_completion_events(video_url: str | dict | None, *, backgro
         }
         if background_update:
             data["background_update"] = True
+        if artifact_version is not None:
+            data["version"] = artifact_version
         return {"event": SSEEventType.TEXT.value, "data": data}
 
     if isinstance(video_url, dict):
@@ -330,6 +337,7 @@ class PostCompletionUpdateContext(TypedDict):
     brochure_html: str
     video_job_id: str | None
     owner_id: str
+    artifact_version: NotRequired[int]
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
@@ -722,6 +730,62 @@ def _extract_latest_agent_text(conversation: dict | None, agent_names: set[str])
         content = data.get("content")
         if isinstance(content, str) and content:
             latest_text = content
+    return latest_text
+
+
+def _count_completed_artifact_versions(events: object) -> int:
+    """done イベント数から確定済み成果物 version 数を返す。"""
+    if not isinstance(events, list):
+        return 0
+    return sum(
+        1
+        for event in events
+        if isinstance(event, dict) and event.get("event") == SSEEventType.DONE.value
+    )
+
+
+def _coerce_artifact_version(value: object) -> int | None:
+    """artifact version を正の int へ安全に正規化する。"""
+    try:
+        version = int(value)
+    except (TypeError, ValueError):
+        return None
+    return version if version > 0 else None
+
+
+def _extract_agent_text_for_version(
+    conversation: dict | None,
+    agent_names: set[str],
+    artifact_version: int | None,
+) -> str:
+    """指定 artifact version 内の対象 agent の最新 text を返す。"""
+    if artifact_version is None:
+        return _extract_latest_agent_text(conversation, agent_names)
+    if not isinstance(conversation, dict):
+        return ""
+
+    target_version = max(1, artifact_version)
+    current_version = 1
+    latest_text = ""
+
+    for message in conversation.get("messages", []):
+        if not isinstance(message, dict):
+            continue
+
+        event_name = message.get("event")
+        data = message.get("data")
+
+        if current_version == target_version and event_name == SSEEventType.TEXT.value and isinstance(data, dict):
+            if data.get("agent") in agent_names:
+                content = data.get("content")
+                if isinstance(content, str) and content:
+                    latest_text = content
+
+        if event_name == SSEEventType.DONE.value:
+            if current_version >= target_version:
+                break
+            current_version += 1
+
     return latest_text
 
 
@@ -1431,7 +1495,12 @@ def _schedule_pipeline_monitoring(
     )
 
 
-def _sse_to_event_dict(event: str, *, background_update: bool = False) -> dict | None:
+def _sse_to_event_dict(
+    event: str,
+    *,
+    background_update: bool = False,
+    artifact_version: int | None = None,
+) -> dict | None:
     """SSE 文字列を会話保存用イベント dict に変換する。"""
     try:
         lines = event.strip().split("\n")
@@ -1443,6 +1512,8 @@ def _sse_to_event_dict(event: str, *, background_update: bool = False) -> dict |
 
     if background_update and isinstance(ev_data, dict):
         ev_data = {**ev_data, "background_update": True}
+        if artifact_version is not None:
+            ev_data["version"] = artifact_version
 
     return {"event": ev_type, "data": ev_data}
 
@@ -3996,9 +4067,22 @@ async def _refine_events(
         user_messages = _extract_user_message_history(conversation)
         user_input = user_messages[0] if user_messages else ""
         rejection_history = user_messages[1:] if len(user_messages) > 1 else []
-        original_plan = _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
-        analysis_markdown = _extract_latest_agent_text(conversation, {"data-search-agent"})
-        regulation_summary = _extract_latest_agent_text(conversation, {"regulation-check-agent"})
+        target_artifact_version = refine_context.artifact_version if refine_context is not None else None
+        original_plan = _extract_agent_text_for_version(
+            conversation,
+            {"marketing-plan-agent", "plan-revision-agent"},
+            target_artifact_version,
+        ) or _extract_latest_agent_text(conversation, {"marketing-plan-agent", "plan-revision-agent"})
+        analysis_markdown = _extract_agent_text_for_version(
+            conversation,
+            {"data-search-agent"},
+            target_artifact_version,
+        ) or _extract_latest_agent_text(conversation, {"data-search-agent"})
+        regulation_summary = _extract_agent_text_for_version(
+            conversation,
+            {"regulation-check-agent"},
+            target_artifact_version,
+        ) or _extract_latest_agent_text(conversation, {"regulation-check-agent"})
         saved_work_iq_session = _get_work_iq_session_from_conversation(conversation)
         effective_work_iq_session = work_iq_session or saved_work_iq_session
         latest_evaluation_result = _extract_latest_evaluation_result(
@@ -4227,6 +4311,14 @@ async def _post_approval_events(
     approval_scope = context.get("approval_scope", "user")
     manager_callback_token = context.get("manager_callback_token")
     context_owner_id, allow_cross_owner = _resolve_context_owner_lookup(context, owner_id)
+    version_source_conversation = await get_conversation(
+        conversation_id,
+        owner_id=context_owner_id or None,
+        allow_cross_owner=allow_cross_owner,
+    )
+    current_artifact_version = _count_completed_artifact_versions(
+        version_source_conversation.get("messages", []) if version_source_conversation else []
+    ) + 1
     regulation_text = ""
     revised_plan_markdown = context["plan_markdown"]
     hero_image_task = None
@@ -4492,6 +4584,7 @@ async def _post_approval_events(
                 "content": _VIDEO_BACKGROUND_PENDING_MESSAGE,
                 "agent": "video-gen-agent",
                 "content_type": "text",
+                "version": current_artifact_version,
             },
         )
 
@@ -4513,7 +4606,8 @@ async def _post_approval_events(
             from src.agents.video_gen import poll_video_job
 
             video_events = _build_video_poll_completion_events(
-                await poll_video_job(video_job_id, max_wait=_VIDEO_POLL_MAX_WAIT_SECONDS)
+                await poll_video_job(video_job_id, max_wait=_VIDEO_POLL_MAX_WAIT_SECONDS),
+                artifact_version=current_artifact_version,
             )
             for event_dict in video_events:
                 yield format_sse(event_dict["event"], event_dict["data"])
@@ -4536,6 +4630,7 @@ async def _post_approval_events(
                 "brochure_html": brochure_html,
                 "video_job_id": video_job_id or None,
                 "owner_id": context_owner_id,
+                "artifact_version": current_artifact_version,
             }
         )
 
@@ -4574,6 +4669,9 @@ async def _append_post_completion_updates(
         return
 
     appended_events: list[dict] = []
+    artifact_version = _coerce_artifact_version(update_context.get("artifact_version"))
+    if artifact_version is None:
+        artifact_version = _count_completed_artifact_versions(existing_conversation.get("messages", [])) or None
 
     video_job_id = _sanitize_optional_text(update_context.get("video_job_id"))
     if video_job_id:
@@ -4583,13 +4681,14 @@ async def _append_post_completion_updates(
             _build_video_poll_completion_events(
                 await poll_video_job(video_job_id, max_wait=_VIDEO_POLL_MAX_WAIT_SECONDS),
                 background_update=True,
+                artifact_version=artifact_version,
             )
         )
 
     review_input = _sanitize_optional_text(update_context.get("review_input"))
     if review_input:
         for event in await _maybe_run_quality_review(review_input):
-            event_dict = _sse_to_event_dict(event, background_update=True)
+            event_dict = _sse_to_event_dict(event, background_update=True, artifact_version=artifact_version)
             if event_dict is not None:
                 appended_events.append(event_dict)
 
