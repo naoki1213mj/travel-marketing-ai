@@ -502,7 +502,7 @@ class TestMarketingPlanRuntimeSettings:
 
     def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 95.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 45.0
 
     def test_foundry_work_iq_no_longer_auto_falls_back(self) -> None:
         event = chat_module.format_sse(

@@ -1268,10 +1268,10 @@ def _resolve_work_iq_timeout_seconds() -> float:
     try:
         timeout_seconds = float(raw_timeout)
     except ValueError:
-        return 95.0
+        return 45.0
     if timeout_seconds <= 0:
-        return 95.0
-    return min(timeout_seconds, 95.0)
+        return 45.0
+    return min(timeout_seconds, 45.0)
 
 
 def _resolve_marketing_plan_runtime(workflow_settings: WorkflowSettings | None) -> MarketingPlanRuntime:
