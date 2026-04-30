@@ -41,9 +41,16 @@
 
 ### 4.0 Container Apps / Cosmos DB private endpoint migration note
 
-IaC can place the Container Apps Environment in the dedicated `snet-container-apps` subnet by setting both `ENABLE_CONTAINER_APPS_VNET_INTEGRATION=true` and `CONTAINER_APPS_VNET_INTEGRATION_MIGRATION_APPROVAL=CONFIRM_CAE_VNET_MIGRATION`, and attaches the Cosmos DB private endpoint to `privatelink.documents.azure.com`, with that private DNS zone linked to the same VNet. Cosmos DB remains `publicNetworkAccess: Disabled`.
+IaC places the Container Apps Environment in the dedicated `snet-container-apps` subnet when both `ENABLE_CONTAINER_APPS_VNET_INTEGRATION=true` and `CONTAINER_APPS_VNET_INTEGRATION_MIGRATION_APPROVAL=CONFIRM_CAE_VNET_MIGRATION` are set, and attaches the Cosmos DB / Key Vault private endpoints to their `privatelink.*` zones linked to the same VNet. Cosmos DB stays `publicNetworkAccess: Disabled`.
 
-Azure Container Apps Environment VNet integration is effectively a create-time setting. If an existing environment was created without `properties.vnetConfiguration`, do **not** set the two migration flags in production without approval: plan a CAE/Container App replacement or blue-green migration, validate that the app resolves the Cosmos account through the private DNS zone from the VNet-integrated environment, and only then raise `CONTAINER_APP_MAX_REPLICAS` above the default `1`.
+Azure Container Apps Environment VNet integration is a create-time setting and `managedEnvironmentId` is immutable on the Container App. Therefore the IaC implements **blue-green** rather than in-place migration: when the two flags above are approved, both the CAE and the Container App are renamed with a `-pn` (private network) suffix (e.g. `cae-<token>-pn`, `ca-<token>-pn`) so a fresh VNet-integrated environment is created side-by-side and `azd` retargets the `web` service to the new Container App. The original `cae-<token>` / `ca-<token>` resources are not in Bicep anymore and must be deleted manually after a stability window.
+
+Operational notes for the migration:
+
+- The first `azd provision` after flipping the flags creates the new CAE and Container App in `snet-container-apps`. The CA module emits AcrPull and Key Vault Secrets User role assignments; if the initial revision pull races the role-assignment propagation, a second `azd provision` will succeed once the assignments exist.
+- Validate that the CA resolves Cosmos / Key Vault through `privatelink.documents.azure.com` / `privatelink.vaultcore.azure.net` from inside the VNet-integrated environment (`getent hosts cosmos-<token>.documents.azure.com` should return a `10.0.x.x` private IP) before raising `CONTAINER_APP_MAX_REPLICAS` above the default `1`.
+- The blue-green cutover preserves SPA Redirect URIs by union: `scripts/postprovision.py::_ensure_spa_redirect_uris` merges the old and new Container App FQDNs into the `travel-voice-spa` Entra app, so both keep working until the old CA is decommissioned.
+- After 1–2 hours of stable traffic on the new FQDN, the old environment can be drained with `az containerapp delete -n ca-<token> -g <rg> --yes` followed by `az containerapp env delete -n cae-<token> -g <rg> --yes`.
 
 ## 4. 手動設定が必要な項目（新しい tenant を一から立てる場合）
 

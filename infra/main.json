@@ -6,7 +6,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.41.2.15936",
-      "templateHash": "6212427492005194362"
+      "templateHash": "1146068555431525312"
     }
   },
   "parameters": {
@@ -139,7 +139,10 @@
     "defaultImageModelDeploymentName": "gpt-image-2",
     "aiServicesApiBase": "[format('https://{0}{1}.services.ai.azure.com', variables('abbrs').aiFoundry, variables('resourceToken'))]",
     "improvementMcpEndpoint": "[format('https://{0}.azure-api.net/improvement-mcp/runtime/webhooks/mcp', variables('apimName'))]",
-    "containerAppsVnetIntegrationApproved": "[and(parameters('enableContainerAppsVnetIntegration'), equals(parameters('containerAppsVnetIntegrationMigrationApproval'), 'CONFIRM_CAE_VNET_MIGRATION'))]"
+    "containerAppsVnetIntegrationApproved": "[and(parameters('enableContainerAppsVnetIntegration'), equals(parameters('containerAppsVnetIntegrationMigrationApproval'), 'CONFIRM_CAE_VNET_MIGRATION'))]",
+    "privateNetworkSuffix": "[if(variables('containerAppsVnetIntegrationApproved'), '-pn', '')]",
+    "containerAppsEnvName": "[format('{0}{1}{2}', variables('abbrs').containerAppsEnv, variables('resourceToken'), variables('privateNetworkSuffix'))]",
+    "containerAppName": "[format('{0}{1}{2}', variables('abbrs').containerApp, variables('resourceToken'), variables('privateNetworkSuffix'))]"
   },
   "resources": {
     "rg": {
@@ -898,7 +901,7 @@
         "mode": "Incremental",
         "parameters": {
           "name": {
-            "value": "[format('{0}{1}', variables('abbrs').containerAppsEnv, variables('resourceToken'))]"
+            "value": "[variables('containerAppsEnvName')]"
           },
           "location": {
             "value": "[parameters('location')]"
@@ -989,7 +992,7 @@
         "mode": "Incremental",
         "parameters": {
           "name": {
-            "value": "[format('{0}{1}', variables('abbrs').containerApp, variables('resourceToken'))]"
+            "value": "[variables('containerAppName')]"
           },
           "location": {
             "value": "[parameters('location')]"

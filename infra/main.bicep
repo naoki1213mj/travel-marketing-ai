@@ -62,6 +62,12 @@ var defaultImageModelDeploymentName = 'gpt-image-2'
 var aiServicesApiBase = 'https://${abbrs.aiFoundry}${resourceToken}.services.ai.azure.com'
 var improvementMcpEndpoint = 'https://${apimName}.azure-api.net/improvement-mcp/runtime/webhooks/mcp'
 var containerAppsVnetIntegrationApproved = enableContainerAppsVnetIntegration && containerAppsVnetIntegrationMigrationApproval == 'CONFIRM_CAE_VNET_MIGRATION'
+// VNet 統合移行は新規 CAE / Container App を別名で作成し blue-green でカットオーバーする。
+// Azure は既存 CAE への vnetConfiguration 追加と既存 Container App の managedEnvironmentId 変更を許可しないため、
+// 承認時は '-pn' (private network) サフィックスを付けてサイドバイサイドに展開する。
+var privateNetworkSuffix = containerAppsVnetIntegrationApproved ? '-pn' : ''
+var containerAppsEnvName = '${abbrs.containerAppsEnv}${resourceToken}${privateNetworkSuffix}'
+var containerAppName = '${abbrs.containerApp}${resourceToken}${privateNetworkSuffix}'
 
 // リソースグループ
 resource rg 'Microsoft.Resources/resourceGroups@2024-07-01' = {
@@ -163,7 +169,7 @@ module containerAppsEnv 'modules/container-apps-env.bicep' = {
   name: 'container-apps-env'
   scope: rg
   params: {
-    name: '${abbrs.containerAppsEnv}${resourceToken}'
+    name: containerAppsEnvName
     location: location
     tags: tags
     logAnalyticsWorkspaceId: logAnalytics.outputs.id
@@ -176,7 +182,7 @@ module containerApp 'modules/container-app.bicep' = {
   name: 'container-app'
   scope: rg
   params: {
-    name: '${abbrs.containerApp}${resourceToken}'
+    name: containerAppName
     location: location
     tags: tags
     containerAppsEnvironmentId: containerAppsEnv.outputs.id

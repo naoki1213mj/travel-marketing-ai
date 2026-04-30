@@ -123,7 +123,37 @@ Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ
 | MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
 | Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored, and both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` are wired into the Container App |
 | Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel. The signed manager trigger URL sync in `deploy.yml` has also been revalidated against the live Container App secret |
-| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback |
+| Container Apps VNet integration | Migrated 2026-04-30 via blue-green: new VNet-integrated CAE `cae-wmbvhdhcsuyb2-pn` (default domain `wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`) and Container App `ca-wmbvhdhcsuyb2-pn` are live in `snet-container-apps`; both connect to the existing Cosmos DB and Key Vault private endpoints over the VNet (`publicNetworkAccess` stays `Disabled`). The pre-migration `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` resources remain in the resource group for rollback and should be deleted manually after the stability window (see "Container Apps VNet integration migration runbook" below) |
+| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback. Drain the legacy `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` once the new `-pn` environment has run for 1–2 hours without errors |
+
+### Container Apps VNet integration migration runbook
+
+Cutting over from a non-VNet-integrated Container Apps Environment to a VNet-integrated one requires a side-by-side rebuild because Azure does not allow `vnetConfiguration` to be added to an existing CAE and `managedEnvironmentId` is immutable on the Container App. The IaC implements this as a blue-green rename keyed off two `azd` flags.
+
+```bash
+azd env set ENABLE_CONTAINER_APPS_VNET_INTEGRATION true
+azd env set CONTAINER_APPS_VNET_INTEGRATION_MIGRATION_APPROVAL CONFIRM_CAE_VNET_MIGRATION
+azd provision
+```
+
+When both flags are set, `infra/main.bicep` appends a `-pn` suffix to the CAE and Container App names (e.g. `cae-<token>-pn`, `ca-<token>-pn`) and creates the new resources alongside the originals. The original CAE / Container App are no longer in Bicep, so `azd provision` leaves them untouched. After the new Container App becomes Healthy, `azd deploy` and the `azure.yaml` `web` service automatically target the new FQDN through the updated `AZURE_CONTAINER_APP_NAME` and `SERVICE_WEB_ENDPOINTS` outputs.
+
+Operational gotchas (verified during the 2026-04-30 cutover):
+
+1. **AcrPull race**: The new Container App's initial revision pulls the image from ACR before the AcrPull / Key Vault Secrets User role assignments emitted by the same Bicep module finish propagating. The first `azd provision` may fail with `Operation expired` on revision creation. Re-run `azd provision`; the second pass succeeds because the role assignments now exist.
+2. **Manual role-assignment cleanup**: If you create AcrPull manually with `az role assignment create`, delete it before re-running `azd provision`. Bicep's deterministic `guid()`-based assignment IDs differ from manual ones, leading to `RoleAssignmentExists` errors on the next pass.
+3. **SPA Redirect URIs**: `scripts/postprovision.py::_ensure_spa_redirect_uris` merges old and new FQDNs into the `travel-voice-spa` Entra app, so MSAL sign-in keeps working on both URLs throughout the migration.
+4. **Connectivity smoke test from inside the new container**:
+   ```bash
+   az containerapp exec -n ca-<token>-pn -g <rg> --command "getent hosts cosmos-<token>.documents.azure.com"
+   # → 10.0.x.x  cosmos-<token>.privatelink.documents.azure.com  cosmos-<token>.documents.azure.com
+   ```
+   Then validate `https://<new-fqdn>/api/health` returns `200 {"status":"ok"}` and `/api/ready` returns `{"status":"ready","missing":[]}`.
+5. **Drain the old environment** only after the new FQDN has run cleanly for 1–2 hours:
+   ```bash
+   az containerapp delete -n ca-<token> -g <rg> --yes
+   az containerapp env delete -n cae-<token> -g <rg> --yes
+   ```
 
 ### Improvement MCP の追加デプロイ
 
