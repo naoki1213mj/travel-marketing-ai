@@ -28,6 +28,9 @@ jobs:
       DEPLOY_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
+      VOICE_SPA_CLIENT_ID: ${{ vars.VOICE_SPA_CLIENT_ID }}
+      SEARCH_ENDPOINT: ${{ vars.SEARCH_ENDPOINT }}
+      WORK_IQ_TIMEOUT_SECONDS: ${{ vars.WORK_IQ_TIMEOUT_SECONDS }}
       FABRIC_DATA_AGENT_URL: ${{ vars.FABRIC_DATA_AGENT_URL }}
       FABRIC_DATA_AGENT_URL_V2: ${{ vars.FABRIC_DATA_AGENT_URL_V2 }}
       FABRIC_DATA_AGENT_RUNTIME: ${{ vars.FABRIC_DATA_AGENT_RUNTIME }}
@@ -88,6 +91,24 @@ jobs:
             --name ${{ vars.CONTAINER_APP_NAME }} \
             --resource-group ${{ vars.RESOURCE_GROUP }} \
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
+
+      - name: Configure optional Work IQ / Search endpoints
+        if: ${{ env.VOICE_SPA_CLIENT_ID != '' || env.SEARCH_ENDPOINT != '' || env.WORK_IQ_TIMEOUT_SECONDS != '' }}
+        run: |
+          env_vars=()
+          if [ -n "${VOICE_SPA_CLIENT_ID}" ]; then
+            env_vars+=("VOICE_SPA_CLIENT_ID=${VOICE_SPA_CLIENT_ID}")
+          fi
+          if [ -n "${SEARCH_ENDPOINT}" ]; then
+            env_vars+=("SEARCH_ENDPOINT=${SEARCH_ENDPOINT}")
+          fi
+          if [ -n "${WORK_IQ_TIMEOUT_SECONDS}" ]; then
+            env_vars+=("WORK_IQ_TIMEOUT_SECONDS=${WORK_IQ_TIMEOUT_SECONDS}")
+          fi
+          az containerapp update \
+            --name ${{ vars.CONTAINER_APP_NAME }} \
+            --resource-group ${{ vars.RESOURCE_GROUP }} \
+            --set-env-vars "${env_vars[@]}"
 
       - name: Configure optional Fabric endpoints
         if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_DATA_AGENT_URL_V2 != '' || env.FABRIC_DATA_AGENT_RUNTIME != '' || env.FABRIC_DATA_AGENT_RUNTIME_VERSION != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' }}
