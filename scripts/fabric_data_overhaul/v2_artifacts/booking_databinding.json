@@ -1,0 +1,104 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/ontology/dataBinding/1.0.0/schema.json",
+  "id": "0df602f1-17b7-448b-bd7c-5ca901db2f6c",
+  "dataBindingConfiguration": {
+    "dataBindingType": "NonTimeSeries",
+    "propertyBindings": [
+      {
+        "sourceColumnName": "booking_id",
+        "targetPropertyId": "3000000000020000"
+      },
+      {
+        "sourceColumnName": "booking_code",
+        "targetPropertyId": "3000000000020001"
+      },
+      {
+        "sourceColumnName": "customer_id",
+        "targetPropertyId": "3000000000020002"
+      },
+      {
+        "sourceColumnName": "campaign_id",
+        "targetPropertyId": "3000000000020003"
+      },
+      {
+        "sourceColumnName": "plan_name",
+        "targetPropertyId": "3000000000020004"
+      },
+      {
+        "sourceColumnName": "product_type",
+        "targetPropertyId": "3000000000020005"
+      },
+      {
+        "sourceColumnName": "destination_country",
+        "targetPropertyId": "3000000000020006"
+      },
+      {
+        "sourceColumnName": "destination_region",
+        "targetPropertyId": "3000000000020007"
+      },
+      {
+        "sourceColumnName": "destination_city",
+        "targetPropertyId": "3000000000020008"
+      },
+      {
+        "sourceColumnName": "destination_type",
+        "targetPropertyId": "3000000000020009"
+      },
+      {
+        "sourceColumnName": "season",
+        "targetPropertyId": "3000000000020010"
+      },
+      {
+        "sourceColumnName": "departure_date",
+        "targetPropertyId": "3000000000020011"
+      },
+      {
+        "sourceColumnName": "return_date",
+        "targetPropertyId": "3000000000020012"
+      },
+      {
+        "sourceColumnName": "duration_days",
+        "targetPropertyId": "3000000000020013"
+      },
+      {
+        "sourceColumnName": "pax",
+        "targetPropertyId": "3000000000020014"
+      },
+      {
+        "sourceColumnName": "pax_adult",
+        "targetPropertyId": "3000000000020015"
+      },
+      {
+        "sourceColumnName": "pax_child",
+        "targetPropertyId": "3000000000020016"
+      },
+      {
+        "sourceColumnName": "total_revenue_jpy",
+        "targetPropertyId": "3000000000020017"
+      },
+      {
+        "sourceColumnName": "price_per_person_jpy",
+        "targetPropertyId": "3000000000020018"
+      },
+      {
+        "sourceColumnName": "booking_date",
+        "targetPropertyId": "3000000000020019"
+      },
+      {
+        "sourceColumnName": "lead_time_days",
+        "targetPropertyId": "3000000000020020"
+      },
+      {
+        "sourceColumnName": "booking_status",
+        "targetPropertyId": "3000000000020021"
+      }
+    ],
+    "sourceTableProperties": {
+      "sourceType": "LakehouseTable",
+      "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+      "itemId": "5e02348e-d2a4-47fb-b63d-257ed3be7731",
+      "sourceTableName": "booking",
+      "sourceSchema": "dbo"
+    }
+  }
+}

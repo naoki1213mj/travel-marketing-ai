@@ -1,0 +1,92 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/item/dataAgent/definition/dataSource/1.0.0/schema.json",
+  "artifactId": "10cd6675-405a-4366-b91b-d57242a28914",
+  "workspaceId": "096ff72a-6174-4aba-8f0c-140454fa6c3f",
+  "dataSourceInstructions": "travelIQ_v2 は lh_travel_marketing_v2 の travel marketing 用 Fabric IQ ontology です。\n\n利用可能 entity (10 種類):\n- customer: 顧客マスタ (customer_id, age_band, customer_segment, loyalty_tier, prefecture, gender, acquisition_channel)\n- booking: 予約ファクト (約 50,000 件、2022〜2026/4)。booking_id, customer_id, campaign_id, destination_country/region/city/type, season, departure_date, total_revenue_jpy, price_per_person_jpy, pax, lead_time_days, booking_status\n- payment: 決済 (payment_id, booking_id, payment_method, amount_jpy, currency, exchange_rate_to_jpy, paid_at)\n- cancellation: キャンセル詳細 (booking_id, cancelled_at, cancellation_reason, cancellation_lead_days, refund_amount_jpy)\n- itinerary_item: 旅程明細 (booking_id, item_type, hotel_id, flight_id)\n- hotel: 宿泊マスタ (region, city, category, star_rating)\n- flight: フライト商品 (airline_code, route_label, flight_class)\n- tour_review: レビュー (booking_id, customer_id, rating, nps, sentiment, comment)\n- campaign: 販促キャンペーン (campaign_id, campaign_type, target_segment, total_budget_jpy)\n- inquiry: 問い合わせ (customer_id, channel, inquiry_type, csat)\n\n## 値マッピング (CRITICAL)\n- destination_region は **日本語** (ハワイ / 沖縄 / 北海道 / パリ / ニューヨーク 等)。\n  「Hawaii」は `destination_region='ハワイ'` で検索。`destination_country='Hawaii'` は存在しない。\n- destination_country は **英語** (Japan / USA / South Korea / France / 等)。\n- destination_type は domestic / outbound / inbound (英語コード)。\n- season は spring / summer / autumn / winter / gw / obon / new_year (英語コード)。\n- age_band は 10s / 20s / 30s / 40s / 50s / 60s / 70s+。\n- customer_segment は family / couple / solo / group / senior / student / business。\n- booking_status は confirmed / completed / cancelled / no_show。\n\n## 集計戦略\n- 単一条件サマリ (「ハワイの売上」) は明細表でなく `destination_region='ハワイ'` の SUM/COUNT/AVG 一行。\n- 目的地別ランキングは destination_region で集約し重複行禁止。\n- 売上 + レビューは booking で先に絞り、tour_review を booking_id で結合。\n- cancellation_rate は `COUNT(WHERE booking_status='cancelled') / COUNT(*)` を使い、HAVING COUNT(*) >= 30 で疎データを除外。\n- 為替: payment.exchange_rate_to_jpy で USD/EUR の年次レート上昇を確認。\n- リピート率: `customer_id ごとの予約数 >=2` の比率。SM 計算メジャーが見えなくても SQL で必ず計算可能。\n\n## 0 件の前に DISTINCT 確認\nWHERE 句で 0 件が返った場合は、必ず `SELECT DISTINCT <column>` で値一覧を確認し、ユーザーの語との一致 (LIKE / 編集距離) を試してから再クエリする。「データなし」「ツール側制限」を回答する前に必ず実施。\n\n## 自動緩和\n複数条件で 0 件のときは自動緩和: season → age_band → customer_segment → region→country。緩和したら明示する。\n\n## 失敗時のフォールバック\n- 「技術的なエラー」「システム的な制約」「取得できませんでした」「ツール側制限」「SM計算列が見えない」を最終回答にしないこと。\n- 複合 JOIN が失敗したら単一テーブルクエリに分解 (booking → review → cancellation を独立に取得し並列表示)。\n- 列にない指標 (利益・天気・流入元) は説明だけで終わらず total_revenue_jpy / pax / price_per_person_jpy / rating で代替ランキングを作成。\n",
+  "displayName": "travelIQ_v2",
+  "type": "ontology",
+  "userDescription": "Travel marketing v2 ontology with 10 entities for Japanese marketing analysis (revenue, segments, seasonality, ROI, churn, currency).",
+  "metadata": {},
+  "elements": [
+    {
+      "id": "customer",
+      "is_selected": true,
+      "display_name": "customer",
+      "type": "ontology.entity",
+      "description": "顧客マスタ。約 10,000 行。customer_id (PK), age_band, customer_segment, loyalty_tier, prefecture, gender, birth_year, acquisition_channel, email_opt_in。",
+      "children": []
+    },
+    {
+      "id": "booking",
+      "is_selected": true,
+      "display_name": "booking",
+      "type": "ontology.entity",
+      "description": "予約ファクト。約 50,000 行 (2022-01〜2026-04)。booking_id (PK), customer_id (FK), campaign_id (FK), destination_country/region/city/type (domestic/outbound/inbound), season (spring/summer/autumn/winter/gw/obon/new_year), departure_date, return_date, duration_days, pax, total_revenue_jpy, price_per_person_jpy, booking_date, lead_time_days, booking_status, plan_name, product_type。destination_region は日本語 (ハワイ/沖縄/京都/パリ等)。",
+      "children": []
+    },
+    {
+      "id": "payment",
+      "is_selected": true,
+      "display_name": "payment",
+      "type": "ontology.entity",
+      "description": "決済。約 60,000 行。payment_id (PK), booking_id (FK), payment_method, payment_status, amount_jpy, currency (JPY/USD/EUR), exchange_rate_to_jpy, paid_at, installment_count。為替調整に必須。",
+      "children": []
+    },
+    {
+      "id": "cancellation",
+      "is_selected": true,
+      "display_name": "cancellation",
+      "type": "ontology.entity",
+      "description": "キャンセル詳細。約 5,000 行。booking_id (FK, 1:1), cancelled_at, cancellation_reason, cancellation_lead_days, cancellation_fee_jpy, refund_amount_jpy。booking_status='cancelled' の booking と JOIN。",
+      "children": []
+    },
+    {
+      "id": "itinerary_item",
+      "is_selected": true,
+      "display_name": "itinerary_item",
+      "type": "ontology.entity",
+      "description": "旅程明細。約 175,000 行。booking_id (FK), item_type (flight/hotel/transfer/activity/meal/insurance), hotel_id (FK), flight_id (FK), unit_price_jpy。",
+      "children": []
+    },
+    {
+      "id": "hotel",
+      "is_selected": true,
+      "display_name": "hotel",
+      "type": "ontology.entity",
+      "description": "宿泊マスタ。500 行。region, city, category, star_rating, avg_price_per_night_jpy。",
+      "children": []
+    },
+    {
+      "id": "flight",
+      "is_selected": true,
+      "display_name": "flight",
+      "type": "ontology.entity",
+      "description": "フライト商品。2,000 行。airline_code, route_label, flight_class, distance_km。",
+      "children": []
+    },
+    {
+      "id": "tour_review",
+      "is_selected": true,
+      "display_name": "tour_review",
+      "type": "ontology.entity",
+      "description": "顧客レビュー。約 8,000 行。booking_id (FK 1:1), customer_id, rating (1-5), nps (-100〜+100), sentiment (positive/neutral/negative), comment, review_date。",
+      "children": []
+    },
+    {
+      "id": "campaign",
+      "is_selected": true,
+      "display_name": "campaign",
+      "type": "ontology.entity",
+      "description": "販促キャンペーン。200 行。campaign_type (early_bird/last_minute/loyalty/seasonal/regional_partner/corporate), target_segment, target_destination_type, discount_percent, total_budget_jpy, total_redemptions。",
+      "children": []
+    },
+    {
+      "id": "inquiry",
+      "is_selected": true,
+      "display_name": "inquiry",
+      "type": "ontology.entity",
+      "description": "問い合わせ。約 20,000 行。customer_id (FK 任意), channel (web_form/tel/email/chat/store/social), inquiry_type, received_at, resolved_at, resolution_minutes, csat (1-5), assigned_team。",
+      "children": []
+    }
+  ]
+}
