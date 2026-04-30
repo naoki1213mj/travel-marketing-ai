@@ -196,6 +196,17 @@ def _normalize_resource_token(container_app_name: str) -> str:
     return normalized[3:] if normalized.startswith("ca-") else normalized
 
 
+def _sanitize_storage_account_name(prefix: str, resource_token: str) -> str:
+    """Azure Storage account 名仕様 (lowercase + 数字, 3-24 文字) に合わせて整形する。
+
+    Container App 名にハイフン (例: blue-green 移行で付く ``-pn``) が含まれていても
+    storage account 名として有効になるように非英数字を除去し、24 文字へ切り詰める。
+    """
+    sanitized_token = "".join(ch for ch in resource_token if ch.isalnum()).lower()
+    sanitized_prefix = "".join(ch for ch in prefix if ch.isalnum()).lower()
+    return (sanitized_prefix + sanitized_token)[:24]
+
+
 def _derive_improvement_mcp_names(env: dict[str, str]) -> tuple[str, str]:
     """improvement-mcp 用の Function App 名と storage account 名を決める。"""
     function_app_name = env.get("IMPROVEMENT_MCP_FUNCTION_APP_NAME", "").strip()
@@ -211,7 +222,7 @@ def _derive_improvement_mcp_names(env: dict[str, str]) -> tuple[str, str]:
     if not function_app_name:
         function_app_name = f"func-mcp-{resource_token}"
     if not storage_account_name:
-        storage_account_name = f"stfn{resource_token}"
+        storage_account_name = _sanitize_storage_account_name("stfn", resource_token)
     return function_app_name, storage_account_name
 
 

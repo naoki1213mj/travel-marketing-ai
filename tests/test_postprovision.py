@@ -19,6 +19,31 @@ def test_derive_improvement_mcp_names_from_container_app() -> None:
     assert storage_account_name == "stfnabc123"
 
 
+def test_derive_improvement_mcp_names_strips_hyphens_for_storage() -> None:
+    """blue/green 移行などで CA 名にハイフンが残っていても storage 名は英数字のみに整える"""
+    function_app_name, storage_account_name = postprovision_module._derive_improvement_mcp_names(
+        {"AZURE_CONTAINER_APP_NAME": "ca-wmbvhdhcsuyb2-pn"}
+    )
+
+    # Function App 名はハイフン許容なのでそのまま
+    assert function_app_name == "func-mcp-wmbvhdhcsuyb2-pn"
+    # Storage account 名はハイフン NG なので除去 + 24 文字以内
+    assert storage_account_name == "stfnwmbvhdhcsuyb2pn"
+    assert len(storage_account_name) <= 24
+    assert all(ch.isalnum() for ch in storage_account_name)
+    assert storage_account_name.islower()
+
+
+def test_derive_improvement_mcp_names_caps_storage_at_24_chars() -> None:
+    """token が長い場合でも 24 文字以内に切り詰める"""
+    long_name = "ca-" + "abcdefghij" * 4  # token = 40 chars
+    _, storage_account_name = postprovision_module._derive_improvement_mcp_names(
+        {"AZURE_CONTAINER_APP_NAME": long_name}
+    )
+    assert len(storage_account_name) == 24
+    assert storage_account_name.startswith("stfn")
+
+
 def test_configure_improvement_mcp_registers_named_value_backend_api_and_policy(monkeypatch) -> None:
     """Function App がある場合は APIM の improvement-mcp 一式を構成する"""
     calls: list[dict[str, object]] = []
