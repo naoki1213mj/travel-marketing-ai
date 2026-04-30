@@ -43,7 +43,7 @@ PROMPTS = [
     ("P11", "リピート顧客の比率を教えてください"),
 ]
 
-TIMEOUT_S = 180
+TIMEOUT_S = 240
 
 
 def get_token() -> str:
