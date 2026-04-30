@@ -72,7 +72,7 @@ router = APIRouter(prefix="/api", tags=["chat"])
 logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_remote_address)
 _BROCHURE_AGENT_MAX_WAIT_SECONDS = 240.0
-_WORK_IQ_TIMEOUT_CAP_SECONDS = 90.0
+_WORK_IQ_TIMEOUT_CAP_SECONDS = 150.0
 
 _APPROVAL_KEYWORDS = {
     "approve",
@@ -1310,9 +1310,9 @@ def _resolve_work_iq_timeout_seconds() -> float:
     """Foundry connector 側で使う Work IQ タイムアウトを返す。
 
     Microsoft 365 MCP (mcp_M365Copilot) は cold start や大きいメールボックスだと
-    1 回の MCP 呼び出しで 30〜60 秒近く掛かるため、env 由来の値を 90 秒で頭打ちにする。
-    90 秒は Container Apps の ingress timeout (240s) や OpenAI クライアントの
-    既定 timeout (600s) を大きく下回り、SSE keepalive にも干渉しない安全な上限。
+    1 回の MCP 呼び出しで 30〜120 秒近く掛かるため、env 由来の値を 150 秒で頭打ちにする。
+    150 秒は Container Apps の ingress timeout (240s) や OpenAI クライアントの
+    既定 timeout (600s) を下回り、SSE keepalive にも干渉しない安全な上限。
     """
     raw_timeout = _sanitize_optional_text(get_settings().get("work_iq_timeout_seconds"))
     try:

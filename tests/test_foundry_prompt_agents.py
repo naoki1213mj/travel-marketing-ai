@@ -196,8 +196,9 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_
     assert "ユーザー入力:\ntest input" in kwargs["input"]
     assert kwargs["extra_body"] == {
         "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
-        "tool_choice": "required",
+        "tool_choice": {"type": "mcp", "server_label": "mcp_M365Copilot"},
     }
+    assert kwargs["extra_body"]["tool_choice"] != "required"
     assert "tool_choice" not in kwargs
     assert "tools" not in kwargs
     assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]

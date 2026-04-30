@@ -501,19 +501,19 @@ class TestMarketingPlanRuntimeSettings:
         assert chat_module._resolve_work_iq_runtime(None) == "foundry_tool"
 
     def test_resolve_work_iq_timeout_seconds_caps_foundry_timeout(self, monkeypatch) -> None:
-        """env で大きすぎる timeout 値が来ても 90 秒で頭打ちにする。"""
-        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "120"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+        """env で大きすぎる timeout 値が来ても 150 秒で頭打ちにする。"""
+        monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "300"})
+        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
 
     def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_unparseable(self, monkeypatch) -> None:
-        """env 値が数値でない場合は安全側の既定 90 秒を返す。"""
+        """env 値が数値でない場合は安全側の既定 150 秒を返す。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "not-a-number"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
 
     def test_resolve_work_iq_timeout_seconds_falls_back_to_default_when_zero_or_negative(self, monkeypatch) -> None:
-        """env 値が 0 以下なら既定 90 秒に戻す。"""
+        """env 値が 0 以下なら既定 150 秒に戻す。"""
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "0"})
-        assert chat_module._resolve_work_iq_timeout_seconds() == 90.0
+        assert chat_module._resolve_work_iq_timeout_seconds() == 150.0
 
     def test_resolve_work_iq_timeout_seconds_honors_lower_value(self, monkeypatch) -> None:
         """cap 未満の env 値は尊重する。"""

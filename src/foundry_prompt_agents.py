@@ -260,7 +260,7 @@ def run_marketing_plan_prompt_agent(
                 ),
                 "extra_body": {
                     "agent_reference": {"name": agent.name, "type": "agent_reference"},
-                    "tool_choice": "required",
+                    "tool_choice": _build_work_iq_tool_choice(),
                 },
             }
             openai_client = project_client.get_openai_client(api_key=access_token)
