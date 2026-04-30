@@ -39,6 +39,8 @@ class AppSettings(TypedDict):
     manager_approval_trigger_url: str
     public_app_base_url: str
     fabric_data_agent_url: str
+    fabric_data_agent_url_v2: str
+    fabric_data_agent_runtime_version: str
     image_project_endpoint_mai: str
     gpt_image_15_deployment_name: str
     gpt_image_2_deployment_name: str
@@ -104,6 +106,8 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "manager_approval_trigger_url": ("MANAGER_APPROVAL_TRIGGER_URL",),
     "public_app_base_url": ("PUBLIC_APP_BASE_URL",),
     "fabric_data_agent_url": ("FABRIC_DATA_AGENT_URL",),
+    "fabric_data_agent_url_v2": ("FABRIC_DATA_AGENT_URL_V2",),
+    "fabric_data_agent_runtime_version": ("FABRIC_DATA_AGENT_RUNTIME_VERSION",),
     "image_project_endpoint_mai": ("IMAGE_PROJECT_ENDPOINT_MAI",),
     "gpt_image_15_deployment_name": ("GPT_IMAGE_15_DEPLOYMENT_NAME",),
     "gpt_image_2_deployment_name": ("GPT_IMAGE_2_DEPLOYMENT_NAME",),
@@ -157,6 +161,7 @@ _DEFAULTS: dict[str, str] = {
     "fabric_sales_table": "sales_results",
     "fabric_reviews_table": "customer_reviews",
     "fabric_data_agent_runtime": "sql",
+    "fabric_data_agent_runtime_version": "v1",
     "allowed_origins": "http://localhost:5173",
     "gpt_image_15_deployment_name": "gpt-image-1.5",
     "gpt_image_2_deployment_name": "gpt-image-2",

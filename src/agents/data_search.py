@@ -254,6 +254,52 @@ def _resolve_fabric_data_agent_runtime() -> str:
     return "sql"
 
 
+def _resolve_data_agent_version() -> str:
+    """Fabric Data Agent v1 / v2 を選ぶ。default は v1（既存挙動を保護）。
+
+    Phase 9 で導入した v2 (Travel_Ontology_DA_v2 + lh_travel_marketing_v2) は
+    `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2` を環境変数に設定して有効化する。
+    `FABRIC_DATA_AGENT_URL_V2` が未設定の場合は v1 にフォールバックする。
+    """
+    raw = str(get_settings().get("fabric_data_agent_runtime_version", "") or "").strip().lower()
+    if raw in {"v2", "2", "lh_v2", "travel_ontology_da_v2"}:
+        v2_url = str(get_settings().get("fabric_data_agent_url_v2", "") or "").strip()
+        if v2_url:
+            return "v2"
+        logger.warning(
+            "FABRIC_DATA_AGENT_RUNTIME_VERSION=v2 が指定されたが FABRIC_DATA_AGENT_URL_V2 が未設定。v1 にフォールバックします。"
+        )
+    return "v1"
+
+
+def _resolve_data_agent_url(version: str) -> str:
+    """version に対応する Fabric Data Agent published URL を返す。"""
+    settings = get_settings()
+    if version == "v2":
+        return str(settings.get("fabric_data_agent_url_v2", "") or "").strip()
+    return str(settings.get("fabric_data_agent_url", "") or "").strip()
+
+
+def _build_data_agent_question_v2(question: str) -> str:
+    """v2 用の質問プロンプト。
+
+    v2 (Travel_Ontology_DA_v2) は Phase 9.6 で aiInstructions に値マッピング・
+    時系列 SQL テンプレート・計算指標 SQL ロジック・失敗時リカバリ手順を内蔵済。
+    アプリ側で長いシステムプロンプトを重ねると v1 用スキーマと混線するため、
+    最小限のマーケティング文脈と品質ガードだけ渡す。
+    """
+    return "\n".join(
+        [
+            "あなたは旅行マーケティング担当者向けの Fabric Data Agent (Travel_Ontology_DA_v2) です。",
+            "lh_travel_marketing_v2 lakehouse の booking / customer / review / payment / cancellation / hotel / flight / campaign / inquiry / itinerary 10 テーブルから実データに基づくマーケ分析を返してください。",
+            "回答は 1) 結論、2) 適用条件 (季節 / destination_region / customer_segment / age_band)、3) 主要指標 (売上 SUM(total_revenue_jpy) / 予約件数 COUNT / 旅行者数 SUM(pax_count) / 平均評価 AVG(rating))、4) 表またはランキング、5) 補足の順でまとめてください。",
+            "実データの数値だけを使い、X/XX、○○、架空の例、プレースホルダーは絶対に使わないでください。",
+            "内部の GQL、GraphQL、JSON、SQL、ツール呼び出しトレースは出力せず、マーケ担当者向けの自然な日本語で書いてください。",
+            f"質問: {question}",
+        ]
+    )
+
+
 def _build_data_agent_question(question: str) -> str:
     """Data Agent に対して、該当ゼロ時も代替集計を返すよう明示する。"""
     return "\n".join(
@@ -463,9 +509,11 @@ async def _query_data_agent(question: str) -> str | None:
     """Fabric Data Agent にクエリを送り、回答テキストを返す。
 
     Published URL が未設定、または通信エラーの場合は None を返す。
+    `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2` のときは v2 published URL と v2 用の
+    短いプロンプトを使う。v1 のときは従来通り。
     """
-    settings = get_settings()
-    base_url = settings.get("fabric_data_agent_url", "")
+    version = _resolve_data_agent_version()
+    base_url = _resolve_data_agent_url(version)
     if not base_url:
         return None
 
@@ -503,15 +551,20 @@ async def _query_data_agent(question: str) -> str | None:
         # スレッド作成 → メッセージ送信 → 実行 → 結果取得
         assistant = client.beta.assistants.create(model="not used")
         thread = client.beta.threads.create()
+        question_payload = (
+            _build_data_agent_question_v2(question) if version == "v2" else _build_data_agent_question(question)
+        )
         client.beta.threads.messages.create(
             thread_id=thread.id,
             role="user",
-            content=_build_data_agent_question(question),
+            content=question_payload,
         )
         run = client.beta.threads.runs.create(
             thread_id=thread.id,
             assistant_id=assistant.id,
         )
+
+        logger.info("Fabric Data Agent %s 経由で質問: %d 文字", version, len(question_payload))
 
         # ポーリング（最大 90 秒）。Fabric Data Agent は NL2SQL 生成と検証で
         # 60 秒を超えることがあるため、デモ中の不要な SQL 退避を避ける。
@@ -742,7 +795,13 @@ def _get_sales_data_from_fabric(
     """
     sales_table = _fabric_table_name("fabric_sales_table", "sales_results")
     table_columns = _fabric_table_columns(sales_table)
-    is_ws3iq_schema = {
+    is_v2_schema = {
+        "destination_region",
+        "departure_date",
+        "total_revenue_jpy",
+        "pax_count",
+    }.issubset(table_columns)
+    is_ws3iq_schema = (not is_v2_schema) and {
         "travel_destination",
         "date",
         "price",
@@ -754,8 +813,15 @@ def _get_sales_data_from_fabric(
     params: list = []
 
     if region:
-        where_clauses.append("Travel_destination LIKE ?" if is_ws3iq_schema else "destination LIKE ?")
-        params.append(f"%{region}%")
+        if is_v2_schema:
+            where_clauses.append("(destination_region LIKE ? OR destination_country LIKE ?)")
+            params.extend([f"%{region}%", f"%{region}%"])
+        elif is_ws3iq_schema:
+            where_clauses.append("Travel_destination LIKE ?")
+            params.append(f"%{region}%")
+        else:
+            where_clauses.append("destination LIKE ?")
+            params.append(f"%{region}%")
 
     if season:
         season_months: dict[str, tuple[int, ...]] = {
@@ -767,13 +833,47 @@ def _get_sales_data_from_fabric(
         months = season_months.get(season)
         if months:
             placeholders = ", ".join("?" for _ in months)
-            date_expr = "TRY_CONVERT(date, [Date], 111)" if is_ws3iq_schema else "departure_date"
+            if is_v2_schema:
+                date_expr = "departure_date"
+            elif is_ws3iq_schema:
+                date_expr = "TRY_CONVERT(date, [Date], 111)"
+            else:
+                date_expr = "departure_date"
             where_clauses.append(f"MONTH({date_expr}) IN ({placeholders})")
             params.extend(months)
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    if is_ws3iq_schema:
+    if is_v2_schema:
+        # Phase 9 v2 schema: lh_travel_marketing_v2.dbo.booking
+        # 列: destination_region / departure_date / total_revenue_jpy / pax_count / customer_id
+        query = f"""
+            SELECT
+                CONCAT(destination_region, ' ', COALESCE(product_type, '')) AS plan_name,
+                destination_region AS destination,
+                CASE
+                    WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                    WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                    WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                    ELSE 'winter'
+                END AS season,
+                SUM(CAST(total_revenue_jpy AS BIGINT)) AS revenue,
+                SUM(CAST(pax_count AS INT)) AS pax,
+                MIN(COALESCE(product_type, '')) AS customer_segment,
+                COUNT(*) AS booking_count
+            FROM {sales_table}
+            {where_sql}
+            GROUP BY
+                destination_region,
+                product_type,
+                CASE
+                    WHEN MONTH(departure_date) IN (3, 4, 5) THEN 'spring'
+                    WHEN MONTH(departure_date) IN (6, 7, 8) THEN 'summer'
+                    WHEN MONTH(departure_date) IN (9, 10, 11) THEN 'autumn'
+                    ELSE 'winter'
+                END
+        """
+    elif is_ws3iq_schema:
         date_expr = "TRY_CONVERT(date, [Date], 111)"
         season_expr = f"""
             CASE
@@ -840,14 +940,24 @@ def _get_reviews_from_fabric(
     """
     reviews_table = _fabric_table_name("fabric_reviews_table", "customer_reviews")
     table_columns = _fabric_table_columns(reviews_table)
-    is_ws3iq_schema = {"travel_destination", "rating", "comments"}.issubset(table_columns)
+    is_v2_schema = {"rating", "comment_text"}.issubset(table_columns) and (
+        "destination_region" in table_columns or "booking_id" in table_columns
+    )
+    is_ws3iq_schema = (not is_v2_schema) and {"travel_destination", "rating", "comments"}.issubset(table_columns)
 
     where_clauses: list[str] = []
     params: list = []
 
     if plan_name:
-        where_clauses.append("Travel_destination LIKE ?" if is_ws3iq_schema else "plan_name LIKE ?")
-        params.append(f"%{plan_name}%")
+        if is_v2_schema:
+            where_clauses.append("(destination_region LIKE ? OR plan_name LIKE ?)")
+            params.extend([f"%{plan_name}%", f"%{plan_name}%"])
+        elif is_ws3iq_schema:
+            where_clauses.append("Travel_destination LIKE ?")
+            params.append(f"%{plan_name}%")
+        else:
+            where_clauses.append("plan_name LIKE ?")
+            params.append(f"%{plan_name}%")
 
     if min_rating is not None:
         where_clauses.append("Rating >= ?" if is_ws3iq_schema else "rating >= ?")
@@ -855,7 +965,18 @@ def _get_reviews_from_fabric(
 
     where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
-    if is_ws3iq_schema:
+    if is_v2_schema:
+        # Phase 9 v2 schema: lh_travel_marketing_v2.dbo.review
+        query = f"""
+            SELECT
+                COALESCE(destination_region, '旅行プラン') AS plan_name,
+                rating AS rating,
+                comment_text AS comment
+            FROM {reviews_table}
+            {where_sql}
+            ORDER BY review_date DESC
+        """
+    elif is_ws3iq_schema:
         query = f"""
             SELECT
                 Travel_destination AS plan_name,

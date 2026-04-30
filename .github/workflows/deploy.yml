@@ -29,7 +29,9 @@ jobs:
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
       FABRIC_DATA_AGENT_URL: ${{ vars.FABRIC_DATA_AGENT_URL }}
+      FABRIC_DATA_AGENT_URL_V2: ${{ vars.FABRIC_DATA_AGENT_URL_V2 }}
       FABRIC_DATA_AGENT_RUNTIME: ${{ vars.FABRIC_DATA_AGENT_RUNTIME }}
+      FABRIC_DATA_AGENT_RUNTIME_VERSION: ${{ vars.FABRIC_DATA_AGENT_RUNTIME_VERSION }}
       FABRIC_SQL_ENDPOINT: ${{ vars.FABRIC_SQL_ENDPOINT }}
       FABRIC_LAKEHOUSE_DATABASE: ${{ vars.FABRIC_LAKEHOUSE_DATABASE }}
       FABRIC_SALES_TABLE: ${{ vars.FABRIC_SALES_TABLE }}
@@ -88,14 +90,20 @@ jobs:
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
 
       - name: Configure optional Fabric endpoints
-        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_DATA_AGENT_RUNTIME != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' }}
+        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_DATA_AGENT_URL_V2 != '' || env.FABRIC_DATA_AGENT_RUNTIME != '' || env.FABRIC_DATA_AGENT_RUNTIME_VERSION != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' }}
         run: |
           env_vars=()
           if [ -n "${FABRIC_DATA_AGENT_URL}" ]; then
             env_vars+=("FABRIC_DATA_AGENT_URL=${FABRIC_DATA_AGENT_URL}")
           fi
+          if [ -n "${FABRIC_DATA_AGENT_URL_V2}" ]; then
+            env_vars+=("FABRIC_DATA_AGENT_URL_V2=${FABRIC_DATA_AGENT_URL_V2}")
+          fi
           if [ -n "${FABRIC_DATA_AGENT_RUNTIME}" ]; then
             env_vars+=("FABRIC_DATA_AGENT_RUNTIME=${FABRIC_DATA_AGENT_RUNTIME}")
+          fi
+          if [ -n "${FABRIC_DATA_AGENT_RUNTIME_VERSION}" ]; then
+            env_vars+=("FABRIC_DATA_AGENT_RUNTIME_VERSION=${FABRIC_DATA_AGENT_RUNTIME_VERSION}")
           fi
           if [ -n "${FABRIC_SQL_ENDPOINT}" ]; then
             env_vars+=("FABRIC_SQL_ENDPOINT=${FABRIC_SQL_ENDPOINT}")

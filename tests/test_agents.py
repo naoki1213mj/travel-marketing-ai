@@ -530,6 +530,71 @@ class TestDataSearchTools:
         monkeypatch.setattr(ds, "get_settings", lambda: {"fabric_data_agent_runtime": "rest"})
         assert ds._resolve_fabric_data_agent_runtime() == "rest"
 
+    def test_resolve_data_agent_version_defaults_to_v1(self, monkeypatch):
+        """v1 がデフォルト。env 未設定なら本番 (旧 schema) と同じ挙動を維持する。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(ds, "get_settings", lambda: {})
+        assert ds._resolve_data_agent_version() == "v1"
+
+    def test_resolve_data_agent_version_v2_requires_url(self, monkeypatch):
+        """version=v2 でも URL_V2 が空なら v1 にフォールバックする (誤設定への安全網)。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(
+            ds,
+            "get_settings",
+            lambda: {"fabric_data_agent_runtime_version": "v2", "fabric_data_agent_url_v2": ""},
+        )
+        assert ds._resolve_data_agent_version() == "v1"
+
+    def test_resolve_data_agent_version_v2_when_url_set(self, monkeypatch):
+        """version=v2 + URL_V2 が両方そろっているときだけ v2 を使う。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(
+            ds,
+            "get_settings",
+            lambda: {
+                "fabric_data_agent_runtime_version": "v2",
+                "fabric_data_agent_url_v2": "https://api.fabric.microsoft.com/v1/workspaces/x/dataagents/y/aiassistant/openai",
+            },
+        )
+        assert ds._resolve_data_agent_version() == "v2"
+
+    def test_resolve_data_agent_url_returns_version_specific_url(self, monkeypatch):
+        """version 指定に応じて v1 / v2 の URL を出し分ける。v1 URL は v2 経路で参照されない。"""
+        import src.agents.data_search as ds
+
+        monkeypatch.setattr(
+            ds,
+            "get_settings",
+            lambda: {
+                "fabric_data_agent_url": "https://v1-url",
+                "fabric_data_agent_url_v2": "https://v2-url",
+            },
+        )
+        assert ds._resolve_data_agent_url("v1") == "https://v1-url"
+        assert ds._resolve_data_agent_url("v2") == "https://v2-url"
+
+    def test_build_data_agent_question_v2_is_short_and_v2_specific(self):
+        """v2 用プロンプトは v1 と被らず、lh_travel_marketing_v2 schema を明示する。"""
+        import src.agents.data_search as ds
+
+        prompt = ds._build_data_agent_question_v2("春の沖縄ファミリー施策を分析して")
+
+        # v2 schema (10 テーブル / lh_travel_marketing_v2) に言及している
+        assert "lh_travel_marketing_v2" in prompt
+        assert "Travel_Ontology_DA_v2" in prompt
+        assert "booking" in prompt and "review" in prompt
+        # v1 用の travel_sales / travel_review 名は含めない (混線防止)
+        assert "travel_sales" not in prompt
+        assert "travel_review" not in prompt
+        # 元の質問は最後に残す
+        assert "春の沖縄ファミリー施策を分析して" in prompt
+        # アプリ側のシステムプロンプトは aiInstructions と重複しないよう短く保つ
+        assert len(prompt) < 1500
+
     def test_data_agent_answer_with_sales_metrics_is_not_low_confidence(self):
         """一部項目がデータなしでも売上実数があれば Data Agent 成功として扱う。"""
         import src.agents.data_search as ds
