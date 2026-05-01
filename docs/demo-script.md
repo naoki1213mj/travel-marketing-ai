@@ -4,7 +4,7 @@
 
 > ターゲット: ハッカソン審査員 / 社内 PoC レビューア
 > 所要時間: 8〜12 分
-> 前提環境: Azure Container Apps `ca-wmbvhdhcsuyb2` (East US 2) / Fabric workspace `ws-3iq-demo` / Fabric capacity `fcdemoeastus2001`
+> 前提環境: Azure Container Apps `ca-wmbvhdhcsuyb2-pn` (East US 2, VNet 統合 CAE `cae-wmbvhdhcsuyb2-pn`) / Fabric workspace `ws-3iq-demo` / Fabric capacity `fcdemoeastus2001` / 公開 FQDN `https://ca-wmbvhdhcsuyb2-pn.wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`
 
 ---
 
@@ -115,10 +115,10 @@ UI 上で 7 段階の進捗バー（データ検索 → 施策生成 → 承認 
 - `Settings → Work IQ → Sign in` をクリックして MSAL ポップアップで再ログイン
 - それでも失敗する場合: `WORKIQ_RUNTIME=graph_prefetch` に切替（短い workplace brief だけ取れる）
 
-### 3.3 画像生成が黒画像になった場合
+### 3.3 画像生成が黒画像 / プレースホルダーになった場合
 
 - `IMAGE_PROJECT_ENDPOINT_MAI` 設定済みなら MAI-Image-2 に切替
-- 黒画像は 1×1 PNG fallback の signal なので、再生成かモデル切替で対処
+- 失敗時は **可視 SVG プレースホルダー** (`data:image/svg+xml,...`) が返るので、生成失敗の signal として再生成かモデル切替で対処
 
 ---
 
@@ -127,19 +127,19 @@ UI 上で 7 段階の進捗バー（データ検索 → 施策生成 → 承認 
 ```bash
 # 現在の version を確認
 az containerapp show \
-  --name ca-wmbvhdhcsuyb2 --resource-group <rg> \
+  --name ca-wmbvhdhcsuyb2-pn --resource-group <rg> \
   --query "properties.template.containers[0].env[?name=='FABRIC_DATA_AGENT_RUNTIME_VERSION'].value" -o tsv
 
 # v1 → v2 に切替（GitHub Actions vars を更新後 deploy.yml を再実行するのが正規ルート）
 # 緊急時の手動切替（dev のみ推奨）:
 az containerapp update \
-  --name ca-wmbvhdhcsuyb2 --resource-group <rg> \
+  --name ca-wmbvhdhcsuyb2-pn --resource-group <rg> \
   --set-env-vars FABRIC_DATA_AGENT_RUNTIME_VERSION=v2 \
                  FABRIC_DATA_AGENT_URL_V2=https://api.fabric.microsoft.com/v1/workspaces/096ff72a-6174-4aba-8f0c-140454fa6c3f/dataagents/b85b67a4-bac4-4852-95e1-443c02032844/aiassistant/openai
 
 # 即時 rollback
 az containerapp update \
-  --name ca-wmbvhdhcsuyb2 --resource-group <rg> \
+  --name ca-wmbvhdhcsuyb2-pn --resource-group <rg> \
   --set-env-vars FABRIC_DATA_AGENT_RUNTIME_VERSION=v1
 ```
 
@@ -147,10 +147,21 @@ az containerapp update \
 
 ---
 
-## 5. 関連リンク
+## 5. 承認 token のセキュリティ補足（デモ Q&A 想定）
+
+- 「審査員からセキュリティを問われたら」: `/api/chat/{id}/approve` は **per-conversation の `approval_token`** で保護されています。`chat()` が Agent2 完了時に `secrets.token_urlsafe(32)` で発行し、`approval_request` SSE イベントで client に配布、frontend が次の approve POST で echo します。
+- 匿名ユーザーは token 必須、Entra 認証済ユーザーは owner_id 一致で代替可。token 不一致 / 不在は `APPROVAL_CONTEXT_NOT_FOUND` で即拒否（pipeline 後段は走りません）。
+- token は `_refine_events()` で修正版を出すたびに rotation。Cosmos `metadata.pending_approval_token` に `awaiting_approval` 状態の間だけ保存され、状態遷移時に削除されます。`hmac.compare_digest` で timing side-channel も封じています。
+
+詳細は [`approval-security.md`](approval-security.md) と [`api-reference.md`](api-reference.md) `/api/chat/{thread_id}/approve` セクションを参照。
+
+---
+
+## 6. 関連リンク
 
 - 要件定義書: [requirements_v4.0.md](requirements_v4.0.md)
 - Phase 9.5 baseline smoke: `scripts/fabric_data_overhaul/v2_artifacts/smoke_results.json`
 - Phase 9.6 final smoke (12/14 grade A): `scripts/fabric_data_overhaul/v2_artifacts/smoke_results_v6_retry2.json`
 - Phase 9.6 完了レポート: [docs/fabric-data-overhaul/phase96_smoke_results.md](fabric-data-overhaul/phase96_smoke_results.md)
+- Phase 10 ontology + agent tune: `scripts/fabric_data_overhaul/v2_artifacts/phase10_summary.md`
 - v2 resource IDs: `scripts/fabric_data_overhaul/v2_artifacts/v2_ids.txt`

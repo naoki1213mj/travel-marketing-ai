@@ -112,7 +112,7 @@ Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ
 
 詳細は [azure-setup.md](azure-setup.md) を参照してください。
 
-### Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-18)
+### Current production snapshot (`workiq-dev`, 2026-05-01 cutover complete)
 
 | Area | State |
 | --- | --- |
@@ -121,14 +121,15 @@ Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ
 | Work IQ runtime | The default runtime is `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`. Agent2 uses the pre-provisioned Foundry Prompt Agent through `agent_reference`; the frontend acquires `https://ai.azure.com/user_impersonation`, and the backend passes that delegated token to the Foundry Responses client so the attached Work IQ MCP connection runs per-user. `source_scope` is guidance/metadata, not a dynamic connector overlay. `graph_prefetch` remains the explicit rollback path, where a short Graph Copilot Chat API brief is prefetched (`chatOverStream` preferred, `/chat` fallback, `WORK_IQ_TIMEOUT_SECONDS=120`). Frontend preflight surfaces `auth_required`, `consent_required`, and `redirecting`, and the backend persists `work_iq_session` status so restored conversations keep the same Work IQ UI state. Accounts outside the tenant/guest list are rejected during sign-in |
 | Text models | `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, and `gpt-5.4` exist on the main East US 2 Foundry account. `gpt-5.5` is visible in the East US 2 catalog as GA (`2026-04-24`, Responses-capable), but this subscription currently has 0 TPM quota for it; request quota and deploy it before selecting it in the UI. The app default image route is `gpt-image-2`; GPT image calls use the Azure OpenAI Images API against the account endpoint derived from `AZURE_AI_PROJECT_ENDPOINT`, so deploy it under the default name or set `GPT_IMAGE_2_DEPLOYMENT_NAME` when the deployment name differs. `gpt-image-1.5` remains supported |
 | MAI image route | A separate East US AI Services account is wired through `IMAGE_PROJECT_ENDPOINT_MAI`; the live `MAI-Image-2` deployment name currently points to the `MAI-Image-2e` model because direct `MAI-Image-2` quota wasn't available |
-| Fabric | Fabric capacity `fcdemojapaneast001`, workspace `ws-MG-pod2`, lakehouse `Travel_Lakehouse`, and the `sales_results` / `customer_reviews` tables are restored, and both `FABRIC_DATA_AGENT_URL` and `FABRIC_SQL_ENDPOINT` are wired into the Container App |
+| Fabric | Fabric capacity `fcdemoeastus2001` (East US 2, F64, **Active**) backs workspace `ws-3iq-demo`. The Phase 9 v2 lakehouse `lh_travel_marketing_v2` (10 Delta tables in `dbo` schema) is the live data source. Data Agent v2 `Travel_Ontology_DA_v2` (`b85b67a4-bac4-4852-95e1-443c02032844`) is published with the Phase 10 `displayNamePropertyId` enrichment + tuned aiInstructions (best-of grade A 12/14). `FABRIC_DATA_AGENT_URL_V2`, `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2`, and the v2 SQL endpoint are wired into the Container App. The legacy `Travel_LH` lakehouse is retained as v1 rollback only |
 | Logic Apps / Teams | `teams-1` is Connected, `logic-manager-approval-wmbvhdhcsuyb2` is live, and `logic-wmbvhdhcsuyb2` can post the post-approval message to the target Teams channel. The signed manager trigger URL sync in `deploy.yml` has also been revalidated against the live Container App secret |
-| Container Apps VNet integration | Migrated 2026-04-30 via blue-green: new VNet-integrated CAE `cae-wmbvhdhcsuyb2-pn` (default domain `wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`) and Container App `ca-wmbvhdhcsuyb2-pn` are live in `snet-container-apps`; both connect to the existing Cosmos DB and Key Vault private endpoints over the VNet (`publicNetworkAccess` stays `Disabled`). The pre-migration `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` resources remain in the resource group for rollback and should be deleted manually after the stability window (see "Container Apps VNet integration migration runbook" below) |
-| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback. Drain the legacy `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` once the new `-pn` environment has run for 1–2 hours without errors |
+| Container Apps VNet integration | **Cutover complete (2026-05-01)**. The new VNet-integrated CAE `cae-wmbvhdhcsuyb2-pn` (default domain `wonderfultree-f9803f6f.eastus2.azurecontainerapps.io`) and Container App `ca-wmbvhdhcsuyb2-pn` are the only live environment in `snet-container-apps`; both connect to Cosmos DB and Key Vault private endpoints over the VNet (`publicNetworkAccess` stays `Disabled`). The pre-migration `cae-wmbvhdhcsuyb2` / `ca-wmbvhdhcsuyb2` resources were deleted on 2026-05-01 after stability verification |
+| Approval security | `/api/chat/{id}/approve` is bound to a per-conversation `approval_token` (32-byte urlsafe) that `chat()` mints after Agent2 succeeds and emits in the `approval_request` SSE event. Anonymous external `/approve` requests must echo the token; missing / mismatched tokens return `APPROVAL_CONTEXT_NOT_FOUND`. The token rotates per `_refine_events()` revision, is stored in Cosmos `metadata.pending_approval_token` while in `awaiting_approval` / `awaiting_manager_approval`, and is constant-time compared via `hmac.compare_digest`. Authenticated users (Entra Bearer) keep working on owner_id match alone. See [`approval-security.md`](approval-security.md) for the full security model |
+| Remaining manual work | Finish the SharePoint save path by granting the target site permission to the post-approval Logic App managed identity, or re-authenticate the SharePoint connector as a fallback. Microsoft Fabric P13 / P14 prompts (`円安後の海外売上回復の度合い` / `インバウンド比率の四半期推移`) hit a Fabric platform-side `submit_tool_outputs` BadRequest and need a Microsoft support escalation; Phase 10 `aiInstructions` cannot fix it |
 
-### Container Apps VNet integration migration runbook
+### Container Apps VNet integration migration runbook (historical reference)
 
-Cutting over from a non-VNet-integrated Container Apps Environment to a VNet-integrated one requires a side-by-side rebuild because Azure does not allow `vnetConfiguration` to be added to an existing CAE and `managedEnvironmentId` is immutable on the Container App. The IaC implements this as a blue-green rename keyed off two `azd` flags.
+The cutover from the legacy non-VNet-integrated CAE to the current `-pn` CAE is **complete** as of 2026-05-01. The runbook below is preserved for the next time this kind of side-by-side rebuild is required, since Azure does not allow `vnetConfiguration` to be added to an existing CAE and `managedEnvironmentId` is immutable on the Container App.
 
 ```bash
 azd env set ENABLE_CONTAINER_APPS_VNET_INTEGRATION true
@@ -188,7 +189,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー。live tenant では Container Apps secret で保持 |
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL (`https://api.fabric.microsoft.com/v1/workspaces/<workspace-id>/dataagents/<data-agent-id>/aiassistant/openai`) |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL フォールバック |
-| `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL フォールバック時の Lakehouse database 名。未設定時は `Travel_Lakehouse` |
+| `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL フォールバック時の Lakehouse database 名。未設定時は `lh_travel_marketing_v2`（live 環境の v2 既定） |
 | `FABRIC_SALES_TABLE` | 任意 | Fabric SQL フォールバック時の販売テーブル名。未設定時は `sales_results` |
 | `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL フォールバック時のレビューテーブル名。未設定時は `customer_reviews` |
 | `IMPROVEMENT_MCP_ENDPOINT` | 任意 | APIM MCP ルート |

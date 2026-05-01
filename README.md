@@ -114,10 +114,12 @@ azd up                                    # provision + build + deploy
 | Search / Foundry IQ | `regulations-index`, `regulations-ks`, and `regulations-kb` are live on Azure AI Search in **East US** and wired to the app via `SEARCH_ENDPOINT` + `SEARCH_API_KEY` |
 | Model deployments | The text deployments are `gpt-5-4-mini`, `gpt-4-1-mini`, `gpt-4.1`, and `gpt-5.4`. `gpt-5.5` is GA in the East US 2 Microsoft Foundry catalog (`2026-04-24`, Responses-capable), and the UI/postprovision code now recognizes it, but rebuilt `workiq-dev` currently has 0 TPM quota for `gpt-5.5`; deploy it before selecting it. The app default image route is `gpt-image-2`; GPT image models use the Azure OpenAI Images API against the AI Services account endpoint derived from `AZURE_AI_PROJECT_ENDPOINT`, with managed identity auth, bounded retry/backoff, and visible SVG fallback. Deploy `gpt-image-2` under the default name or set `GPT_IMAGE_2_DEPLOYMENT_NAME` when the deployment name differs. `gpt-image-1.5` remains supported |
 | MAI image route | `IMAGE_PROJECT_ENDPOINT_MAI` points to a separate East US AI Services account. The `MAI-Image-2` deployment name is currently an alias for **MAI-Image-2e** because this subscription doesn't have `MAI-Image-2` quota |
-| Fabric | The current migration target is workspace `ws-3iq-demo`. Agent1 uses `FABRIC_DATA_AGENT_URL` first, then `FABRIC_SQL_ENDPOINT` + `FABRIC_LAKEHOUSE_DATABASE` + configured table names, then CSV fallback. The previous workspace was `ws-MG-pod2` with lakehouse `Travel_Lakehouse` |
+| Fabric | The current production target is workspace `ws-3iq-demo` on Fabric capacity `fcdemoeastus2001` (East US 2, F64, Active). Phase 9 lakehouse `lh_travel_marketing_v2` (10 Delta tables in `dbo`) and Phase 10 tuned Data Agent v2 `Travel_Ontology_DA_v2` are live. Agent1 prefers `FABRIC_DATA_AGENT_URL_V2` when `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2`, then falls back to `FABRIC_SQL_ENDPOINT` + `FABRIC_LAKEHOUSE_DATABASE` + the configured table names, then CSV. Legacy `Travel_LH` / `Travel_Ontology_DA` remain as v1 rollback only |
 | Logic Apps / Teams | `logic-manager-approval-wmbvhdhcsuyb2` and `logic-wmbvhdhcsuyb2` are live. Manager approval notification and post-approval Teams channel delivery were revalidated, and `deploy.yml` now resyncs the full signed manager trigger URL into the Container App secret |
-| Live health baseline | The pre-maintenance live baseline was Container Apps revision `ca-wmbvhdhcsuyb2--0000094`, with `/api/health` returning `{"status":"ok"}` and `/api/ready` returning `{"status":"ready","missing":[]}`. Revision IDs roll on each deploy; use GitHub Actions and the health endpoints for the current runtime check |
-| Remaining manual work | Only the SharePoint save path remains as manual follow-up; Fabric, manager approval, and Teams notification are already live |
+| Container Apps | Live URL: `https://ca-wmbvhdhcsuyb2-pn.wonderfultree-f9803f6f.eastus2.azurecontainerapps.io/`. CAE `cae-wmbvhdhcsuyb2-pn` is VNet-integrated (`snet-container-apps`); Cosmos DB and Key Vault private endpoints are reached over the VNet, with `publicNetworkAccess: Disabled`. Pre-cutover `ca-wmbvhdhcsuyb2` / `cae-wmbvhdhcsuyb2` were deleted on 2026-05-01 |
+| Approval security | `/api/chat/{id}/approve` is bound to a per-conversation `approval_token` (32-byte urlsafe) that `chat()` mints after Agent2 succeeds and emits in the `approval_request` SSE event. Anonymous external `/approve` requests must echo the token; missing or mismatched returns `APPROVAL_CONTEXT_NOT_FOUND`. Authenticated users (Entra Bearer) keep working on owner_id match. See [`docs/approval-security.md`](docs/approval-security.md) |
+| Live health baseline | Use `/api/health` (`{"status":"ok"}`) and `/api/ready` (`{"status":"ready","missing":[]}`) on the live FQDN above. Revision IDs roll on each deploy; `gh run list --workflow=deploy.yml` is the source of truth for the active image |
+| Remaining manual work | Only the SharePoint save path remains as manual follow-up; Fabric, manager approval, and Teams notification are already live. Phase 10 P13 / P14 prompts hit a Fabric platform-side `submit_tool_outputs` BadRequest pending Microsoft support escalation |
 
 ## Environment Variables
 
@@ -129,11 +131,13 @@ azd up                                    # provision + build + deploy
 | `COSMOS_DB_ENDPOINT` | Optional | Conversation persistence (in-memory fallback) |
 | `SEARCH_ENDPOINT` | Optional | Azure AI Search endpoint for Foundry IQ / direct knowledge-base lookup |
 | `SEARCH_API_KEY` | Optional | Azure AI Search admin key (stored as a secret in Container Apps for the live tenant) |
-| `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent Published URL |
+| `FABRIC_DATA_AGENT_URL` | Recommended | Fabric Data Agent v1 Published URL (`Travel_Ontology_DA` / `travel_sales` / `travel_review` schema; rollback only) |
+| `FABRIC_DATA_AGENT_URL_V2` | Recommended | Fabric Data Agent v2 Published URL (`Travel_Ontology_DA_v2` / `lh_travel_marketing_v2`, current production) |
+| `FABRIC_DATA_AGENT_RUNTIME_VERSION` | Optional | `v1` (default) or `v2`. Set to `v2` to route Agent1 to the Phase 9/10 v2 lakehouse |
 | `FABRIC_SQL_ENDPOINT` | Optional | Fabric SQL analytics endpoint fallback |
-| `FABRIC_LAKEHOUSE_DATABASE` | Optional | Lakehouse database name for Fabric SQL fallback (default: `Travel_Lakehouse`) |
-| `FABRIC_SALES_TABLE` | Optional | Sales table name for Fabric SQL fallback (default: `sales_results`) |
-| `FABRIC_REVIEWS_TABLE` | Optional | Reviews table name for Fabric SQL fallback (default: `customer_reviews`) |
+| `FABRIC_LAKEHOUSE_DATABASE` | Optional | Lakehouse database name for Fabric SQL fallback (live default: `lh_travel_marketing_v2`) |
+| `FABRIC_SALES_TABLE` | Optional | Sales table name for Fabric SQL fallback (v2 default: `booking`) |
+| `FABRIC_REVIEWS_TABLE` | Optional | Reviews table name for Fabric SQL fallback (v2 default: `tour_review`) |
 | `MARKETING_PLAN_RUNTIME` | Optional | Marketing-plan runtime selector (default: `foundry_preprovisioned`; `legacy` remains available for rollback/testing) |
 | `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `foundry_tool`; `graph_prefetch` remains available as the explicit rollback path) |
 | `WORK_IQ_TIMEOUT_SECONDS` | Optional | Timeout for the `graph_prefetch` rollback path when fetching a short Work IQ brief from Microsoft Graph Copilot Chat API (default: `120`) |
