@@ -20,8 +20,8 @@
       {
         "tool_name": "analyze.database.nl2code",
         "is_extracted": false,
-        "output_len": 821,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nWHERE node_booking.`booking_date` >= ZONED_DATETIME(\\\"2022-01-01T00:00:00.000+09:00\\\") AND node_booking.`booking_date` < ZONED_DATETIME(\\\"2026-05-01T00:00:00.000+09:00\\\")\\nRETURN node_booking.`destination_region` AS `destination_region`, node_booking.`booking_id` AS `booking_id`, node_booking.`total_revenue_jpy` AS `total_revenue_jpy`, node_booking.`booking_date` AS `booking_date`\"},\"timeSeriesSelector\":{\"entityType\":{\"name\":\"booking\"},\"keyColumns\":{\"booking_id\":\"booking_id\"},\"metrics\":[{\"f",
+        "output_len": 649,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nRETURN node_booking.`destination_region` AS `destination_region`, node_booking.`booking_id` AS `booking_id`, node_booking.`total_revenue_jpy` AS `total_revenue_jpy`, node_booking.`booking_date` AS `booking_date`\"},\"timeSeriesSelector\":{\"entityType\":{\"name\":\"booking\"},\"keyColumns\":{\"booking_id\":\"booking_id\"},\"metrics\":[{\"field\":\"total_revenue_jpy\",\"aggregation\":\"Sum\",\"alias\":\"SumTotalRevenueJPY\"}],\"sampling\":\"31536000\",\"timeRange\":{\"start\":\"2022-01-01T00:00:00Z\",\"end\":\"2026-05-01T18:00:43Z\"}",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -54,13 +54,13 @@
         "has_nl2ontology": false
       }
     ],
-    "elapsed_s": 198.4
+    "elapsed_s": 255.4
   },
   {
     "qid": "U2",
     "question": "夏の家族旅行プランで売れているものは？",
-    "run_status": "failed",
-    "run_last_error": "LastError(code='server_error', message=\"Status code BadRequest: OpenAI request to 'openai/threads/thread_tpTfrsePs9lAgv2rjxCqp1uc/runs/run_jyQ3zQFUnXf2sQSV4VDRFn78/submit_tool_outputs' failed.\")",
+    "run_status": "in_progress",
+    "run_last_error": null,
     "assistant_messages": [],
     "final_answer": "",
     "final_low_confidence": true,
@@ -68,17 +68,17 @@
       {
         "tool_name": "trace.analyze_ontology",
         "is_extracted": true,
-        "output_len": 703988,
-        "output_preview": "| booking_id                           | destination_region | product_type     | total_revenue_jpy | pax | price_per_person_jpy | customer_id                          | TotalRevenue | BookingCount | TotalPax | AvgUnitPrice |\r\n|:-------------------------------------|:-------------------|:-----------------|:------------------|:----|:---------------------|:-------------------------------------|:-------------|:-------------|:---------|:-------------|\r\n| 74e101ec-36b8-4c97-8631-9701956e3f4d | ハワイ                | outbound_package | 9590121           | 9   | 1065569              | 8852cb18-c83c-415c",
-        "low_confidence": false,
+        "output_len": 587,
+        "output_preview": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)\\nWHERE LOWER(booking.`plan_name`) CONTAINS LOWER(\\\"家族\\\") AND LOWER(booking.`season`) = LOWER(\\\"夏\\\")\\nRETURN booking.`plan_name` AS `plan_name`, COUNT(booking.`booking_id`) AS `booking_count`, SUM(booking.`total_revenue_jpy`) AS `total_revenue_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy DESC, booking_count DESC\"}}\r\n```\r\n\r\nThe error was: No data found after query execution.",
+        "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
       },
       {
         "tool_name": "analyze.database.nl2code",
         "is_extracted": false,
-        "output_len": 1310,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\nWHERE LOWER(booking.season) = LOWER(\\\"summer\\\") AND LOWER(customer.customer_segment) = LOWER(\\\"family\\\")\\nRETURN\\n    booking.booking_id AS booking_id,\\n    booking.destination_region AS destination_region,\\n    booking.product_type AS product_type,\\n    booking.total_revenue_jpy AS total_revenue_jpy,\\n    booking.pax AS pax,\\n    booking.price_per_person_jpy AS price_per_person_jpy,\\n    customer.customer_id AS customer_id\\nGRO",
+        "output_len": 424,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)\\nWHERE LOWER(booking.`plan_name`) CONTAINS LOWER(\\\"家族\\\") AND LOWER(booking.`season`) = LOWER(\\\"夏\\\")\\nRETURN booking.`plan_name` AS `plan_name`, COUNT(booking.`booking_id`) AS `booking_count`, SUM(booking.`total_revenue_jpy`) AS `total_revenue_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy DESC, booking_count DESC\"}}\n```",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -104,90 +104,17 @@
       {
         "tool_name": "analyze.database.execute",
         "is_extracted": true,
-        "output_len": 703988,
-        "output_preview": "| booking_id                           | destination_region | product_type     | total_revenue_jpy | pax | price_per_person_jpy | customer_id                          | TotalRevenue | BookingCount | TotalPax | AvgUnitPrice |\r\n|:-------------------------------------|:-------------------|:-----------------|:------------------|:----|:---------------------|:-------------------------------------|:-------------|:-------------|:---------|:-------------|\r\n| 74e101ec-36b8-4c97-8631-9701956e3f4d | ハワイ                | outbound_package | 9590121           | 9   | 1065569              | 8852cb18-c83c-415c",
+        "output_len": 36,
+        "output_preview": "No data found after query execution.",
         "low_confidence": false,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
-      }
-    ],
-    "elapsed_s": 43.6
-  },
-  {
-    "qid": "U3",
-    "question": "20代女性に人気のプラン上位3つは？",
-    "run_status": "completed",
-    "run_last_error": null,
-    "assistant_messages": [
-      "結論:\n20代女性に人気のプラン上位3つは、それぞれ1件ずつ予約されている以下のプランです。現時点では件数に大きな差は見られません。\n\n使用条件:\nフィルタ: age_band = '20s'（20代）、gender = 'female'（女性）、plan_nameごとに予約件数で集計。\n\n上位3プラン（予約数順）:\n\n| ランキング | プラン名                             | 予約件数 |\n|:-----------|:------------------------------------|:--------|\n| 1          | タイ周遊5泊6日シニア向け (年末年始)  | 1       |\n| 2          | 北海道2泊3日カップルプラン (冬)      | 1       |\n| 3          | 石川5泊6日ファミリープラン (冬)      | 1       |\n\n補足:\n- いずれのプランも20代女性の中で現時点での予約数は1件ずつです。\n- 件数が拮抗しているため、今後のデータ追加や、季節・エリア条件の緩和でさらに傾向を分析できます。\n- 続けてエリアや季節別、他の年代についても分析可能ですのでご希望があればご指示ください。"
-    ],
-    "final_answer": "結論:\n20代女性に人気のプラン上位3つは、それぞれ1件ずつ予約されている以下のプランです。現時点では件数に大きな差は見られません。\n\n使用条件:\nフィルタ: age_band = '20s'（20代）、gender = 'female'（女性）、plan_nameごとに予約件数で集計。\n\n上位3プラン（予約数順）:\n\n| ランキング | プラン名                             | 予約件数 |\n|:-----------|:------------------------------------|:--------|\n| 1          | タイ周遊5泊6日シニア向け (年末年始)  | 1       |\n| 2          | 北海道2泊3日カップルプラン (冬)      | 1       |\n| 3          | 石川5泊6日ファミリープラン (冬)      | 1       |\n\n補足:\n- いずれのプランも20代女性の中で現時点での予約数は1件ずつです。\n- 件数が拮抗しているため、今後のデータ追加や、季節・エリア条件の緩和でさらに傾向を分析できます。\n- 続けてエリアや季節別、他の年代についても分析可能ですのでご希望があればご指示ください。",
-    "final_low_confidence": false,
-    "tool_outputs": [
+      },
       {
         "tool_name": "trace.analyze_ontology",
         "is_extracted": true,
-        "output_len": 598,
-        "output_preview": "| customer_id                          | booking_id                           | plan_name            | booking_count |\r\n|:-------------------------------------|:-------------------------------------|:---------------------|:--------------|\r\n| 6975c00c-0ff7-4d99-8873-1bf516f266cc | 86697f70-5ee6-492a-a8fc-ac9904dd76ed | タイ周遊5泊6日シニア向け (年末年始) | 1             |\r\n| 21890322-c58c-4399-9549-4f146bed6210 | ce4c4beb-77f8-4125-b680-b109e791d95c | 北海道2泊3日カップルプラン (冬)   | 1             |\r\n| 401dfa13-285d-4a3e-9bf4-c385804540c4 | aebb3f8b-4182-4d32-ba08-cf8831d2d266 | 石川5泊6日ファミリープラン (冬)   | 1             |",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.nl2code",
-        "is_extracted": false,
-        "output_len": 592,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_has_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nWHERE LOWER(customer_node.`age_band`) = LOWER(\\\"20s\\\") AND LOWER(customer_node.`gender`) = LOWER(\\\"female\\\")\\nRETURN\\n    customer_node.`customer_id` AS `customer_id`,\\n    booking_node.`booking_id` AS `booking_id`,\\n    booking_node.`plan_name` AS `plan_name`,\\n    COUNT(booking_node.`booking_id`) AS `booking_count`\\nGROUP BY customer_id, booking_id, plan_name\\nORDER BY booking_count DESC\\nLIMIT 3\"}}\n```",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.fewshots.loading",
-        "is_extracted": false,
-        "output_len": 17,
-        "output_preview": "Loaded 0 fewshots",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "generate.filename",
-        "is_extracted": false,
-        "output_len": 38,
-        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.execute",
-        "is_extracted": true,
-        "output_len": 598,
-        "output_preview": "| customer_id                          | booking_id                           | plan_name            | booking_count |\r\n|:-------------------------------------|:-------------------------------------|:---------------------|:--------------|\r\n| 6975c00c-0ff7-4d99-8873-1bf516f266cc | 86697f70-5ee6-492a-a8fc-ac9904dd76ed | タイ周遊5泊6日シニア向け (年末年始) | 1             |\r\n| 21890322-c58c-4399-9549-4f146bed6210 | ce4c4beb-77f8-4125-b680-b109e791d95c | 北海道2泊3日カップルプラン (冬)   | 1             |\r\n| 401dfa13-285d-4a3e-9bf4-c385804540c4 | aebb3f8b-4182-4d32-ba08-cf8831d2d266 | 石川5泊6日ファミリープラン (冬)   | 1             |",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      }
-    ],
-    "elapsed_s": 34.4
-  },
-  {
-    "qid": "P10",
-    "question": "年別の売上トレンドを教えてください",
-    "run_status": "completed",
-    "run_last_error": null,
-    "assistant_messages": [
-      "結論:\n2022年から2026年4月までの年別売上トレンドは以下の通りです。2026年は1〜4月の途中年であるため、前年度との単純比較には注意が必要です。\n\n使用条件:\n- 対象期間: 2022年1月～2026年4月（2026年は途中年）\n- 集計対象: 予約ステータスが確定・完了の予約のみ\n\n主要指標・年別推移:\n\n| 年      | 予約件数   | 売上        | 平均客単価  |\n|---------|------------|------------|--------------|\n| 2022年  | 約6,019件  | 約¥3.77億  | 約¥62,600    |\n| 2023年  | 約10,496件 | 約¥6.50億  | 約¥61,900    |\n| 2024年  | 約12,587件 | 約¥8.62億  | 約¥68,500    |\n| 2025年  | 約13,477件 | 約¥9.32億  | 約¥69,100    |\n| 2026年* | 約1,271件  | 約¥0.91億  | 約¥71,600    |\n\n補足:\n- 2022年から2025年にかけて、売上・予約件数ともに堅調に増加。\n- 2026年は1〜4月のみの実績データで、年間比較の際は分母に注意が必要です。\n- 平均客単価は2024年以降やや上昇傾向。\n\n次に見るべき観点:\n- 季節性や目的地別の伸び率分析\n- 顧客層別や商品タイプ別の内訳分析"
-    ],
-    "final_answer": "結論:\n2022年から2026年4月までの年別売上トレンドは以下の通りです。2026年は1〜4月の途中年であるため、前年度との単純比較には注意が必要です。\n\n使用条件:\n- 対象期間: 2022年1月～2026年4月（2026年は途中年）\n- 集計対象: 予約ステータスが確定・完了の予約のみ\n\n主要指標・年別推移:\n\n| 年      | 予約件数   | 売上        | 平均客単価  |\n|---------|------------|------------|--------------|\n| 2022年  | 約6,019件  | 約¥3.77億  | 約¥62,600    |\n| 2023年  | 約10,496件 | 約¥6.50億  | 約¥61,900    |\n| 2024年  | 約12,587件 | 約¥8.62億  | 約¥68,500    |\n| 2025年  | 約13,477件 | 約¥9.32億  | 約¥69,100    |\n| 2026年* | 約1,271件  | 約¥0.91億  | 約¥71,600    |\n\n補足:\n- 2022年から2025年にかけて、売上・予約件数ともに堅調に増加。\n- 2026年は1〜4月のみの実績データで、年間比較の際は分母に注意が必要です。\n- 平均客単価は2024年以降やや上昇傾向。\n\n次に見るべき観点:\n- 季節性や目的地別の伸び率分析\n- 顧客層別や商品タイプ別の内訳分析",
-    "final_low_confidence": false,
-    "tool_outputs": [
-      {
-        "tool_name": "trace.analyze_ontology",
-        "is_extracted": true,
-        "output_len": 1148,
-        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nWHERE (node_booking.`booking_status` = \\\"確定\\\" OR node_booking.`booking_status` = \\\"完了\\\")\\n  AND node_booking.`booking_date` >= ZONED_DATETIME(\\\"2022-01-01T00:00:00.000+09:00\\\")\\n  AND node_booking.`booking_date` < ZONED_DATETIME(\\\"2026-05-01T00:00:00.000+09:00\\\")\\nLET booking_year = node_booking.`booking_date`.`year`\\nRETURN booking_year AS `year`,\\n  COUNT(node_booking.`b",
+        "output_len": 792,
+        "output_preview": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_has_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nWHERE LOWER(booking_node.`season`) = LOWER(\\\"夏\\\") AND LOWER(customer_node.`customer_segment`) = LOWER(\\\"ファミリー\\\")\\nRETURN\\n    customer_node.`customer_id` AS `customer_id`,\\n    booking_node.`booking_id` AS `booking_id`,\\n    SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy_sum`,\\n    COUNT(booking",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -195,53 +122,8 @@
       {
         "tool_name": "analyze.database.nl2code",
         "is_extracted": false,
-        "output_len": 691,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nWHERE (node_booking.`booking_status` = \\\"確定\\\" OR node_booking.`booking_status` = \\\"完了\\\")\\n  AND node_booking.`booking_date` >= ZONED_DATETIME(\\\"2022-01-01T00:00:00.000+09:00\\\")\\n  AND node_booking.`booking_date` < ZONED_DATETIME(\\\"2026-05-01T00:00:00.000+09:00\\\")\\nLET booking_year = node_booking.`booking_date`.`year`\\nRETURN booking_year AS `year`,\\n  COUNT(node_booking.`booking_id`) AS `booking_count`,\\n  SUM(node_booking.`total_revenue_jpy`) AS `total_revenue_jpy`,\\n  AVG(node_booking.`pr",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.fewshots.loading",
-        "is_extracted": false,
-        "output_len": 17,
-        "output_preview": "Loaded 0 fewshots",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "generate.filename",
-        "is_extracted": false,
-        "output_len": 38,
-        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.execute",
-        "is_extracted": true,
-        "output_len": 0,
-        "output_preview": "",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "trace.analyze_ontology",
-        "is_extracted": true,
-        "output_len": 2006,
-        "output_preview": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nWHERE (LOWER(node_booking.`booking_status`) = LOWER(\\\"確定\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"完了\\\"))\\n  AND (\\n    (node_booking.`departure_date` >= ZONED_DATETIME(\\\"2022-01-01T00:00:00.000+09:00\\\") AND node_booking.`departure_date` < ZONED_DATETIME(\\\"2023-01-01T00:00:00.000+09:00\\\")) OR\\n    (node_booking.`departure_date` >= ZONED_DATETIME(\\\"2023-01-01T00:00:00.000+09:",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.nl2code",
-        "is_extracted": false,
-        "output_len": 1843,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nWHERE (LOWER(node_booking.`booking_status`) = LOWER(\\\"確定\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"完了\\\"))\\n  AND (\\n    (node_booking.`departure_date` >= ZONED_DATETIME(\\\"2022-01-01T00:00:00.000+09:00\\\") AND node_booking.`departure_date` < ZONED_DATETIME(\\\"2023-01-01T00:00:00.000+09:00\\\")) OR\\n    (node_booking.`departure_date` >= ZONED_DATETIME(\\\"2023-01-01T00:00:00.000+09:00\\\") AND node_booking.`departure_date` < ZONED_DATETIME(\\\"2024-01-01T00:00:00.000+09:00\\\")) OR\\n    (node_",
+        "output_len": 629,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_has_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nWHERE LOWER(booking_node.`season`) = LOWER(\\\"夏\\\") AND LOWER(customer_node.`customer_segment`) = LOWER(\\\"ファミリー\\\")\\nRETURN\\n    customer_node.`customer_id` AS `customer_id`,\\n    booking_node.`booking_id` AS `booking_id`,\\n    SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy_sum`,\\n    COUNT(booking_node.`booking_id`) AS `booking_count`\\nGROUP BY customer_id, booking_id\\nORDER BY total_revenue_jpy_sum DE",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -263,26 +145,12 @@
         "low_confidence": false,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
-      }
-    ],
-    "elapsed_s": 78.0
-  },
-  {
-    "qid": "P11",
-    "question": "リピート顧客の比率を教えてください",
-    "run_status": "completed",
-    "run_last_error": null,
-    "assistant_messages": [
-      "結論:\nリピート顧客（2回以上予約した方）の比率は非常に高く、全予約顧客の約95%がリピート顧客です。\n\n使用条件:\n- 期間: 全期間（2022年〜2026年4月）\n- フィルタ: 売上計上済み（予約ステータスがconfirmedまたはcompleted）\n\n主要指標:\n- アクティブ（1回以上予約）顧客数: 9,869 人\n- リピート（2回以上予約）顧客数: 9,322 人\n- リピート率: 約94.5%（9,322人 / 9,869人）\n\n補足:\n- 非常にリピーターの多い顧客基盤であることがわかります。\n- 新規獲得だけでなく、既存顧客向けのリピート施策が今後も有効と考えられます。"
-    ],
-    "final_answer": "結論:\nリピート顧客（2回以上予約した方）の比率は非常に高く、全予約顧客の約95%がリピート顧客です。\n\n使用条件:\n- 期間: 全期間（2022年〜2026年4月）\n- フィルタ: 売上計上済み（予約ステータスがconfirmedまたはcompleted）\n\n主要指標:\n- アクティブ（1回以上予約）顧客数: 9,869 人\n- リピート（2回以上予約）顧客数: 9,322 人\n- リピート率: 約94.5%（9,322人 / 9,869人）\n\n補足:\n- 非常にリピーターの多い顧客基盤であることがわかります。\n- 新規獲得だけでなく、既存顧客向けのリピート施策が今後も有効と考えられます。",
-    "final_low_confidence": false,
-    "tool_outputs": [
+      },
       {
         "tool_name": "trace.analyze_ontology",
         "is_extracted": true,
-        "output_len": 1487,
-        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_has_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nRETURN\\n    customer_node.`customer_id` AS `customer_id`,\\n    COUNT(booking_node.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT\\nFILTER booking_count >= 1\\nRETURN\\n    COUNT(customer_id) AS `total_customers_with_1plus_booking`\\nNEXT\\nMATCH (booking_node2:`booking`)-[booking_has_cu",
+        "output_len": 550,
+        "output_preview": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)\\nWHERE LOWER(booking_node.`season`) = LOWER(\\\"夏\\\")\\nRETURN booking_node.`plan_name` AS `plan_name`, COUNT(booking_node.`booking_id`) AS `booking_count`, SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy DESC\\nLIMIT 10\"}}\r\n```\r\n\r\nThe error was: No data found after query execution.",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -290,8 +158,221 @@
       {
         "tool_name": "analyze.database.nl2code",
         "is_extracted": false,
-        "output_len": 1017,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_has_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nRETURN\\n    customer_node.`customer_id` AS `customer_id`,\\n    COUNT(booking_node.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT\\nFILTER booking_count >= 1\\nRETURN\\n    COUNT(customer_id) AS `total_customers_with_1plus_booking`\\nNEXT\\nMATCH (booking_node2:`booking`)-[booking_has_customer_edge2:`booking_has_customer`]->(customer_node2:`customer`)\\nRETURN\\n    customer_node2.`customer_id` AS `customer",
+        "output_len": 387,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)\\nWHERE LOWER(booking_node.`season`) = LOWER(\\\"夏\\\")\\nRETURN booking_node.`plan_name` AS `plan_name`, COUNT(booking_node.`booking_id`) AS `booking_count`, SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy DESC\\nLIMIT 10\"}}\n```",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "generate.filename",
+        "is_extracted": false,
+        "output_len": 38,
+        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.execute",
+        "is_extracted": true,
+        "output_len": 36,
+        "output_preview": "No data found after query execution.",
+        "low_confidence": false,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "trace.analyze_ontology",
+        "is_extracted": true,
+        "output_len": 0,
+        "output_preview": "",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.nl2code",
+        "is_extracted": false,
+        "output_len": 324,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_customer:`customer`), (node_booking:`booking`) RETURN node_customer.`customer_id` AS `customer_id`, node_customer.`customer_segment` AS `customer_segment`, node_booking.`booking_id` AS `booking_id`, node_booking.`season` AS `season`\"}}\n```",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "generate.filename",
+        "is_extracted": false,
+        "output_len": 38,
+        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.execute",
+        "is_extracted": true,
+        "output_len": 0,
+        "output_preview": "",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      }
+    ],
+    "elapsed_s": 251.8
+  },
+  {
+    "qid": "U3",
+    "question": "20代女性に人気のプラン上位3つは？",
+    "run_status": "failed",
+    "run_last_error": "LastError(code='server_error', message=\"Status code BadRequest: OpenAI request to 'openai/threads/thread_wYezmRw3tiz80j29xrkJP1kz/runs/run_YPdF4yDqw7z9Krt8Amp0uGmF/submit_tool_outputs' failed.\")",
+    "assistant_messages": [],
+    "final_answer": "",
+    "final_low_confidence": true,
+    "tool_outputs": [
+      {
+        "tool_name": "trace.analyze_ontology",
+        "is_extracted": true,
+        "output_len": 635,
+        "output_preview": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\nWHERE customer.`gender` = \\\"女性\\\" AND customer.`age_band` = \\\"20代\\\"\\nRETURN\\n    booking.`plan_name` AS `plan_name`,\\n    COUNT(booking.`booking_id`) AS `booking_count`,\\n    AVG(booking.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\nGROUP BY plan_name\\nORDER BY booking_count DESC\\nLIMIT 3\"}}\r\n```\r\n\r\nThe error was: N",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.nl2code",
+        "is_extracted": false,
+        "output_len": 472,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\nWHERE customer.`gender` = \\\"女性\\\" AND customer.`age_band` = \\\"20代\\\"\\nRETURN\\n    booking.`plan_name` AS `plan_name`,\\n    COUNT(booking.`booking_id`) AS `booking_count`,\\n    AVG(booking.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\nGROUP BY plan_name\\nORDER BY booking_count DESC\\nLIMIT 3\"}}\n```",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.fewshots.loading",
+        "is_extracted": false,
+        "output_len": 17,
+        "output_preview": "Loaded 0 fewshots",
+        "low_confidence": false,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "generate.filename",
+        "is_extracted": false,
+        "output_len": 38,
+        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.execute",
+        "is_extracted": true,
+        "output_len": 36,
+        "output_preview": "No data found after query execution.",
+        "low_confidence": false,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "trace.analyze_ontology",
+        "is_extracted": true,
+        "output_len": 1354,
+        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[:booking_has_customer]->(customer:customer)\\nWHERE (LOWER(customer.`age_band`) = LOWER(\\\"20代\\\") OR customer.`age_band` = \\\"20s\\\")\\n  AND (LOWER(customer.`gender`) = LOWER(\\\"女性\\\") OR LOWER(customer.`gender\\\") = LOWER(\\\"female\\\") OR LOWER(customer.`gender\\\") = LOWER(\\\"woman\\\"))\\n  AND booking.`plan_name` IS NOT NULL\\nRETURN\\n  booking.`plan_name` AS `plan_name`,\\n  COUNT(booking.`b",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.nl2code",
+        "is_extracted": false,
+        "output_len": 645,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[:booking_has_customer]->(customer:customer)\\nWHERE (LOWER(customer.`age_band`) = LOWER(\\\"20代\\\") OR customer.`age_band` = \\\"20s\\\")\\n  AND (LOWER(customer.`gender`) = LOWER(\\\"女性\\\") OR LOWER(customer.`gender\\\") = LOWER(\\\"female\\\") OR LOWER(customer.`gender\\\") = LOWER(\\\"woman\\\"))\\n  AND booking.`plan_name` IS NOT NULL\\nRETURN\\n  booking.`plan_name` AS `plan_name`,\\n  COUNT(booking.`booking_id`) AS `booking_count`,\\n  AVG(booking.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\nGROUP BY plan_name",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "generate.filename",
+        "is_extracted": false,
+        "output_len": 38,
+        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.execute",
+        "is_extracted": true,
+        "output_len": 0,
+        "output_preview": "",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "trace.analyze_ontology",
+        "is_extracted": true,
+        "output_len": 620122,
+        "output_preview": "| customer_id                          | age_band | gender |\r\n|:-------------------------------------|:---------|:-------|\r\n| e9b97d64-f9af-4d9c-ab68-6888e1aa8196 | 40s      | male   |\r\n| d8f230ff-212a-44f2-88a7-e0d2d7fdd883 | 20s      | female |\r\n| 89da3637-430c-4e0e-801f-2eb779834625 | 50s      | male   |\r\n| c726d5b5-d499-4d96-89a2-6e50bc418630 | 60s      | male   |\r\n| a6f5e845-3616-43aa-b082-7bf0901f62a8 | 70s+     | female |\r\n| 6946ffac-6c1f-4475-adc2-930de890bfba | 50s      | female |\r\n| 909863ea-da02-4d9f-ab96-46260f0322e4 | 20s      | male   |\r\n| 63ba6238-308c-4d54-8309-96b1f9f2399f | 6",
+        "low_confidence": false,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.nl2code",
+        "is_extracted": false,
+        "output_len": 279,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_customer:`customer`) RETURN node_customer.`customer_id` AS `customer_id`, node_customer.`age_band` AS `age_band`, node_customer.`gender` AS `gender` GROUP BY customer_id, age_band, gender\"}}\n```",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "generate.filename",
+        "is_extracted": false,
+        "output_len": 38,
+        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.execute",
+        "is_extracted": true,
+        "output_len": 620122,
+        "output_preview": "| customer_id                          | age_band | gender |\r\n|:-------------------------------------|:---------|:-------|\r\n| e9b97d64-f9af-4d9c-ab68-6888e1aa8196 | 40s      | male   |\r\n| d8f230ff-212a-44f2-88a7-e0d2d7fdd883 | 20s      | female |\r\n| 89da3637-430c-4e0e-801f-2eb779834625 | 50s      | male   |\r\n| c726d5b5-d499-4d96-89a2-6e50bc418630 | 60s      | male   |\r\n| a6f5e845-3616-43aa-b082-7bf0901f62a8 | 70s+     | female |\r\n| 6946ffac-6c1f-4475-adc2-930de890bfba | 50s      | female |\r\n| 909863ea-da02-4d9f-ab96-46260f0322e4 | 20s      | male   |\r\n| 63ba6238-308c-4d54-8309-96b1f9f2399f | 6",
+        "low_confidence": false,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      }
+    ],
+    "elapsed_s": 104.0
+  },
+  {
+    "qid": "P10",
+    "question": "年別の売上トレンドを教えてください",
+    "run_status": "cancelled",
+    "run_last_error": "LastError(code='server_error', message='Run run_fab7KsaeQbtG4GJAgy4JHjNJtGVh was cancelled, setting state.')",
+    "assistant_messages": [],
+    "final_answer": "",
+    "final_low_confidence": true,
+    "tool_outputs": [
+      {
+        "tool_name": "trace.analyze_ontology",
+        "is_extracted": true,
+        "output_len": 0,
+        "output_preview": "",
+        "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.nl2code",
+        "is_extracted": false,
+        "output_len": 264,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nRETURN node_booking.`booking_id` AS `booking_id`, node_booking.`booking_date` AS `booking_date`, node_booking.`total_revenue_jpy` AS `total_revenue_jpy`\"}}\n```",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -322,12 +403,26 @@
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
-      },
+      }
+    ],
+    "elapsed_s": 200.7
+  },
+  {
+    "qid": "P11",
+    "question": "リピート顧客の比率を教えてください",
+    "run_status": "completed",
+    "run_last_error": null,
+    "assistant_messages": [
+      "該当期間のリピート顧客比率を取得できませんでした。条件や期間の指定方法を少し変えて再度お確かめいただくか、ご希望の期間や区分を具体的にご指示ください。\n\n補足：  \n技術的な理由で全顧客・リピート顧客の同時算出ができませんでした。条件緩和や別指標での分析も可能ですので、ご希望があればお知らせください。"
+    ],
+    "final_answer": "該当期間のリピート顧客比率を取得できませんでした。条件や期間の指定方法を少し変えて再度お確かめいただくか、ご希望の期間や区分を具体的にご指示ください。\n\n補足：  \n技術的な理由で全顧客・リピート顧客の同時算出ができませんでした。条件緩和や別指標での分析も可能ですので、ご希望があればお知らせください。",
+    "final_low_confidence": true,
+    "tool_outputs": [
       {
         "tool_name": "trace.analyze_ontology",
         "is_extracted": true,
-        "output_len": 1425,
-        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`)\\nWHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\")\\nLET customer_id = node_customer.`customer_id`\\nRETURN customer_id, COUNT(node_booking.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT FILTER booking_coun",
+        "output_len": 1388,
+        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:booking)-[edge_booking_has_customer:booking_has_customer]->(node_customer:customer)\\nWHERE node_booking.`booking_date` >= ZONED_DATETIME(\\\"2025-05-01T00:00:00.000+00:00\\\")\\nRETURN\\n    node_customer.`customer_id` AS `customer_id`,\\n    COUNT(node_booking.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT\\nFILTER booking_count > 1\\nRETURN COUNT(customer_id) AS `repeat_custome",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
@@ -335,9 +430,18 @@
       {
         "tool_name": "analyze.database.nl2code",
         "is_extracted": false,
-        "output_len": 968,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`)\\nWHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\")\\nLET customer_id = node_customer.`customer_id`\\nRETURN customer_id, COUNT(node_booking.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT FILTER booking_count >= 2\\nRETURN COUNT(customer_id) AS `repeat_customer_count`\\nNEXT MATCH (node_booking2:`booking`)-[edge_booking_has_cus",
+        "output_len": 931,
+        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:booking)-[edge_booking_has_customer:booking_has_customer]->(node_customer:customer)\\nWHERE node_booking.`booking_date` >= ZONED_DATETIME(\\\"2025-05-01T00:00:00.000+00:00\\\")\\nRETURN\\n    node_customer.`customer_id` AS `customer_id`,\\n    COUNT(node_booking.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT\\nFILTER booking_count > 1\\nRETURN COUNT(customer_id) AS `repeat_customer_count`\\nNEXT\\nMATCH (node_booking2:booking)-[edge_booking_has_customer2:booking_has_customer]->(node_customer2:custome",
         "low_confidence": true,
+        "has_failed_to_generate": false,
+        "has_nl2ontology": false
+      },
+      {
+        "tool_name": "analyze.database.fewshots.loading",
+        "is_extracted": false,
+        "output_len": 17,
+        "output_preview": "Loaded 0 fewshots",
+        "low_confidence": false,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
       },
@@ -355,110 +459,11 @@
         "is_extracted": true,
         "output_len": 0,
         "output_preview": "",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "trace.analyze_ontology",
-        "is_extracted": true,
-        "output_len": 1011,
-        "output_preview": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`)\\nWHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\")\\nLET customer_id = node_customer.`customer_id`\\nRETURN COUNT(CASE WHEN COUNT(node_booking.`booking_id`) >= 2 THEN customer_id END) AS `repeat_customer_count`, COUNT(DI",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.nl2code",
-        "is_extracted": false,
-        "output_len": 555,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`)\\nWHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\")\\nLET customer_id = node_customer.`customer_id`\\nRETURN COUNT(CASE WHEN COUNT(node_booking.`booking_id`) >= 2 THEN customer_id END) AS `repeat_customer_count`, COUNT(DISTINCT customer_id) AS `active_customer_count`\\nGROUP BY customer_id\"}}\n```",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "generate.filename",
-        "is_extracted": false,
-        "output_len": 38,
-        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.execute",
-        "is_extracted": true,
-        "output_len": 0,
-        "output_preview": "",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "trace.analyze_ontology",
-        "is_extracted": true,
-        "output_len": 79,
-        "output_preview": "| active_customer_count |\r\n|:----------------------|\r\n| 9869                  |",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.nl2code",
-        "is_extracted": false,
-        "output_len": 1000,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`)\\nWHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\")\\nRETURN node_customer.`customer_id` AS `customer_id`, COUNT(node_booking.`booking_id`) AS `booking_count`\\nGROUP BY customer_id\\nNEXT FILTER booking_count >= 2\\nRETURN COUNT(customer_id) AS `repeat_customer_count`\\nNEXT MATCH (node_booking2:`booking`)-[edge_booking_has_customer2:`bookin",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "generate.filename",
-        "is_extracted": false,
-        "output_len": 38,
-        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.execute",
-        "is_extracted": true,
-        "output_len": 79,
-        "output_preview": "| active_customer_count |\r\n|:----------------------|\r\n| 9869                  |",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "trace.analyze_ontology",
-        "is_extracted": true,
-        "output_len": 79,
-        "output_preview": "| repeat_customer_count |\r\n|:----------------------|\r\n| 9322                  |",
-        "low_confidence": false,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "analyze.database.nl2code",
-        "is_extracted": false,
-        "output_len": 528,
-        "output_preview": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)-[edge_booking_has_customer:`booking_has_customer`]->(node_customer:`customer`) WHERE LOWER(node_booking.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(node_booking.`booking_status`) = LOWER(\\\"completed\\\") RETURN node_customer.`customer_id` AS `customer_id`, COUNT(node_booking.`booking_id`) AS `booking_count` GROUP BY customer_id NEXT FILTER booking_count >= 2 RETURN COUNT(customer_id) AS `repeat_customer_count`\"}}\n```",
-        "low_confidence": true,
-        "has_failed_to_generate": false,
-        "has_nl2ontology": false
-      },
-      {
-        "tool_name": "generate.filename",
-        "is_extracted": false,
-        "output_len": 38,
-        "output_preview": "{\"generated_filename\":\"result_0.json\"}",
         "low_confidence": true,
         "has_failed_to_generate": false,
         "has_nl2ontology": false
       }
     ],
-    "elapsed_s": 143.7
+    "elapsed_s": 50.8
   }
 ]
