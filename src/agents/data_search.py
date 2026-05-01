@@ -322,6 +322,105 @@ def _build_data_agent_question_v2(question: str) -> str:
     )
 
 
+# Fabric Lakehouse v2 で実際に格納されている canonical 値。NL2Ontology が
+# 日本語フリーテキストから 3 条件以上 conjoined filter を組み立てると失敗
+# (Phase 10 P02 「夏のハワイの売上」= no_data・GQL 0件) するので、app 側で
+# 1 ヒットだけ確実な日本語語彙を canonical 英語値に正規化して、structured
+# retry prompt で明示的に渡す。
+#
+# 設計指針 (rubber-duck 監査 2026-05-02):
+# - **明示語のみ**: 「若い旅行者」「ビジネス利用」のような曖昧語は誤マッピング
+#   リスクが高いので入れない
+# - **destination_region は触らない**: Phase 10 P01「ハワイの売上」=A なので
+#   日本語のまま動いている。手を出すと回帰
+# - **0 ヒット / 2+ ヒット は None 扱い**: 1 ヒットだけ正規化することで
+#   「学生グループ」「ファミリーとカップル比較」のような複合クエリで誤注釈
+#   しないようにする
+_DATA_AGENT_SEGMENT_NORMALIZATION = {
+    "学生": "student",
+    "ファミリー": "family",
+    "家族": "family",
+    "子連れ": "family",
+    "カップル": "couple",
+    "二人旅": "couple",
+    "一人旅": "solo",
+    "ソロ": "solo",
+    "団体": "group",
+    "グループ": "group",
+    "シニア": "senior",
+    "出張": "business",
+    "ビジネス出張": "business",
+}
+_DATA_AGENT_SEASON_NORMALIZATION = {
+    "春": "spring",
+    "夏": "summer",
+    "秋": "autumn",
+    "冬": "winter",
+}
+
+
+def _extract_normalized_filters(question: str) -> dict[str, str] | None:
+    """日本語の segment / season を Fabric lakehouse v2 の英語 canonical 値に正規化する。
+
+    Returns:
+        - 1 dimension あたり 1 ヒットだけ確認できた filter dict (例: {"customer_segment": "student", "season": "summer"})
+        - 曖昧 (0 ヒット or 2+ ヒット) または何もマッチしないときは None
+    """
+    seg_hits: set[str] = set()
+    for ja, en in _DATA_AGENT_SEGMENT_NORMALIZATION.items():
+        if ja in question:
+            seg_hits.add(en)
+    if len(seg_hits) >= 2:
+        # 「ファミリーとカップル比較」のような明示的比較クエリは正規化しない
+        return None
+
+    season_hits: set[str] = set()
+    for ja, en in _DATA_AGENT_SEASON_NORMALIZATION.items():
+        if ja in question:
+            season_hits.add(en)
+    if len(season_hits) >= 2:
+        return None
+
+    filters: dict[str, str] = {}
+    if len(seg_hits) == 1:
+        filters["customer_segment"] = next(iter(seg_hits))
+    if len(season_hits) == 1:
+        filters["season"] = next(iter(season_hits))
+    return filters or None
+
+
+def _build_structured_retry_question(question: str, filters: dict[str, str]) -> str:
+    """1 回目低信頼後の structured retry プロンプト。
+
+    Fabric Data Agent の NL2Ontology が日本語フリーテキストから conjoined filter を
+    取りこぼす問題 (Phase 10 P02/P07) を回避するため、正規化済み英語値を箇条書きで
+    schema-aware に明示する。
+
+    rubber-duck 監査 2026-05-02 を反映:
+    - **緩和は禁止**: 「条件を勝手に緩和せず exact で 0 件のときは『該当 0 件』と明示」
+      (緩和すると Data Agent が「正確に動いた」ことを検証できなくなる)
+    - **正規化値は英語小文字のまま使う**ことを明示 (NL2Ontology の正規化バイパス)
+    """
+    lines = [
+        "前回の質問では実データを取得できませんでした。",
+        "下記の正規化済みフィルタを必ず厳密に適用して、もう一度実データを検索してください。",
+        "",
+        "正規化済みフィルタ条件:",
+    ]
+    for key, value in filters.items():
+        lines.append(f"- {key}: {value}")
+    lines.extend(
+        [
+            "",
+            "上記の値はそのまま英語小文字で WHERE 句に使ってください (例: `customer_segment = 'student'`)。",
+            "条件を勝手に緩和せず、exact 条件で 0 件のときは「該当 0 件」と明示してください (近接データへの自動置換は禁止)。",
+            "実データが取れた場合は通常通り 1) 結論、2) 適用条件、3) 主要指標、4) 表/ランキング、5) 補足の順でまとめてください。",
+            f"元の質問: {question}",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def _build_data_agent_question(question: str) -> str:
     """Data Agent に対して、該当ゼロ時も代替集計を返すよう明示する。"""
     return "\n".join(
@@ -1168,6 +1267,46 @@ async def query_data_agent(question: str) -> str:
     async with trace_tool_invocation("query_data_agent", agent_name="data-search-agent"):
         runtime = _resolve_fabric_data_agent_runtime()
         result = await _query_data_agent(question) if runtime == "rest" else None
+        attempt_label = "first"
+        retry_attempted = False
+        # 1 回目が低信頼 (Fabric Data Agent が NL2Ontology で 3 条件以上 conjoined
+        # filter を取りこぼした「実データの取得ができませんでした」型の応答) のとき、
+        # 日本語の segment / season を canonical 英語値に正規化した structured prompt
+        # で 1 回だけ retry する。これで Phase 10 P02 / P07 系の no_data 失敗を
+        # 救い、SQL fallback で「Data Agent が動いた」演出をするのではなく
+        # Data Agent 本体に正しいデータを返させる (rubber-duck 監査 2026-05-02)。
+        #
+        # ★ v2 (Travel_Ontology_DA_v2) 限定: structured retry prompt は v2 lakehouse
+        # スキーマの `customer_segment` / `season` (英語小文字) を直書きするので、
+        # v1 (travel_sales: Category / Age_group) には合わない。v1 では retry をスキップする。
+        if (
+            runtime == "rest"
+            and result
+            and _is_low_confidence_data_agent_answer(result)
+            and _resolve_data_agent_version() == "v2"
+        ):
+            normalized_filters = _extract_normalized_filters(question)
+            if normalized_filters:
+                retry_attempted = True
+                retry_prompt = _build_structured_retry_question(question, normalized_filters)
+                logger.info(
+                    "Fabric Data Agent: 1回目低信頼 → structured retry filters=%s",
+                    normalized_filters,
+                )
+                retry_result = await _query_data_agent(retry_prompt)
+                if retry_result and not _is_low_confidence_data_agent_answer(retry_result):
+                    logger.info(
+                        "Fabric Data Agent: structured_retry succeeded filters=%s answer_len=%d",
+                        normalized_filters,
+                        len(retry_result),
+                    )
+                    result = retry_result
+                    attempt_label = "structured_retry"
+                else:
+                    logger.info(
+                        "Fabric Data Agent: structured_retry も低信頼 → SQL fallback へ filters=%s",
+                        normalized_filters,
+                    )
         if result and not _is_low_confidence_data_agent_answer(result):
             _emit_evidence_event(
                 "query_data_agent",
@@ -1179,12 +1318,12 @@ async def query_data_agent(question: str) -> str:
                         "quote": _safe_evidence_quote(result),
                         "relevance": 0.85,
                         "retrieved_at": _utc_now_iso(),
-                        "metadata": {"runtime": "fabric_data_agent"},
+                        "metadata": {"runtime": "fabric_data_agent", "attempt": attempt_label},
                     }
                 ],
             )
             return json.dumps(
-                {"source": "Fabric Data Agent", "answer": result},
+                {"source": "Fabric Data Agent", "answer": result, "attempt": attempt_label},
                 ensure_ascii=False,
             )
         fabric_sql_answer = _build_fabric_sql_analysis(question)
@@ -1204,7 +1343,11 @@ async def query_data_agent(question: str) -> str:
                     f"{fabric_sql_answer}"
                 )
                 source = "Fabric Data Agent + Fabric SQL"
-                metadata = {"runtime": "fabric_sql_supplement", "data_agent_quality": "low_confidence"}
+                metadata = {
+                    "runtime": "fabric_sql_supplement",
+                    "data_agent_quality": "low_confidence",
+                    "structured_retry_attempted": retry_attempted,
+                }
                 title = "Fabric SQL 補強"
                 relevance = 0.9
             elif runtime != "rest":

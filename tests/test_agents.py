@@ -882,6 +882,199 @@ class TestDataSearchTools:
         )
         assert ds._is_low_confidence_data_agent_answer(success_with_real_data_phrase) is False
 
+    def test_normalized_filters_extracts_segment_and_season(self):
+        """日本語の segment / season 表記から canonical 英語値を 1 ヒットだけ抽出する。"""
+        import src.agents.data_search as ds
+
+        assert ds._extract_normalized_filters("夏のハワイ学生旅行向けプランを企画して") == {
+            "customer_segment": "student",
+            "season": "summer",
+        }
+        assert ds._extract_normalized_filters("春の沖縄ファミリープラン") == {
+            "customer_segment": "family",
+            "season": "spring",
+        }
+        assert ds._extract_normalized_filters("カップル向けの京都旅行") == {
+            "customer_segment": "couple",
+        }
+        assert ds._extract_normalized_filters("シニア向けの団体旅行") is None, (
+            "segment が 2 ヒット (senior + group) のときは曖昧として None"
+        )
+        assert ds._extract_normalized_filters("春と夏の比較") is None, (
+            "season が 2 ヒット (spring + summer) のときは曖昧として None"
+        )
+        assert ds._extract_normalized_filters("ハワイの売上を教えて") is None, (
+            "segment / season どちらもヒットしないときは None"
+        )
+
+    def test_normalized_filters_skips_ambiguous_japanese(self):
+        """rubber-duck 監査で指摘された曖昧語 (若い旅行者 / ビジネス) は誤マッピング
+        リスクが高いので map に入っていないこと (= None になること)。"""
+        import src.agents.data_search as ds
+
+        assert ds._extract_normalized_filters("若い旅行者向けのプラン") is None
+        assert ds._extract_normalized_filters("ビジネス利用のホテル") is None
+
+    def test_structured_retry_question_includes_normalized_filters(self):
+        """structured retry プロンプトが英語小文字 canonical 値を箇条書きで含むこと。"""
+        import src.agents.data_search as ds
+
+        retry = ds._build_structured_retry_question(
+            "夏のハワイ学生旅行向けプラン",
+            {"customer_segment": "student", "season": "summer"},
+        )
+        assert "正規化済みフィルタ条件" in retry
+        assert "- customer_segment: student" in retry
+        assert "- season: summer" in retry
+        assert "緩和" in retry, "緩和禁止の指示を含む"
+        assert "元の質問: 夏のハワイ学生旅行向けプラン" in retry
+        # 元の質問の日本語キーワードも保持される (NL2Ontology が destination='ハワイ' を抽出するため)
+        assert "ハワイ" in retry
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_structured_retry_recovers_no_data(self, monkeypatch):
+        """1 回目で「実データの取得ができませんでした」が返ったとき、structured retry で
+        正規化済み英語値を渡して 2 回目を投げ、Data Agent から実データを取得することを確認する
+        (Phase 10 P02 / P07 系の no_data 救済)。"""
+        import src.agents.data_search as ds
+
+        first_failure = (
+            "現在、ハワイ学生旅行（夏季）に関する実データの取得ができませんでした。"
+            "再度ご質問ください。"
+        )
+        retry_success = (
+            "## 結論\n"
+            "夏季ハワイの学生 (customer_segment=student) 向け予約は 207 件、\n"
+            "売上は ¥45,820,000 でした。\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| --- | --- |\n"
+            "| 予約件数 | 207 件 |\n"
+            "| 平均単価 | ¥221,400 |\n"
+            "| 平均評価 | 4.3 / 5 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            if "正規化済みフィルタ条件" in question:
+                return retry_success
+            return first_failure
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        result = await ds.query_data_agent("夏のハワイ学生旅行向けプランを企画して")
+
+        assert len(call_history) == 2, "1 回目失敗 → 2 回目 structured retry の合計 2 回呼び出される"
+        assert "正規化済みフィルタ条件" in call_history[1]
+        assert "customer_segment: student" in call_history[1]
+        assert "season: summer" in call_history[1]
+        # 2 回目で実データが取れたら Fabric Data Agent 由来の応答として返される (SQL fallback ではない)
+        import json as _json
+        payload = _json.loads(result)
+        assert payload["source"] == "Fabric Data Agent", (
+            f"structured retry 成功時は Fabric Data Agent 由来として表示される "
+            f"(SQL fallback ではない); got source={payload['source']}"
+        )
+        assert payload.get("attempt") == "structured_retry"
+        assert "207 件" in payload["answer"]
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_no_retry_when_filters_unextractable(self, monkeypatch):
+        """日本語 segment / season が抽出できない曖昧クエリでは structured retry を
+        スキップし、SQL fallback に直行することを確認する (回帰防止)。"""
+        import src.agents.data_search as ds
+
+        always_fail = (
+            "現在、データの取得ができませんでした。"
+            "もう少し条件を絞ってください。"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return always_fail
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        # _build_fabric_sql_analysis はテスト環境では実 lakehouse がないので空
+        # (CSV / hardcoded fallback は _build_fabric_sql_analysis 外なので OK)
+
+        await ds.query_data_agent("ハワイの売上を教えて")
+
+        assert len(call_history) == 1, (
+            "曖昧クエリ (segment / season ヒットなし) では structured retry をスキップする"
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_no_retry_on_v1_runtime(self, monkeypatch):
+        """structured retry prompt は v2 lakehouse スキーマ (customer_segment / season を
+        英語小文字で直書き) に依存しているため、v1 runtime ではスキップしなければならない。
+        v1 (travel_sales: Category / Age_group) で v2 prompt を流すと NL2Ontology が
+        さらに混乱して品質が悪化するリスクがあるため、rubber-duck #1 で gate を追加した。"""
+        import src.agents.data_search as ds
+
+        always_fail = "現在、実データの取得ができませんでした。"
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return always_fail
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        # v1 runtime を強制
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v1")
+
+        # 日本語 segment / season が両方ヒットするクエリでも v1 では retry しない
+        await ds.query_data_agent("夏のハワイ学生旅行向けプランを企画して")
+
+        assert len(call_history) == 1, (
+            "v1 runtime では structured retry を絶対にスキップ "
+            "(retry prompt が v2 schema 専用のため)"
+        )
+
+    @pytest.mark.asyncio
+    async def test_query_data_agent_high_confidence_first_attempt_does_not_retry(self, monkeypatch):
+        """1 回目で高信頼の実データが返ってきた場合、structured retry は
+        トリガされず attempt='first' のまま返ること (Phase 10 grade-A 回帰防止)。"""
+        import src.agents.data_search as ds
+        import json as _json
+
+        first_success = (
+            "## 結論\n"
+            "夏のハワイ学生旅行 (customer_segment=student) は 207 件、売上は ¥45,820,000 です。\n"
+            "## 主要指標\n"
+            "| 指標 | 値 |\n"
+            "| --- | --- |\n"
+            "| 予約件数 | 207 件 |\n"
+            "| 平均評価 | 4.3 / 5 |\n"
+        )
+
+        call_history: list[str] = []
+
+        async def fake_data_agent(question: str) -> str:
+            call_history.append(question)
+            return first_success
+
+        monkeypatch.setattr(ds, "_query_data_agent", fake_data_agent)
+        monkeypatch.setattr(ds, "_resolve_fabric_data_agent_runtime", lambda: "rest")
+        monkeypatch.setattr(ds, "_resolve_data_agent_version", lambda: "v2")
+
+        result = await ds.query_data_agent("夏のハワイ学生旅行向けプランを企画して")
+
+        assert len(call_history) == 1, (
+            "1 回目で高信頼が取れたら追加 retry は走らない (Phase 10 grade-A 回帰防止)"
+        )
+        payload = _json.loads(result)
+        assert payload.get("attempt") == "first"
+        assert payload["source"] == "Fabric Data Agent"
+
     @pytest.mark.asyncio
     async def test_query_data_agent_replaces_nl2ontology_error_with_sql_supplement(
         self, monkeypatch
