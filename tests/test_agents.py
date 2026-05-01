@@ -1043,8 +1043,9 @@ class TestDataSearchTools:
     async def test_query_data_agent_high_confidence_first_attempt_does_not_retry(self, monkeypatch):
         """1 回目で高信頼の実データが返ってきた場合、structured retry は
         トリガされず attempt='first' のまま返ること (Phase 10 grade-A 回帰防止)。"""
-        import src.agents.data_search as ds
         import json as _json
+
+        import src.agents.data_search as ds
 
         first_success = (
             "## 結論\n"
