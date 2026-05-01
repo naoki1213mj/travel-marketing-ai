@@ -278,6 +278,7 @@ export async function sendApproval(
   handlers: SSEHandlers,
   signal?: AbortSignal,
   useDelegatedAuth = false,
+  approvalToken?: string,
 ): Promise<ConnectSSEStartResult> {
   const combinedSignal = buildSignal(signal)
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -293,12 +294,17 @@ export async function sendApproval(
     Object.assign(headers, delegatedAuth.headers)
   }
 
+  const requestBody: Record<string, unknown> = { conversation_id: threadId, response }
+  if (approvalToken) {
+    requestBody.approval_token = approvalToken
+  }
+
   let res: Response
   try {
     res = await fetch(`/api/chat/${threadId}/approve`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ conversation_id: threadId, response }),
+      body: JSON.stringify(requestBody),
       signal: combinedSignal,
     })
   } catch (err: unknown) {

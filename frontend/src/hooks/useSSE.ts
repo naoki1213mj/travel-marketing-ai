@@ -85,6 +85,9 @@ export interface ApprovalRequest {
   manager_comment?: string
   manager_approval_url?: string
   manager_delivery_mode?: 'manual' | 'workflow'
+  // server-issued bearer token for the /approve POST. Required to bind the
+  // approval to this exact pending plan and prevent cross-owner take-over.
+  approval_token?: string
 }
 
 export interface ErrorData {
@@ -1013,6 +1016,7 @@ export function buildRestoredPipelineState(
           manager_comment: data.manager_comment ? String(data.manager_comment) : undefined,
           manager_approval_url: data.manager_approval_url ? String(data.manager_approval_url) : undefined,
           manager_delivery_mode: data.manager_delivery_mode === 'workflow' ? 'workflow' : data.manager_delivery_mode === 'manual' ? 'manual' : undefined,
+          approval_token: data.approval_token ? String(data.approval_token) : undefined,
         }
         latestAgentProgress = {
           agent: 'approval',
@@ -1697,6 +1701,7 @@ export function useSSE() {
         handlers,
         controller.signal,
         stateRef.current.workIq.workIqEnabled,
+        stateRef.current.approvalRequest?.approval_token,
       )
       if (approvalStartResult !== 'redirecting') {
         clearPendingWorkIqApprovalRequest()

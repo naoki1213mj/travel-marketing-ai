@@ -133,6 +133,7 @@ _RESPONSES_CITATION_RE = re.compile(
 _BROCHURE_HTML_BLOCK_RE = re.compile(r"```html\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 _EMAIL_ADDRESS_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 _MANAGER_APPROVAL_TOKEN_METADATA_KEY = "manager_approval_callback_token"
+_PENDING_APPROVAL_TOKEN_METADATA_KEY = "pending_approval_token"
 _BACKGROUND_UPDATES_PENDING_METADATA_KEY = "background_updates_pending"
 _USER_MESSAGES_METADATA_KEY = "user_messages"
 _PIPELINE_TOTAL_STEPS = 5
@@ -225,6 +226,10 @@ class PendingApprovalContext(TypedDict):
     previous_versions: NotRequired[list[dict[str, object]]]
     agent_metrics: NotRequired[dict[str, AgentMetricSnapshot]]
     initial_tool_calls: NotRequired[int]
+    # 承認 POST を bearer-token 認証相当に格上げするための per-conversation 一時 token。
+    # `chat()` が pending 保存時に発行し、approval_request イベントで client に返す。
+    # client は `/api/chat/{id}/approve` の body に `approval_token` として echo する。
+    approval_token: NotRequired[str]
 
 
 class AgentExecutionOutcome(TypedDict):
@@ -538,47 +543,77 @@ def _pending_approval_key(conversation_id: str, owner_id: str | None = None) -> 
 def _get_pending_approval_context_from_memory(
     conversation_id: str,
     owner_id: str | None = None,
+    approval_token: str | None = None,
 ) -> PendingApprovalContext | None:
-    """in-memory pending approval を owner 単位で取得する。
+    """in-memory pending approval を owner / token 単位で取得する。
+
+    `approval_token` が渡された場合は最優先で照合する (定数時間比較)。
+    トークン未指定 (legacy / 認証済ユーザー直接 lookup) の場合は owner_id 比較に
+    フォールバックする。
 
     匿名フィンガープリント (anon-* prefix) の owner_id は同一クライアントでも
     リクエスト間で僅かなヘッダ揺らぎ (Connection 再利用や Envoy 経由の
     X-Forwarded-For 並び順) で安定しないことが実機で確認されている。
-    会話 ID はサーバ側で発行する UUID4 (122 bit エントロピ) で推測不可能なため、
-    匿名同士の lookup は conversation_id 一致のみで許可してデモを成立させる。
-    実ユーザー (user-* prefix) の場合は引き続き厳密マッチを要求する。
+    会話 ID はサーバ側で発行する UUID4 (122 bit エントロピ) で推測不可能だが
+    ID の漏洩リスクを考慮し、匿名同士の cross-owner アクセスは
+    `approval_token` の一致を必須とする。
     """
     normalized_owner_id = _sanitize_optional_text(owner_id)
+    normalized_token = _sanitize_optional_text(approval_token)
+
     if normalized_owner_id:
         direct = _pending_approvals.get(_pending_approval_key(conversation_id, normalized_owner_id))
-        if isinstance(direct, dict):
+        if isinstance(direct, dict) and _matches_approval_credentials(direct, normalized_owner_id, normalized_token):
             return direct
 
     legacy = _pending_approvals.get(conversation_id)
-    if isinstance(legacy, dict):
-        stored_owner_id = _sanitize_optional_text(str(legacy.get("owner_id") or ""))
-        if _can_access_pending_approval(stored_owner_id, normalized_owner_id):
-            return legacy
-        return None
+    if isinstance(legacy, dict) and _matches_approval_credentials(legacy, normalized_owner_id, normalized_token):
+        return legacy
 
     for key, context in _pending_approvals.items():
         if not isinstance(context, dict):
             continue
         if key == conversation_id or key.endswith(f":{conversation_id}"):
-            stored_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
-            if _can_access_pending_approval(stored_owner_id, normalized_owner_id):
+            if _matches_approval_credentials(context, normalized_owner_id, normalized_token):
                 return context
     return None
 
 
-def _can_access_pending_approval(stored_owner_id: str, lookup_owner_id: str) -> bool:
-    """pending approval の cross-owner アクセス可否を判定する。
+def _matches_approval_credentials(
+    context: Mapping[str, object],
+    lookup_owner_id: str,
+    lookup_token: str,
+) -> bool:
+    """pending approval への access 権限を判定する。
 
-    - どちらかの owner が空 → 許可 (legacy 互換)
-    - 両方が同一文字列 → 許可 (厳密マッチ)
-    - 両方とも匿名 (anon- prefix) → 許可 (fingerprint 揺らぎ吸収)
-    - それ以外 → 拒否 (実ユーザー間の cross-owner は禁止)
+    優先順位:
+    1. `approval_token` が両方に存在 → 定数時間比較で一致なら許可、不一致なら拒否
+    2. trust path: 実ユーザー (`user-*`) の exact owner match
+    3. trust path: 双方とも空 owner (legacy 互換)
+    4. trust path: 双方とも anon-* かつ approval_token も渡されていない場合のみ legacy 互換で許可
+       (新コードパスは必ず token を発行するため、これは旧 client / 旧 in-memory entry のみに適用)
+
+    重要: 匿名同士の cross-fingerprint アクセスは `approval_token` 経由でのみ許可する。
+    `conversation_id` 単独では bearer secret として弱いため。
     """
+    stored_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
+    stored_token = _sanitize_optional_text(str(context.get("approval_token") or ""))
+
+    if stored_token and lookup_token:
+        return hmac.compare_digest(stored_token, lookup_token)
+    if stored_token and not lookup_token:
+        return False
+    if not stored_owner_id or not lookup_owner_id:
+        return True
+    if stored_owner_id == lookup_owner_id:
+        return True
+    if stored_owner_id.startswith("anon-") and lookup_owner_id.startswith("anon-"):
+        return True
+    return False
+
+
+def _can_access_pending_approval(stored_owner_id: str, lookup_owner_id: str) -> bool:
+    """後方互換のための薄い wrapper。新コードは `_matches_approval_credentials` を使う。"""
     if not stored_owner_id or not lookup_owner_id:
         return True
     if stored_owner_id == lookup_owner_id:
@@ -674,6 +709,13 @@ def _get_manager_callback_token_from_conversation(conversation: dict | None) -> 
     """保存済み会話 metadata から callback token を取得する。"""
     metadata = _get_conversation_metadata(conversation)
     value = metadata.get(_MANAGER_APPROVAL_TOKEN_METADATA_KEY)
+    return _sanitize_optional_text(str(value) if value is not None else "")
+
+
+def _get_pending_approval_token_from_conversation(conversation: dict | None) -> str:
+    """保存済み会話 metadata から pending approval token を取得する。"""
+    metadata = _get_conversation_metadata(conversation)
+    value = metadata.get(_PENDING_APPROVAL_TOKEN_METADATA_KEY)
     return _sanitize_optional_text(str(value) if value is not None else "")
 
 
@@ -1268,6 +1310,19 @@ def _build_conversation_metadata_for_save(
     else:
         metadata.pop(_MANAGER_APPROVAL_TOKEN_METADATA_KEY, None)
 
+    # pending approval 用 bearer token の永続化。`awaiting_approval` 中だけ Cosmos へ保存し、
+    # それ以外の状態 (completed / error など) では破棄する。
+    if conversation_status in {"awaiting_approval", "awaiting_manager_approval"}:
+        approval_bearer_token = ""
+        if pending_context is not None:
+            approval_bearer_token = _sanitize_optional_text(str(pending_context.get("approval_token") or ""))
+        if not approval_bearer_token:
+            approval_bearer_token = _get_pending_approval_token_from_conversation(existing_conversation)
+        if approval_bearer_token:
+            metadata[_PENDING_APPROVAL_TOKEN_METADATA_KEY] = approval_bearer_token
+    else:
+        metadata.pop(_PENDING_APPROVAL_TOKEN_METADATA_KEY, None)
+
     if background_updates_pending is True:
         metadata[_BACKGROUND_UPDATES_PENDING_METADATA_KEY] = True
     elif background_updates_pending is False:
@@ -1500,6 +1555,7 @@ def _build_approval_request_data(
     manager_comment: str | None = None,
     manager_approval_url: str | None = None,
     manager_delivery_mode: str | None = None,
+    approval_token: str | None = None,
 ) -> dict:
     """approval_request の payload を共通生成する。"""
     data = {
@@ -1519,6 +1575,8 @@ def _build_approval_request_data(
         data["manager_approval_url"] = manager_approval_url
     if manager_delivery_mode:
         data["manager_delivery_mode"] = manager_delivery_mode
+    if approval_token:
+        data["approval_token"] = approval_token
     return data
 
 
@@ -2640,35 +2698,46 @@ def _extract_web_search_evidence(result: object, result_text: str) -> list[Mappi
 async def _load_pending_approval_context(
     conversation_id: str,
     owner_id: str | None = None,
+    approval_token: str | None = None,
 ) -> PendingApprovalContext | None:
     """承認待ちコンテキストをメモリまたは保存済み会話から復元する。"""
     normalized_owner_id = _sanitize_optional_text(owner_id)
-    context = _get_pending_approval_context_from_memory(conversation_id, normalized_owner_id)
+    normalized_token = _sanitize_optional_text(approval_token)
+    context = _get_pending_approval_context_from_memory(conversation_id, normalized_owner_id, normalized_token)
     if context:
         return context
 
-    # 匿名 lookup の場合は Cosmos でも cross-owner 検索を許可する
-    # (`anon-*` の fingerprint は揺らぎがあり、save 時と read 時の partition_key が
-    # 一致しない可能性があるため)。実ユーザー (`user-*`) は引き続き厳密検索する。
+    # Cosmos fallback: 匿名 lookup で approval_token が渡されている場合のみ
+    # cross-partition 検索を許可する。token がない匿名の cross-owner 検索は
+    # ID 衝突攻撃を許す可能性があるため拒否。
     is_anonymous_lookup = normalized_owner_id.startswith("anon-")
+    allow_cross_owner = bool(normalized_token) or (
+        is_anonymous_lookup and not normalized_owner_id
+    ) or not normalized_owner_id
+
     conversation = await get_conversation(
         conversation_id,
-        owner_id=None if is_anonymous_lookup else (normalized_owner_id or None),
-        allow_cross_owner=is_anonymous_lookup or not normalized_owner_id,
+        owner_id=None if (allow_cross_owner and is_anonymous_lookup and normalized_token) else (normalized_owner_id or None),
+        allow_cross_owner=allow_cross_owner,
     )
     if not conversation:
         return None
     if conversation.get("status") not in {"awaiting_approval", "awaiting_manager_approval"}:
         return None
 
-    # cross-owner で読んだ場合、保存済 owner_id が anon-* でない (= 実ユーザー所有) なら
-    # 匿名アクセスは拒否する。
+    # Cosmos に保存された approval_token と一致しない匿名 lookup は拒否
     stored_doc_owner_id = _sanitize_optional_text(_get_conversation_owner_id(conversation))
+    stored_doc_token = _get_pending_approval_token_from_conversation(conversation)
     if (
         is_anonymous_lookup
         and stored_doc_owner_id
         and not stored_doc_owner_id.startswith("anon-")
     ):
+        return None
+    if normalized_token and stored_doc_token and not hmac.compare_digest(normalized_token, stored_doc_token):
+        return None
+    if is_anonymous_lookup and stored_doc_token and not normalized_token:
+        # token あり保存に対し、token なし匿名 lookup は拒否 (cross-owner 防止)
         return None
 
     analysis_markdown = ""
@@ -3572,6 +3641,9 @@ class ApproveRequest(BaseModel):
 
     conversation_id: str = Field(..., max_length=100)
     response: str = Field(..., min_length=1)
+    # `approval_request` イベントで配布した per-conversation token。匿名ユーザーの cross-owner
+    # 承認バイパスを防ぐ bearer secret として機能する (cf. `_can_access_pending_approval`).
+    approval_token: str | None = Field(None, max_length=128)
 
     @field_validator("response")
     @classmethod
@@ -4111,9 +4183,10 @@ async def _refine_events(
     model_settings_override: dict | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    approval_token: str | None = None,
 ):
     """完了後のマルチターン修正リクエストを処理する SSE イベント"""
-    pending_context = await _load_pending_approval_context(conversation_id, owner_id)
+    pending_context = await _load_pending_approval_context(conversation_id, owner_id, approval_token)
     if pending_context is not None:
         effective_model_settings = model_settings_override or pending_context.get("model_settings")
         pending_work_iq_session = work_iq_session or pending_context.get("work_iq_session")
@@ -4143,6 +4216,9 @@ async def _refine_events(
         if not outcome["success"]:
             return
 
+        # 修正フローでも新しい approval_token を発行する (前 token を再利用すると
+        # 漏洩時の影響範囲が広がるため per-revision で rotation)
+        refreshed_approval_token = secrets.token_urlsafe(32)
         _store_pending_approval_context(
             conversation_id,
             {
@@ -4151,6 +4227,7 @@ async def _refine_events(
                 "model_settings": effective_model_settings,
                 "approval_scope": "user",
                 "manager_callback_token": None,
+                "approval_token": refreshed_approval_token,
             },
         )
         yield format_sse(
@@ -4166,6 +4243,7 @@ async def _refine_events(
                 model_settings=effective_model_settings,
                 workflow_settings=pending_context.get("workflow_settings"),
                 approval_scope="user",
+                approval_token=refreshed_approval_token,
             ),
         )
         return
@@ -4402,6 +4480,7 @@ async def _post_approval_events(
     base_url: str | None = None,
     approval_context: PendingApprovalContext | None = None,
     owner_id: str | None = None,
+    approval_token: str | None = None,
     register_background_job: Callable[[PostCompletionUpdateContext], None] | None = None,
 ):
     """承認後に Agent3 → Agent4 を実行する SSE イベント"""
@@ -4412,7 +4491,9 @@ async def _post_approval_events(
             yield event
         return
 
-    context = approval_context or await _load_pending_approval_context(conversation_id, owner_id)
+    context = approval_context or await _load_pending_approval_context(
+        conversation_id, owner_id, approval_token
+    )
     if context is None:
         yield format_sse(
             SSEEventType.ERROR,
@@ -5277,6 +5358,7 @@ async def workflow_event_generator(
         {"data-search-agent": _build_agent_metric_snapshot(analysis_outcome)},
         {"marketing-plan-agent": _build_agent_metric_snapshot(plan_outcome)},
     )
+    pending_approval_token = secrets.token_urlsafe(32)
     _store_pending_approval_context(
         conversation_id,
         {
@@ -5292,6 +5374,7 @@ async def workflow_event_generator(
             "work_iq_session": work_iq_session,
             "agent_metrics": initial_agent_metrics,
             "initial_tool_calls": analysis_outcome["tool_calls"] + plan_outcome["tool_calls"],
+            "approval_token": pending_approval_token,
         },
     )
 
@@ -5308,6 +5391,7 @@ async def workflow_event_generator(
             model_settings=model_settings,
             workflow_settings=workflow_settings,
             approval_scope="user",
+            approval_token=pending_approval_token,
         ),
     )
 
@@ -5618,6 +5702,7 @@ async def approve(
                         thread_id,
                         base_url,
                         owner_id=caller_identity["user_id"],
+                        approval_token=body.approval_token,
                         register_background_job=_register_background_job,
                     )
                 ):
@@ -5635,6 +5720,7 @@ async def approve(
                         thread_id,
                         owner_id=caller_identity["user_id"],
                         work_iq_access_token=work_iq_access_token,
+                        approval_token=body.approval_token,
                     )
                 ):
                     yield event

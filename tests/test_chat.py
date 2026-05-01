@@ -396,6 +396,7 @@ def test_chat_refine_forwards_evaluation_context(monkeypatch):
         model_settings_override: dict | None = None,
         work_iq_session=None,
         work_iq_access_token: str = "",
+        approval_token: str | None = None,
     ):
         captured["source"] = getattr(refine_context, "source", None)
         captured["artifact_version"] = getattr(refine_context, "artifact_version", None)
@@ -454,6 +455,7 @@ def test_chat_refine_forwards_work_iq_session_and_token(monkeypatch):
         model_settings_override: dict | None = None,
         work_iq_session=None,
         work_iq_access_token: str = "",
+        approval_token: str | None = None,
     ):
         captured["work_iq_access_token"] = work_iq_access_token
         captured["work_iq_session"] = work_iq_session
@@ -674,8 +676,9 @@ def test_approve_revision_forwards_work_iq_bearer_token(monkeypatch):
         model_settings_override: dict | None = None,
         work_iq_session=None,
         work_iq_access_token: str = "",
+        approval_token: str | None = None,
     ):
-        del refine_context, owner_id, model_settings_override, work_iq_session
+        del refine_context, owner_id, model_settings_override, work_iq_session, approval_token
         captured["work_iq_access_token"] = work_iq_access_token
         yield 'event: done\ndata: {"conversation_id": "workiq-thread"}\n\n'
 

@@ -999,6 +999,7 @@ describe('buildRestoredPipelineState', () => {
       expect.any(Object),
       expect.any(AbortSignal),
       false,
+      undefined,
     )
   })
 
@@ -1042,6 +1043,7 @@ describe('buildRestoredPipelineState', () => {
       expect.any(Object),
       expect.any(AbortSignal),
       true,
+      undefined,
     )
   })
 
@@ -1139,6 +1141,7 @@ describe('buildRestoredPipelineState', () => {
       expect.any(Object),
       expect.any(AbortSignal),
       true,
+      undefined,
     )
     expect(window.sessionStorage.getItem('workIqPendingApprovalRequest')).toBeNull()
   })

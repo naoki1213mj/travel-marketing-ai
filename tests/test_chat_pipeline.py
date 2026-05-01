@@ -1613,7 +1613,7 @@ async def test_post_approval_events_falls_back_to_manual_manager_share(monkeypat
         },
     )
 
-    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None):
+    async def fake_load_pending(_conversation_id: str, owner_id: str | None = None, approval_token: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -2827,7 +2827,7 @@ async def test_refine_events_completed_conversation_ignores_foundry_tool_when_wo
 
     captured: dict[str, object] = {}
 
-    async def fake_load_pending_approval_context(_conversation_id: str, owner_id: str | None = None):
+    async def fake_load_pending_approval_context(_conversation_id: str, owner_id: str | None = None, approval_token: str | None = None):
         del owner_id
         return None
 
@@ -3391,7 +3391,7 @@ async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypa
         lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
     )
 
-    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None, approval_token: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -3572,7 +3572,7 @@ async def test_post_approval_emits_video_timeout_message_when_polling_times_out(
         lambda: {"project_endpoint": "https://example.test/project", "content_understanding_endpoint": ""},
     )
 
-    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None, approval_token: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -3670,7 +3670,7 @@ async def test_post_approval_does_not_block_done_when_video_agent_submission_han
     )
     monkeypatch.setattr(chat_module, "_VIDEO_AGENT_SUBMISSION_MAX_WAIT_SECONDS", 0.01)
 
-    async def fake_load_pending(_conversation_id, owner_id: str | None = None):
+    async def fake_load_pending(_conversation_id, owner_id: str | None = None, approval_token: str | None = None):
         return {
             "user_input": "沖縄プラン",
             "analysis_markdown": "分析結果",
@@ -4099,3 +4099,4 @@ async def test_workflow_event_generator_agent1_failure(monkeypatch) -> None:
 
     assert any(event_name == "error" for event_name, _ in parsed)
     assert not any(event_name == "approval_request" for event_name, _ in parsed)
+
