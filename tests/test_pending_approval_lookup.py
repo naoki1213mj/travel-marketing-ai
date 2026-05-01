@@ -164,6 +164,29 @@ def test_token_does_not_grant_real_user_cross_owner() -> None:
 def test_load_pending_returns_none_for_missing_conversation() -> None:
     """存在しない conversation_id は in-memory も Cosmos も無いので None"""
     chat_module._pending_approvals.clear()
-    ctx = asyncio.run(chat_module._load_pending_approval_context("nonexistent-conv", "anon-aaaa"))
+    # 匿名 lookup には必ず token が必要だが、まずは missing conversation のテスト
+    ctx = asyncio.run(chat_module._load_pending_approval_context("nonexistent-conv", "anon-aaaa", "any-token"))
     assert ctx is None
+
+
+def test_load_pending_anonymous_without_token_rejected() -> None:
+    """`/approve` 経由の匿名 lookup は token なしでは絶対に通さない (cross-session 漏洩防止)"""
+    chat_module._pending_approvals.clear()
+    _setup_pending("conv-anon-no-token", "anon-aaaa", approval_token="real-token")
+    # 同じ owner_id でも token なしで _load は拒否
+    ctx = asyncio.run(chat_module._load_pending_approval_context("conv-anon-no-token", "anon-aaaa", None))
+    assert ctx is None, "匿名外部 lookup は同一 fingerprint でも token 必須"
+    # 正しい token があれば通る
+    ctx_ok = asyncio.run(chat_module._load_pending_approval_context("conv-anon-no-token", "anon-aaaa", "real-token"))
+    assert ctx_ok is not None
+    chat_module._pending_approvals.clear()
+
+
+def test_load_pending_real_user_does_not_need_token() -> None:
+    """Entra-authenticated 実ユーザー (user-*) は token なしでも owner_id 一致で通る"""
+    chat_module._pending_approvals.clear()
+    _setup_pending("conv-user", "user-alice", approval_token="some-token")
+    ctx = asyncio.run(chat_module._load_pending_approval_context("conv-user", "user-alice", None))
+    assert ctx is not None, "実ユーザーは Entra Bearer 認証済なので token 不要"
+    chat_module._pending_approvals.clear()
 

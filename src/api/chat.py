@@ -586,29 +586,33 @@ def _matches_approval_credentials(
 ) -> bool:
     """pending approval への access 権限を判定する。
 
-    優先順位:
-    1. `approval_token` が両方に存在 → 定数時間比較で一致なら許可、不一致なら拒否
-    2. trust path: 実ユーザー (`user-*`) の exact owner match
-    3. trust path: 双方とも空 owner (legacy 互換)
-    4. trust path: 双方とも anon-* かつ approval_token も渡されていない場合のみ legacy 互換で許可
-       (新コードパスは必ず token を発行するため、これは旧 client / 旧 in-memory entry のみに適用)
+    認証強度に応じた階層判定:
+    - 両 token が提示されたら必ず一致必須 (定数時間比較) — 不一致は明示的拒否
+    - 同一 owner_id (Entra Bearer 認証相当 or 同一 fingerprint) → 許可
+    - cross-owner かつ token なし → 拒否 (ただし legacy 互換で anon-anon 旧 entry のみ許可)
 
-    重要: 匿名同士の cross-fingerprint アクセスは `approval_token` 経由でのみ許可する。
-    `conversation_id` 単独では bearer secret として弱いため。
+    Server-internal lookup (save_conversation 等) は owner_id を渡せば token 不要で動く。
+    匿名 fingerprint 揺らぎは `_load_pending_approval_context` で token 必須化することで防ぐ。
     """
     stored_owner_id = _sanitize_optional_text(str(context.get("owner_id") or ""))
     stored_token = _sanitize_optional_text(str(context.get("approval_token") or ""))
 
+    # 両 token が提示されたら必ず一致必須 (token mismatch は常に拒否)
     if stored_token and lookup_token:
         return hmac.compare_digest(stored_token, lookup_token)
-    if stored_token and not lookup_token:
-        return False
+
+    # legacy / 匿名 store path: どちらか empty owner → 許可
     if not stored_owner_id or not lookup_owner_id:
         return True
+
+    # 厳密な owner_id 一致 → 許可 (server-internal lookup や 同一 fingerprint same-session)
     if stored_owner_id == lookup_owner_id:
         return True
-    if stored_owner_id.startswith("anon-") and lookup_owner_id.startswith("anon-"):
-        return True
+
+    # Cross-owner かつ token 不在 → legacy 互換で anon-anon 旧 entry のみ許可
+    if not stored_token and not lookup_token:
+        if stored_owner_id.startswith("anon-") and lookup_owner_id.startswith("anon-"):
+            return True
     return False
 
 
@@ -2700,24 +2704,35 @@ async def _load_pending_approval_context(
     owner_id: str | None = None,
     approval_token: str | None = None,
 ) -> PendingApprovalContext | None:
-    """承認待ちコンテキストをメモリまたは保存済み会話から復元する。"""
+    """承認待ちコンテキストをメモリまたは保存済み会話から復元する。
+
+    外部 `/approve` から呼ばれる前提のため、匿名ユーザー (`anon-*`) は必ず
+    `approval_token` を提示する必要がある。`conversation_id` 単独では bearer secret
+    として弱く、漏洩したら誰でも他人の plan を approve できてしまうため。
+
+    Server-internal 同一プロセス内の lookup (save_conversation 等) は
+    `_get_pending_approval_context_from_memory` を直接呼ぶこと。
+    """
     normalized_owner_id = _sanitize_optional_text(owner_id)
     normalized_token = _sanitize_optional_text(approval_token)
+    is_anonymous_lookup = normalized_owner_id.startswith("anon-")
+
+    # 匿名ユーザーの外部 lookup は token 必須。同一 fingerprint 偶然一致による
+    # cross-session 漏洩攻撃を防ぐ。
+    if is_anonymous_lookup and not normalized_token:
+        return None
+
     context = _get_pending_approval_context_from_memory(conversation_id, normalized_owner_id, normalized_token)
     if context:
         return context
 
-    # Cosmos fallback: 匿名 lookup で approval_token が渡されている場合のみ
-    # cross-partition 検索を許可する。token がない匿名の cross-owner 検索は
-    # ID 衝突攻撃を許す可能性があるため拒否。
-    is_anonymous_lookup = normalized_owner_id.startswith("anon-")
-    allow_cross_owner = bool(normalized_token) or (
-        is_anonymous_lookup and not normalized_owner_id
-    ) or not normalized_owner_id
+    # Cosmos fallback: token があれば cross-partition 検索を許可。
+    # token 経由の検証で同一文書を確実に取れるため、ID 衝突攻撃も防げる。
+    allow_cross_owner = bool(normalized_token) or not normalized_owner_id
 
     conversation = await get_conversation(
         conversation_id,
-        owner_id=None if (allow_cross_owner and is_anonymous_lookup and normalized_token) else (normalized_owner_id or None),
+        owner_id=None if (allow_cross_owner and normalized_token) else (normalized_owner_id or None),
         allow_cross_owner=allow_cross_owner,
     )
     if not conversation:
@@ -2725,7 +2740,7 @@ async def _load_pending_approval_context(
     if conversation.get("status") not in {"awaiting_approval", "awaiting_manager_approval"}:
         return None
 
-    # Cosmos に保存された approval_token と一致しない匿名 lookup は拒否
+    # Cosmos doc の owner / token を検証
     stored_doc_owner_id = _sanitize_optional_text(_get_conversation_owner_id(conversation))
     stored_doc_token = _get_pending_approval_token_from_conversation(conversation)
     if (
@@ -2733,11 +2748,13 @@ async def _load_pending_approval_context(
         and stored_doc_owner_id
         and not stored_doc_owner_id.startswith("anon-")
     ):
+        # 匿名 lookup から実ユーザー所有の doc には到達不可
         return None
     if normalized_token and stored_doc_token and not hmac.compare_digest(normalized_token, stored_doc_token):
+        # token 不一致は明示的拒否
         return None
     if is_anonymous_lookup and stored_doc_token and not normalized_token:
-        # token あり保存に対し、token なし匿名 lookup は拒否 (cross-owner 防止)
+        # 匿名 + token 必須の doc に対し token なし lookup は拒否
         return None
 
     analysis_markdown = ""
