@@ -273,11 +273,48 @@ async def _persist_conversation_doc(doc: dict) -> None:
             return
         except (ValueError, OSError) as exc:
             logger.warning("Cosmos DB への保存に失敗、インメモリにフォールバック: %s", exc)
+            _emit_cosmos_fallback_signal(doc, reason=f"{type(exc).__name__}: {exc}")
         except Exception as exc:
             logger.exception("Cosmos DB への保存で予期しないエラー、インメモリにフォールバック: %s", exc)
+            _emit_cosmos_fallback_signal(doc, reason=f"{type(exc).__name__}: {exc}")
 
     _memory_store[_build_memory_key(owner_id, conversation_id)] = doc
     logger.info("会話 %s をインメモリに保存", conversation_id)
+
+
+def _emit_cosmos_fallback_signal(doc: dict, *, reason: str) -> None:
+    """Cosmos が configured かつ失敗したケースを構造化テレメトリで通知する。
+
+    特に承認待ち (`awaiting_approval` / `awaiting_manager_approval`) の保存が
+    in-memory に落ちると、replica 再起動で承認が消える致命的状態になる。
+    rubber-duck 指摘 #1 (approval/Cosmos silent degradation = Fabric MI と同じ
+    クラスのバグ) を catch するため、ERROR ログ + App Insights customEvent を
+    emit する。
+    """
+    status = str(doc.get("status", "")).strip()
+    severity = "critical" if status in {"awaiting_approval", "awaiting_manager_approval"} else "warning"
+    payload = {
+        "conversation_id": str(doc.get("id", "")),
+        "status": status,
+        "severity": severity,
+        "reason": reason,
+    }
+    if severity == "critical":
+        logger.error(
+            "Cosmos 永続化失敗 (承認 critical): conversation=%s reason=%s — replica 再起動で承認状態が消失する可能性",
+            payload["conversation_id"],
+            reason,
+        )
+    try:  # pragma: no cover - App Insights が設定されている場合のみ機能
+        from azure.monitor.opentelemetry import configure_azure_monitor  # noqa: F401
+        from opentelemetry import trace
+
+        tracer = trace.get_tracer("travel.cosmos_fallback")
+        with tracer.start_as_current_span("cosmos_fallback") as span:
+            for key, value in payload.items():
+                span.set_attribute(key, value)
+    except Exception:  # noqa: BLE001
+        return
 
 
 async def get_conversation(
