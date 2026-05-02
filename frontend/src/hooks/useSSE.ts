@@ -294,6 +294,101 @@ function clonePipelineMetrics(metrics: PipelineMetrics | null): PipelineMetrics 
   return normalizePipelineMetrics(metrics)
 }
 
+// Bug A fix 2026-05-02: 永続化時 (`src/conversations.py`) に大きな base64 画像 (>64KB)
+// は `data:image/svg+xml;...original_size=NB` という決定的な SVG プレースホルダーに
+// 置換される。passive polling が Cosmos doc を 5s 間隔で再読する際、フル画像を持つ
+// in-memory state が placeholder で上書きされ、ブローシャ画像が消える事象が発生していた。
+// 以下の rescue helper は (a) placeholder 検出、(b) 直前 state からのフル画像復元 を行う。
+
+const TRUNCATED_IMAGE_PLACEHOLDER_PREFIX = 'data:image/svg+xml;charset=utf-8,'
+
+export function isTruncatedImagePlaceholder(url: string): boolean {
+  if (!url) return false
+  return url.startsWith(TRUNCATED_IMAGE_PLACEHOLDER_PREFIX) && url.includes('original_size=')
+}
+
+// 注: production の placeholder URL (src/conversations.py:236-249) には
+// 実 space + 実 single-quote (`xmlns='http://...' width='800'` など) が
+// 含まれる。brochure-gen は HTML 属性を `"..."` (double-quoted) で出力
+// するため、HTML 属性境界は `"` または `>` のみ。`'` は data URL 内に
+// 出現するので除外できない。文字クラスから `\s` も除外する。
+const TRUNCATED_INLINE_IMAGE_RE = /data:image\/svg\+xml;charset=utf-8,[^">]*?original_size=/
+
+export function htmlContainsTruncatedImage(html: string): boolean {
+  if (!html) return false
+  return TRUNCATED_INLINE_IMAGE_RE.test(html)
+}
+
+export interface ImageRescueLookup {
+  byPosition: Map<number, ImageContent>
+}
+
+export interface HtmlTextRescueLookup {
+  byPosition: Map<number, TextContent>
+}
+
+export function buildImageRescueLookup(
+  previous: PipelineState | null,
+  conversationId: string,
+): ImageRescueLookup | null {
+  if (!previous || previous.conversationId !== conversationId) return null
+  if (!previous.images?.length) return null
+  const byPosition = new Map<number, ImageContent>()
+  previous.images.forEach((image, index) => {
+    if (image.url && !isTruncatedImagePlaceholder(image.url)) {
+      byPosition.set(index, image)
+    }
+  })
+  return byPosition.size === 0 ? null : { byPosition }
+}
+
+export function buildHtmlTextRescueLookup(
+  previous: PipelineState | null,
+  conversationId: string,
+): HtmlTextRescueLookup | null {
+  if (!previous || previous.conversationId !== conversationId) return null
+  if (!previous.textContents?.length) return null
+  const byPosition = new Map<number, TextContent>()
+  let htmlIndex = 0
+  for (const tc of previous.textContents) {
+    if (tc.content_type === 'html') {
+      if (tc.content && !htmlContainsTruncatedImage(tc.content)) {
+        byPosition.set(htmlIndex, tc)
+      }
+      htmlIndex++
+    }
+  }
+  return byPosition.size === 0 ? null : { byPosition }
+}
+
+function rescueTruncatedImage(
+  image: ImageContent,
+  streamIndex: number,
+  lookup: ImageRescueLookup | null,
+): ImageContent {
+  if (!lookup) return image
+  if (!isTruncatedImagePlaceholder(image.url)) return image
+  const previous = lookup.byPosition.get(streamIndex)
+  if (!previous) return image
+  // (agent, alt) 一致を要求して取り違えを防ぐ。空文字 alt は両側で空なら一致扱い。
+  if (previous.agent !== image.agent || previous.alt !== image.alt) return image
+  return { ...image, url: previous.url }
+}
+
+function rescueTruncatedHtmlText(
+  textContent: TextContent,
+  htmlStreamIndex: number,
+  lookup: HtmlTextRescueLookup | null,
+): TextContent {
+  if (!lookup) return textContent
+  if (textContent.content_type !== 'html') return textContent
+  if (!htmlContainsTruncatedImage(textContent.content)) return textContent
+  const previous = lookup.byPosition.get(htmlStreamIndex)
+  if (!previous) return textContent
+  if (previous.agent !== textContent.agent) return textContent
+  return { ...textContent, content: previous.content }
+}
+
 function normalizeTextContentData(data: Record<string, unknown>): TextContent {
   return {
     content: String(data.content || ''),
@@ -899,6 +994,8 @@ export function buildRestoredPipelineState(
   doc: ConversationDocument,
   conversationId: string,
   settings: ModelSettings,
+  imageRescueLookup: ImageRescueLookup | null = null,
+  htmlTextRescueLookup: HtmlTextRescueLookup | null = null,
 ): PipelineState {
   const textContents: TextContent[] = []
   const images: ImageContent[] = []
@@ -914,6 +1011,10 @@ export function buildRestoredPipelineState(
   const backgroundUpdatesPending = metadata.background_updates_pending === true
   let workIq = getWorkIqStateFromMetadata(metadata)
   let activeVersion = 1
+  // Bug A fix 2026-05-02: ストリーム順 index を持って previousState の対応する
+  // フル URL / フル HTML に置換する (passive polling での truncation 退化防止)。
+  let imageStreamIndex = 0
+  let htmlTextStreamIndex = 0
 
   for (const event of doc.messages ?? []) {
     const data = event.data ?? {}
@@ -929,7 +1030,11 @@ export function buildRestoredPipelineState(
         break
       case 'text':
         {
-          const textContent = normalizeTextContentData(data)
+          let textContent = normalizeTextContentData(data)
+          if (textContent.content_type === 'html') {
+            textContent = rescueTruncatedHtmlText(textContent, htmlTextStreamIndex, htmlTextRescueLookup)
+            htmlTextStreamIndex++
+          }
           textContents.push(textContent)
           const requestedVersion = getPositiveVersion(data.version)
           if (isBackgroundUpdate(data) && requestedVersion !== null) {
@@ -951,8 +1056,10 @@ export function buildRestoredPipelineState(
         break
       case 'image':
         {
-          const image = normalizeImageContentData(data)
+          let image = normalizeImageContentData(data)
           if (!image) break
+          image = rescueTruncatedImage(image, imageStreamIndex, imageRescueLookup)
+          imageStreamIndex++
           images.push(image)
           const requestedVersion = getPositiveVersion(data.version)
           if (isBackgroundUpdate(data) && requestedVersion !== null) {
@@ -1945,8 +2052,30 @@ export function useSSE() {
       if (passive && activeRequestIdRef.current !== foregroundRequestId) return
       if (passive && abortControllerRef.current) return
 
+      // Bug A fix 2026-05-02: passive polling は Cosmos doc から truncated 画像
+      // placeholder を読み込むため、in-memory state のフル URL / フル HTML を
+      // 失う。passive かつ同一 conversation の場合のみ、previousState を rescue
+      // ソースとして渡し、placeholder 検出時にフル版へ復元する。
+      // 別 conversation や cold reload では rescue は無効 (= 自然と placeholder 表示)。
+      // (rubber-duck blocking #1: 正規化 BEFORE 行うことで versions[i] snapshot
+      // にもフル URL が伝播する。blocking #2: preserveViewedCommittedVersion より
+      // 前なので、commit 済 version 表示時にも rescue 後の URL が使われる)
+      const rescueScopeOk = passive && previousState.conversationId === conversationId
+      const imageRescueLookup = rescueScopeOk
+        ? buildImageRescueLookup(previousState, conversationId)
+        : null
+      const htmlTextRescueLookup = rescueScopeOk
+        ? buildHtmlTextRescueLookup(previousState, conversationId)
+        : null
+
       const restoredState = mergeCachedEvaluationsIntoState(
-        buildRestoredPipelineState(doc, conversationId, stateRef.current.settings),
+        buildRestoredPipelineState(
+          doc,
+          conversationId,
+          stateRef.current.settings,
+          imageRescueLookup,
+          htmlTextRescueLookup,
+        ),
         getCachedEvaluationRecords(conversationId),
       )
 

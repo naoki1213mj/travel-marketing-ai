@@ -2981,6 +2981,184 @@ async def test_refine_events_uses_mcp_brief_for_evaluation_feedback(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_refine_events_evaluation_feedback_rotates_approval_token(monkeypatch) -> None:
+    """評価フィードバック経由の再 approval でも token を rotate して emit する (Bug B regression)
+
+    Bug B (2026-05-02): _refine_events の評価フィードバック分岐は approval_token を
+    生成・保存・emit していなかったため、ラウンド 2 (v2) で approval_request SSE が
+    {"approval_token": undefined} を返し、フロントエンドが /approve POST に
+    空 token を送ると anonymous lookup が hmac.compare_digest で失敗し
+    APPROVAL_CONTEXT_NOT_FOUND エラーになっていた。
+    """
+
+    chat_module._pending_approvals.clear()
+
+    async def fake_get_conversation(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "input": "京都の春旅プラン",
+            "metadata": {"user_messages": ["京都の春旅プラン"]},
+            "messages": [
+                {"event": "text", "data": {"agent": "data-search-agent", "content": "分析"}},
+                {"event": "text", "data": {"agent": "marketing-plan-agent", "content": "v1 plan"}},
+                {"event": "approval_request", "data": {"workflow_settings": {}}},
+                {"event": "evaluation_result", "data": {"result": {"builtin": {"relevance": {"score": 2}}}}},
+            ],
+        }
+
+    async def fake_execute_agent(*args, **kwargs):  # noqa: ANN002, ANN003
+        return {
+            "events": [
+                chat_module.format_sse(
+                    chat_module.SSEEventType.TEXT,
+                    {"content": "v2 plan", "agent": "marketing-plan-agent"},
+                )
+            ],
+            "text": "v2 plan",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 0,
+            "total_tokens": 10,
+        }
+
+    monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
+    monkeypatch.setattr(chat_module, "is_improvement_mcp_configured", lambda: False)
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+
+    eval_input = "以下の品質評価結果に基づいて企画書を改善してください:\n- relevance が低い"
+    events = [
+        event
+        async for event in chat_module._refine_events(eval_input, "conv-bug-b-eval")
+    ]
+    parsed = [_parse_sse(event) for event in events]
+
+    approval_events = [
+        payload for name, payload in parsed if name == chat_module.SSEEventType.APPROVAL_REQUEST
+    ]
+    assert len(approval_events) == 1, "評価フィードバック経由でも approval_request は 1 回 emit する"
+    emitted_token = approval_events[0].get("approval_token")
+    assert isinstance(emitted_token, str) and len(emitted_token) > 0, (
+        f"approval_request SSE は approval_token を含む必要がある (Bug B regression): payload={approval_events[0]}"
+    )
+
+    stored_context = chat_module._pending_approvals.get("conv-bug-b-eval")
+    assert stored_context is not None, "stored pending approval context が存在する"
+    assert stored_context.get("approval_token") == emitted_token, (
+        "stored context の approval_token と emitted token が一致する"
+    )
+
+    correct_token = await chat_module._load_pending_approval_context(
+        "conv-bug-b-eval", owner_id=None, approval_token=emitted_token
+    )
+    assert correct_token is not None, "正しい token なら lookup は成功する (positive)"
+
+    wrong_token_lookup = await chat_module._load_pending_approval_context(
+        "conv-bug-b-eval", owner_id=None, approval_token="WRONG_TOKEN_XYZ"
+    )
+    assert wrong_token_lookup is None, "間違った token は明示的拒否される (security invariant)"
+
+    # anon-* owner からの empty-token lookup は production /approve の失敗パターン。
+    # eval-feedback で token 未発行だった頃 (Bug B) はここで context_not_found だった。
+    # token rotation 後は anon-* owner + 正しい token なら成功し、空 token は拒否される。
+    anon_correct = await chat_module._load_pending_approval_context(
+        "conv-bug-b-eval", owner_id="anon-fingerprint-test", approval_token=emitted_token
+    )
+    assert anon_correct is not None, "anon-* owner でも正しい token があれば lookup できる"
+
+    anon_empty = await chat_module._load_pending_approval_context(
+        "conv-bug-b-eval", owner_id="anon-fingerprint-test", approval_token=None
+    )
+    assert anon_empty is None, "anon-* owner + 空 token は拒否 (Bug B production failure mode)"
+
+    chat_module._pending_approvals.clear()
+
+
+@pytest.mark.asyncio
+async def test_load_pending_approval_context_rejects_stale_token_without_cosmos_fallback(monkeypatch) -> None:
+    """In-memory に新 token が存在する間、旧 token の lookup は Cosmos fallback せず即拒否
+
+    rubber-duck pr2-final-rubber-duck blocker #1 (2026-05-02) の defense-in-depth:
+    eval-feedback / user-revision で token rotation した直後、Cosmos の outer
+    save が完了する前に旧 token POST が来ると、in-memory は新 token で hmac
+    mismatch → Cosmos fallback → Cosmos の旧 token doc と一致 → 旧 plan 承認、
+    という race が起こりうる。in-memory に同 owner:conv の active pending
+    approval が別 token で存在する場合、Cosmos fallback は stale なので reject
+    する安全装置を追加した。
+    """
+
+    chat_module._pending_approvals.clear()
+
+    owner_id = "anon-fingerprint-stable"
+    conv_id = "conv-stale-token-race"
+    new_token = "NEW_TOKEN_AFTER_ROTATION_xyz"
+    stale_token = "OLD_TOKEN_BEFORE_ROTATION_abc"
+
+    # 新 token を in-memory に store (eval-feedback で rotation した直後の状態)
+    chat_module._store_pending_approval_context(
+        conv_id,
+        {
+            "user_input": "test",
+            "analysis_markdown": "",
+            "plan_markdown": "v2 plan",
+            "model_settings": {},
+            "workflow_settings": None,
+            "approval_scope": "user",
+            "manager_callback_token": None,
+            "owner_id": owner_id,
+            "conversation_settings": None,
+            "work_iq_session": None,
+            "approval_token": new_token,
+        },
+    )
+
+    # Cosmos には旧 token + status="awaiting_approval" の doc が残っている
+    # (outer save 未完了の race window をシミュレート)
+    async def stale_cosmos(
+        _conversation_id: str,
+        owner_id: str | None = None,
+        allow_cross_owner: bool = False,
+    ):
+        return {
+            "id": conv_id,
+            "status": "awaiting_approval",
+            "metadata": {
+                "owner_id": owner_id,
+                "pending_approval_token": stale_token,
+            },
+            "messages": [
+                {
+                    "event": "approval_request",
+                    "data": {"plan_markdown": "v1 plan (stale)", "approval_scope": "user"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(chat_module, "get_conversation", stale_cosmos)
+
+    # 新 token なら成功
+    ok = await chat_module._load_pending_approval_context(
+        conv_id, owner_id=owner_id, approval_token=new_token
+    )
+    assert ok is not None, "新 token は in-memory で match して成功"
+    assert ok.get("approval_token") == new_token
+
+    # 旧 token は in-memory mismatch → Cosmos fallback すると stale doc に
+    # 当たって旧 plan を承認できてしまうため、defensive check で reject する
+    stale = await chat_module._load_pending_approval_context(
+        conv_id, owner_id=owner_id, approval_token=stale_token
+    )
+    assert stale is None, (
+        "旧 token は in-memory に新 token がある限り即 reject (Cosmos の stale doc に "
+        "fallback してはいけない — rubber-duck blocker #1 defense-in-depth)"
+    )
+
+    chat_module._pending_approvals.clear()
+
+
+@pytest.mark.asyncio
 async def test_refine_events_falls_back_when_mcp_brief_unavailable(monkeypatch) -> None:
     """MCP が未使用でも従来の改善フローを維持する"""
 

@@ -2015,4 +2015,202 @@ describe('buildRestoredPipelineState', () => {
     expect(result.current.state.versions[0].evaluations).toHaveLength(1)
     expect(result.current.state.versions[0].evaluations[0].round).toBe(1)
   })
+
+  // Bug A regression suite (2026-05-02 PR2): passive polling re-loads the
+  // Cosmos doc which contains truncated SVG placeholders (image events
+  // and HTML brochures with inline data: URLs over 64KB are persisted as
+  // placeholders to avoid Cosmos 413). The rescue helpers preserve full
+  // base64 images / HTML in-memory when previousState matches.
+  describe('Bug A: truncated image rescue on passive restore', () => {
+    // 注: production の placeholder template (src/conversations.py:236-249)
+    // と同じ形 — literal single-quote + literal space を含む。`%27` でも
+    // `%20` でもない。`TRUNCATED_INLINE_IMAGE_RE` がこの形を正しく
+    // 検出できるかを保証するための fixture。
+    const TRUNCATED_PLACEHOLDER = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='800' height='400'%3E%3Crect width='800' height='400' fill='%23e2e8f0'/%3E%3Ctext x='400' y='220' text-anchor='middle' font-size='14' font-family='sans-serif' fill='%2364748b'%3Eoriginal_size=120000B%3C/text%3E%3C/svg%3E"
+    const FULL_PNG = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAA' + 'A'.repeat(100)
+
+    it('passive restore preserves the full in-memory image when Cosmos returns a placeholder', async () => {
+      const fullDoc = {
+        status: 'completed',
+        input: 'ハワイ夏プラン',
+        messages: [
+          { event: 'text', data: { content: '# Plan', agent: 'marketing-plan-agent' } },
+          { event: 'image', data: { url: FULL_PNG, alt: 'ハワイのヒーロー画像', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-image', metrics: { latency_seconds: 30, tool_calls: 5, total_tokens: 1200 } } },
+        ],
+      }
+      const truncatedDoc = {
+        status: 'completed',
+        input: 'ハワイ夏プラン',
+        messages: [
+          { event: 'text', data: { content: '# Plan', agent: 'marketing-plan-agent' } },
+          { event: 'image', data: { url: TRUNCATED_PLACEHOLDER, alt: 'ハワイのヒーロー画像', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-image', metrics: { latency_seconds: 30, tool_calls: 5, total_tokens: 1200 } } },
+        ],
+      }
+      vi.mocked(globalThis.fetch)
+        .mockResolvedValueOnce(new Response(JSON.stringify(fullDoc)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(truncatedDoc)))
+
+      const { result } = renderHook(() => useSSE())
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-image')
+      })
+
+      expect(result.current.state.images.at(-1)?.url).toBe(FULL_PNG)
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-image', { passive: true })
+      })
+
+      // Bug A core invariant: passive poll must NOT replace the full image
+      // with the SVG placeholder that Cosmos persisted.
+      expect(result.current.state.images.at(-1)?.url).toBe(FULL_PNG)
+    })
+
+    it('passive restore on a DIFFERENT conversation does not substitute (scoping check)', async () => {
+      const fullDocConvA = {
+        status: 'completed',
+        input: 'ハワイ',
+        messages: [
+          { event: 'image', data: { url: FULL_PNG, alt: 'ハワイ', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-scope-A', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 50 } } },
+        ],
+      }
+      const truncatedDocConvB = {
+        status: 'completed',
+        input: 'パリ',
+        messages: [
+          { event: 'image', data: { url: TRUNCATED_PLACEHOLDER, alt: 'パリ', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-scope-B', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 50 } } },
+        ],
+      }
+      vi.mocked(globalThis.fetch)
+        .mockResolvedValueOnce(new Response(JSON.stringify(fullDocConvA)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(truncatedDocConvB)))
+
+      const { result } = renderHook(() => useSSE())
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-scope-A')
+      })
+
+      expect(result.current.state.conversationId).toBe('conv-bug-a-scope-A')
+      expect(result.current.state.images.at(-1)?.url).toBe(FULL_PNG)
+
+      // Passive switch to a different conversation: rescue lookup should be
+      // null (different conversationId), so the placeholder remains.
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-scope-B', { passive: true })
+      })
+
+      // Cross-conversation rescue must be disabled.
+      expect(result.current.state.images.at(-1)?.url).toBe(TRUNCATED_PLACEHOLDER)
+    })
+
+    it('cold reload (no in-memory previousState) preserves the placeholder', () => {
+      // Direct call to buildRestoredPipelineState without any rescue lookup
+      // simulates a cold page reload where previousState.images is empty.
+      const state = buildRestoredPipelineState(
+        {
+          status: 'completed',
+          input: 'ハワイ',
+          messages: [
+            { event: 'image', data: { url: TRUNCATED_PLACEHOLDER, alt: 'ハワイ', agent: 'brochure-gen-agent' } },
+            { event: 'done', data: { conversation_id: 'conv-cold', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 50 } } },
+          ],
+        },
+        'conv-cold',
+        { ...DEFAULT_SETTINGS },
+        null,
+        null,
+      )
+
+      expect(state.images).toHaveLength(1)
+      expect(state.images[0].url).toBe(TRUNCATED_PLACEHOLDER)
+    })
+
+    it('rescue does NOT substitute when alt text mismatches (safety check)', async () => {
+      const fullDoc = {
+        status: 'completed',
+        input: 'ハワイ',
+        messages: [
+          { event: 'image', data: { url: FULL_PNG, alt: 'ハワイのヒーロー', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-alt', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 50 } } },
+        ],
+      }
+      // Same conversation, same stream position, but DIFFERENT alt — rescue
+      // must reject this to avoid swapping in a stale image.
+      const truncatedDocDifferentAlt = {
+        status: 'completed',
+        input: 'ハワイ',
+        messages: [
+          { event: 'image', data: { url: TRUNCATED_PLACEHOLDER, alt: 'ハワイのバナー', agent: 'brochure-gen-agent' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-alt', metrics: { latency_seconds: 10, tool_calls: 1, total_tokens: 50 } } },
+        ],
+      }
+      vi.mocked(globalThis.fetch)
+        .mockResolvedValueOnce(new Response(JSON.stringify(fullDoc)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(truncatedDocDifferentAlt)))
+
+      const { result } = renderHook(() => useSSE())
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-alt')
+      })
+
+      expect(result.current.state.images.at(-1)?.url).toBe(FULL_PNG)
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-alt', { passive: true })
+      })
+
+      // alt mismatched → no substitution, placeholder stays.
+      expect(result.current.state.images.at(-1)?.url).toBe(TRUNCATED_PLACEHOLDER)
+    })
+
+    it('passive restore preserves full HTML brochure when Cosmos returns truncated inline images', async () => {
+      const fullHtml = `<div class="brochure"><img src="${FULL_PNG}" alt="hero"/><h1>沖縄ファミリープラン</h1></div>`
+      const truncatedHtml = `<div class="brochure"><img src="${TRUNCATED_PLACEHOLDER}" alt="hero"/><h1>沖縄ファミリープラン</h1></div>`
+      const fullDoc = {
+        status: 'completed',
+        input: '沖縄',
+        messages: [
+          { event: 'text', data: { content: fullHtml, agent: 'brochure-gen-agent', content_type: 'html' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-html', metrics: { latency_seconds: 30, tool_calls: 5, total_tokens: 1200 } } },
+        ],
+      }
+      const truncatedDoc = {
+        status: 'completed',
+        input: '沖縄',
+        messages: [
+          { event: 'text', data: { content: truncatedHtml, agent: 'brochure-gen-agent', content_type: 'html' } },
+          { event: 'done', data: { conversation_id: 'conv-bug-a-html', metrics: { latency_seconds: 30, tool_calls: 5, total_tokens: 1200 } } },
+        ],
+      }
+      vi.mocked(globalThis.fetch)
+        .mockResolvedValueOnce(new Response(JSON.stringify(fullDoc)))
+        .mockResolvedValueOnce(new Response(JSON.stringify(truncatedDoc)))
+
+      const { result } = renderHook(() => useSSE())
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-html')
+      })
+
+      const initialBrochure = result.current.state.textContents.at(-1)
+      expect(initialBrochure?.content).toBe(fullHtml)
+      expect(initialBrochure?.content_type).toBe('html')
+
+      await act(async () => {
+        await result.current.restoreConversation('conv-bug-a-html', { passive: true })
+      })
+
+      // Bug A invariant: brochure HTML should keep the full base64 inline
+      // image, not the SVG placeholder.
+      const restoredBrochure = result.current.state.textContents.at(-1)
+      expect(restoredBrochure?.content).toBe(fullHtml)
+    })
+  })
 })

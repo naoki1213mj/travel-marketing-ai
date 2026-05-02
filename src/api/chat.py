@@ -2743,6 +2743,20 @@ async def _load_pending_approval_context(
     if context:
         return context
 
+    # 安全装置 (rubber-duck pr2-final-rubber-duck blocker #1, 2026-05-02):
+    # in-memory に同 owner:conv の active pending approval が既に存在し、
+    # かつ提示された token が不一致の場合、Cosmos fallback は stale (outer
+    # save 完了前) → 旧 token で旧 plan を承認できてしまうため reject する。
+    # 「in-memory が active pending approval の真実の source」と扱い、
+    # 別 token を持つ stale な要求は process restart シナリオ以外では拒否。
+    # process restart 時は _pending_approvals が空なので影響しない。
+    if normalized_owner_id and normalized_token:
+        active_entry = _pending_approvals.get(_pending_approval_key(conversation_id, normalized_owner_id))
+        if isinstance(active_entry, dict):
+            stored_token = _sanitize_optional_text(str(active_entry.get("approval_token") or ""))
+            if stored_token and not hmac.compare_digest(stored_token, normalized_token):
+                return None
+
     # Cosmos fallback: token があれば cross-partition 検索を許可。
     # token 経由の検証で同一文書を確実に取れるため、ID 衝突攻撃も防げる。
     allow_cross_owner = bool(normalized_token) or not normalized_owner_id
@@ -4433,7 +4447,14 @@ async def _refine_events(
         if not outcome["success"]:
             return
 
-        # 承認コンテキストを構築して承認フローに再突入
+        # 承認コンテキストを構築して承認フローに再突入。
+        # 評価フィードバック経路でも token rotation する (per-revision rotation:
+        # ラウンド N 用の旧 token が漏洩しても次ラウンドの approve には使えない)。
+        # Bug B fix 2026-05-02: previously this path forgot to mint/store/emit
+        # an approval_token, so frontend got `approval_token: undefined` and
+        # subsequent /approve POST landed with empty token → anonymous lookup
+        # rejected by hmac.compare_digest → APPROVAL_CONTEXT_NOT_FOUND.
+        refreshed_approval_token = secrets.token_urlsafe(32)
         _store_pending_approval_context(
             conversation_id,
             {
@@ -4447,6 +4468,7 @@ async def _refine_events(
                 "owner_id": owner_id or _get_conversation_owner_id(conversation),
                 "conversation_settings": _get_conversation_settings(conversation),
                 "work_iq_session": effective_work_iq_session,
+                "approval_token": refreshed_approval_token,
             },
         )
         yield format_sse(
@@ -4462,6 +4484,7 @@ async def _refine_events(
                 model_settings=model_settings,
                 workflow_settings=refine_workflow_settings,
                 approval_scope="user",
+                approval_token=refreshed_approval_token,
             ),
         )
         return
@@ -6046,6 +6069,13 @@ async def manager_approval_callback(
     )
     manager_comment = body.comment or "上司から差し戻しされました。内容を確認して修正してください。"
     workflow_settings = context.get("workflow_settings")
+    # Manager-reopen path retains the original approval_token via {**context}
+    # spread so backend still validates POST /approve. But the emitted SSE
+    # event also needs to carry the token so frontend doesn't overwrite its
+    # in-state token with `undefined` (which would degrade /approve POST to
+    # an empty token submission and trigger APPROVAL_CONTEXT_NOT_FOUND).
+    # Bug B fix 2026-05-02: pass approval_token explicitly.
+    preserved_approval_token = _sanitize_optional_text(str(context.get("approval_token") or "")) or None
     _store_pending_approval_context(
         thread_id,
         {
@@ -6067,6 +6097,7 @@ async def manager_approval_callback(
             workflow_settings=workflow_settings,
             approval_scope="user",
             manager_comment=manager_comment,
+            approval_token=preserved_approval_token,
         ),
     )
     _record_sse_event(reopened_events, reopened_event, time.monotonic())
