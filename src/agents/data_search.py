@@ -405,21 +405,22 @@ def _resolve_data_agent_url(version: str) -> str:
 def _build_data_agent_question_v2(question: str) -> str:
     """v2 用の質問プロンプト。
 
-    v2 (Travel_Ontology_DA_v2) は Phase 9.6 で aiInstructions に値マッピング・
-    時系列 SQL テンプレート・計算指標 SQL ロジック・失敗時リカバリ手順を内蔵済。
-    アプリ側で長いシステムプロンプトを重ねると v1 用スキーマと混線するため、
-    最小限のマーケティング文脈と品質ガードだけ渡す。
+    v2 (Travel_Ontology_DA_v2) は Phase 9.6 で aiInstructions v6 (~16KB) に値マッピング・
+    時系列 SQL テンプレート・計算指標 SQL ロジック・失敗時リカバリ手順・回答フォーマット
+    ガイド・プレースホルダー禁止ガードを **すべて内蔵済み** (`scripts/fabric_data_overhaul/
+    v2_artifacts/aiInstructions_v6.md` 参照)。
+
+    2026-05-02 の live App Insights ログ (587-char 質問 → 219-char polite refusal) と、
+    standalone probe (`scripts/fabric_data_overhaul/v2_artifacts/probe_user_prompt.py`) で
+    raw 38-char 質問 → 268-char rich grounded answer (¥38.9M / 39件 / 131名) を取得した
+    比較から、アプリ側で長い preamble を重ねると NL2Ontology が confuse して低信頼応答を
+    返すことが判明した。よって v2 では **質問のみ** を渡す。
+
+    v1 (`Travel_Ontology_DA`、travel_sales / travel_review schema) は別関数
+    `_build_data_agent_question` を引き続き使う。v1 の aiInstructions は v2 ほど richly
+    populated されておらず、アプリ側 preamble に依存しているため。
     """
-    return "\n".join(
-        [
-            "あなたは旅行マーケティング担当者向けの Fabric Data Agent (Travel_Ontology_DA_v2) です。",
-            "lh_travel_marketing_v2 lakehouse の booking / customer / review / payment / cancellation / hotel / flight / campaign / inquiry / itinerary 10 テーブルから実データに基づくマーケ分析を返してください。",
-            "回答は 1) 結論、2) 適用条件 (季節 / destination_region / customer_segment / age_band)、3) 主要指標 (売上 SUM(total_revenue_jpy) / 予約件数 COUNT / 旅行者数 SUM(pax_count) / 平均評価 AVG(rating))、4) 表またはランキング、5) 補足の順でまとめてください。",
-            "実データの数値だけを使い、X/XX、○○、架空の例、プレースホルダーは絶対に使わないでください。",
-            "内部の GQL、GraphQL、JSON、SQL、ツール呼び出しトレースは出力せず、マーケ担当者向けの自然な日本語で書いてください。",
-            f"質問: {question}",
-        ]
-    )
+    return question
 
 
 # Fabric Lakehouse v2 で実際に格納されている canonical 値。NL2Ontology が

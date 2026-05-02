@@ -577,23 +577,89 @@ class TestDataSearchTools:
         assert ds._resolve_data_agent_url("v1") == "https://v1-url"
         assert ds._resolve_data_agent_url("v2") == "https://v2-url"
 
-    def test_build_data_agent_question_v2_is_short_and_v2_specific(self):
-        """v2 用プロンプトは v1 と被らず、lh_travel_marketing_v2 schema を明示する。"""
+    def test_build_data_agent_question_v2_returns_question_as_is(self):
+        """v2 用プロンプトは aiInstructions v6 (Phase 9.6) が値マッピング・SQL テンプレート・
+        品質ガードを内蔵しているため、アプリ側で preamble を重ねず質問のみを渡す。
+
+        2026-05-02 の live App Insights ログ (587-char 質問 → 219-char polite refusal) と
+        standalone probe (raw 38-char → rich grounded answer) の比較で、preamble が
+        NL2Ontology を confuse させることが確認されている。
+        """
+        import src.agents.data_search as ds
+
+        question = "春の沖縄ファミリー施策を分析して"
+        prompt = ds._build_data_agent_question_v2(question)
+
+        # 質問がそのまま返される (preamble なし)
+        assert prompt == question
+
+    def test_build_data_agent_question_v2_no_branding_or_schema_preamble(self):
+        """v2 wrapper は preamble を持たない invariant を保証する。
+
+        将来 wrapper を「ちょっとしたコンテキスト」で再膨張させるリグレッションを防ぐため、
+        v2 用プロンプトに以下が含まれていないことを assert する:
+          - v2 ブランディング ("Travel_Ontology_DA_v2", "lh_travel_marketing_v2")
+          - スキーマ列挙 ("booking / customer / review ...")
+          - 回答フォーマット指示 ("結論", "適用条件", "主要指標")
+          - placeholder ガード ("プレースホルダー", "実データの数値")
+        これらはすべて DA 側の aiInstructions v6 が担当する。
+        """
         import src.agents.data_search as ds
 
         prompt = ds._build_data_agent_question_v2("春の沖縄ファミリー施策を分析して")
 
-        # v2 schema (10 テーブル / lh_travel_marketing_v2) に言及している
-        assert "lh_travel_marketing_v2" in prompt
-        assert "Travel_Ontology_DA_v2" in prompt
-        assert "booking" in prompt and "review" in prompt
-        # v1 用の travel_sales / travel_review 名は含めない (混線防止)
-        assert "travel_sales" not in prompt
-        assert "travel_review" not in prompt
-        # 元の質問は最後に残す
+        forbidden_substrings = [
+            "Travel_Ontology_DA_v2",
+            "lh_travel_marketing_v2",
+            "booking / customer",
+            "結論",
+            "適用条件",
+            "主要指標",
+            "プレースホルダー",
+            "実データの数値",
+            "GraphQL",
+            "GQL",
+        ]
+        for forbidden in forbidden_substrings:
+            assert forbidden not in prompt, (
+                f"v2 wrapper は preamble を持たないはずだが {forbidden!r} が含まれた。"
+                f"DA 側 aiInstructions v6 と重複してプロンプト膨張 → NL2Ontology confuse の"
+                f"リグレッションリスク。"
+            )
+
+    def test_build_data_agent_question_v2_length_ceiling(self):
+        """v2 wrapper は質問を verbatim で返すので、length は質問とほぼ一致する。
+
+        ある日「ちょっとした文脈を 1 行だけ追加」したくなっても、prompt 長が質問 + 64
+        char を超えないように歯止めをかける。Live ログで 587-char prompt → polite
+        refusal が確認されているので、200 char 以下のごく短い質問では明確な余裕を取る。
+        """
+        import src.agents.data_search as ds
+
+        for question in [
+            "夏のハワイ学生旅行向けプランを企画して",
+            "夏のハワイ学生旅行向けの売上・予約数・旅行者数・平均評価を教えてください",
+            "春の沖縄",
+        ]:
+            prompt = ds._build_data_agent_question_v2(question)
+            assert len(prompt) <= len(question) + 64, (
+                f"v2 wrapper が質問 ({len(question)} chars) より 64 char 以上膨張した。"
+                f"prompt={prompt!r}"
+            )
+
+    def test_build_data_agent_question_v1_keeps_full_preamble(self):
+        """v1 (Travel_Ontology_DA, travel_sales / travel_review) は引き続きアプリ側
+        preamble を使う。v1 の aiInstructions は v2 ほど richly populated でないため。
+        """
+        import src.agents.data_search as ds
+
+        prompt = ds._build_data_agent_question("春の沖縄ファミリー施策を分析して")
+
+        # v1 用 schema 名・指示が残っていることを確認 (regression防止)
+        assert "travel_sales" in prompt or "travel_review" in prompt
         assert "春の沖縄ファミリー施策を分析して" in prompt
-        # アプリ側のシステムプロンプトは aiInstructions と重複しないよう短く保つ
-        assert len(prompt) < 1500
+        # v1 wrapper は依然として長い (slim 化はしない)
+        assert len(prompt) > 200
 
     def test_data_agent_answer_with_sales_metrics_is_not_low_confidence(self):
         """一部項目がデータなしでも売上実数があれば Data Agent 成功として扱う。"""

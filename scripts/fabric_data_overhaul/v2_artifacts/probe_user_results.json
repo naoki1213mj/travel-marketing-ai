@@ -1,0 +1,50 @@
+[
+  {
+    "qid": "USER1",
+    "question": "夏のハワイ学生旅行向けプランを企画して",
+    "run_status": "completed",
+    "run_last_error": null,
+    "assistant_messages_count": 16,
+    "final_answer_len": 581,
+    "final_answer_full": "結論：夏のハワイ学生旅行市場は、1人あたり平均単価¥302,233、総売上¥38,926,615、予約39件で合計131名が参加しています。グループ利用が多く、割引・体験型アクティビティ込みのプラン企画が有効です。\n\n【適用条件】  \n季節：夏（season='summer'）  \ndestination_region：ハワイ  \ncustomer_segment／age_band：全体（学生属性は直接指定不可）\n\n【主要指標】\n\n| 売上合計 (¥)   | 予約件数 | 旅行者数 | 平均単価 (¥/名) |\n|---------------|---------|----------|-----------------|\n| ¥38,926,615   | 39      | 131      | ¥302,233        |\n\n【補足】\n- 1予約あたり平均3.4名のグループ利用が多く、学生グループやサークル旅行に最適です。\n- 複数名参加割引、現地体験アクティビティ（マリンスポーツ／観光ツアー）付パッケージ、空港送迎等を取り入れることで集客効果が期待できます。\n- 「学生」属性による限定抽出は不可ですが、近い需要傾向として上記の集計値が参考となります。\n- 年齢や評価等、さらに詳細なセグメント指定も対応可能ですのでご相談ください。",
+    "matcher": {
+      "low_confidence": false,
+      "has_grounded_metrics": true,
+      "has_yen": true,
+      "has_count": true
+    },
+    "elapsed_s": 22.9
+  },
+  {
+    "qid": "REF1",
+    "question": "夏のハワイ向けの売上を教えてください",
+    "run_status": "completed",
+    "run_last_error": null,
+    "assistant_messages_count": 1,
+    "final_answer_len": 217,
+    "final_answer_full": "夏のハワイ向け旅行商品の売上は¥647,010,686、予約件数は632件、平均単価は¥311,245です。\n\n【使用条件】destination_region='ハワイ'、season='summer'\n\n| 売上合計(¥)    | 予約件数 | 平均単価(¥) |\n|---------------|---------|------------|\n| ¥647,010,686  | 632     | ¥311,245   |",
+    "matcher": {
+      "low_confidence": false,
+      "has_grounded_metrics": true,
+      "has_yen": true,
+      "has_count": true
+    },
+    "elapsed_s": 86.3
+  },
+  {
+    "qid": "USER2",
+    "question": "夏のハワイ学生旅行向けの売上・予約数・旅行者数・平均評価を教えてください",
+    "run_status": "completed",
+    "run_last_error": null,
+    "assistant_messages_count": 1,
+    "final_answer_len": 268,
+    "final_answer_full": "夏のハワイ学生旅行の売上は約¥38,926,615、予約数39件、旅行者数131名、平均評価4.0です。\n\n【使用条件】対象：夏×ハワイ×学生セグメント\n【主要指標】\n\n| 売上 (¥)      | 予約数 | 旅行者数 | 平均評価 |\n|---------------|--------|----------|----------|\n| ¥38,926,615   | 39     | 131      | 4.0      |\n\n【補足】「学生」セグメントはage_bandやcustomer_segmentで判定しています。",
+    "matcher": {
+      "low_confidence": false,
+      "has_grounded_metrics": true,
+      "has_yen": true,
+      "has_count": true
+    },
+    "elapsed_s": 32.2
+  }
+]
