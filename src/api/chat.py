@@ -344,6 +344,14 @@ class PostCompletionUpdateContext(TypedDict):
     video_job_id: str | None
     owner_id: str
     artifact_version: NotRequired[int]
+    # Snapshot of messages at finally-time of /approve. Used by
+    # _append_post_completion_updates to AVOID re-reading possibly-stale
+    # Cosmos state (Bug 4: when the approval-time save silently fell back
+    # to in-memory, a later Cosmos read returned the pre-approval doc and
+    # subsequent background appends erased post-approval phases).
+    base_messages_snapshot: NotRequired[list[dict]]
+    base_user_input: NotRequired[str]
+    base_user_messages: NotRequired[list[str]]
 
 
 _pending_approvals: dict[str, PendingApprovalContext] = {}
@@ -4935,21 +4943,46 @@ async def _append_post_completion_updates(
     conversation_id: str,
     update_context: PostCompletionUpdateContext,
 ) -> None:
-    """完了後の動画・品質レビュー・通知をバックグラウンドで追記する。"""
+    """完了後の動画・品質レビュー・通知をバックグラウンドで追記する。
+
+    Bug 4 fix: prefer ``base_messages_snapshot`` / ``base_user_input`` injected
+    by the caller over re-reading Cosmos. The snapshot is always the freshest
+    truth (it's what the caller just persisted). Re-reading Cosmos here would
+    racey: if the approval-time save silently fell back to in-memory while
+    Cosmos itself was stale, the read here returns the stale doc and the next
+    ``save_conversation`` overwrites the post-approval phases with only the
+    video / quality-review events. Falling back to Cosmos read is preserved
+    only for non-approval call paths (legacy / safety net).
+    """
     owner_id, allow_cross_owner = _resolve_context_owner_lookup(update_context)
-    existing_conversation = await get_conversation(
-        conversation_id,
-        owner_id=owner_id or None,
-        allow_cross_owner=allow_cross_owner,
-    )
-    if not existing_conversation:
-        logger.warning("background update 対象の会話が見つかりません: %s", conversation_id)
-        return
+    snapshot_messages = update_context.get("base_messages_snapshot")
+    snapshot_user_input = update_context.get("base_user_input")
+    snapshot_user_messages = update_context.get("base_user_messages")
+    existing_conversation: dict | None = None
+    base_messages: list[dict] = []
+    base_user_input = ""
+    base_user_messages: list[str] = []
+    if snapshot_messages is not None:
+        base_messages = list(snapshot_messages)
+        base_user_input = snapshot_user_input or ""
+        if snapshot_user_messages is not None:
+            base_user_messages = list(snapshot_user_messages)
+    else:
+        existing_conversation = await get_conversation(
+            conversation_id,
+            owner_id=owner_id or None,
+            allow_cross_owner=allow_cross_owner,
+        )
+        if not existing_conversation:
+            logger.warning("background update 対象の会話が見つかりません: %s", conversation_id)
+            return
+        base_messages = list(existing_conversation.get("messages", []))
+        base_user_input = existing_conversation.get("input", "")
 
     appended_events: list[dict] = []
     artifact_version = _coerce_artifact_version(update_context.get("artifact_version"))
     if artifact_version is None:
-        artifact_version = _count_completed_artifact_versions(existing_conversation.get("messages", [])) or None
+        artifact_version = _count_completed_artifact_versions(base_messages) or None
 
     video_job_id = _sanitize_optional_text(update_context.get("video_job_id"))
     if video_job_id:
@@ -4976,24 +5009,35 @@ async def _append_post_completion_updates(
         brochure_html=update_context["brochure_html"],
     )
 
-    conversation_status = _conversation_status_from_events(
-        [*existing_conversation.get("messages", []), *appended_events]
+    final_messages = [*base_messages, *appended_events]
+    conversation_status = _conversation_status_from_events(final_messages)
+
+    # Resolve owner_id with sensible fallback if the snapshot path didn't
+    # include the existing conversation doc.
+    effective_owner_id = owner_id
+    if not effective_owner_id and existing_conversation is not None:
+        effective_owner_id = _get_conversation_owner_id(existing_conversation)
+
+    metadata_for_save = replace_conversation_metadata(
+        _build_conversation_metadata_for_save(
+            conversation_id,
+            existing_conversation,
+            conversation_status,
+            background_updates_pending=False,
+            user_messages=base_user_messages or None,
+            owner_id=effective_owner_id,
+        )
     )
-    await append_conversation_events(
+    # Use save_conversation directly with the merged snapshot+appended set.
+    # This bypasses append_conversation_events' Cosmos re-read which is the
+    # source of the Bug 4 stale-base race.
+    await save_conversation(
         conversation_id=conversation_id,
-        user_input=existing_conversation.get("input", ""),
-        new_events=appended_events,
-        metrics=replace_conversation_metadata(
-            _build_conversation_metadata_for_save(
-                conversation_id,
-                existing_conversation,
-                conversation_status,
-                background_updates_pending=False,
-                owner_id=owner_id,
-            )
-        ),
+        user_input=base_user_input,
+        events=final_messages,
+        metrics=metadata_for_save,
         status=conversation_status,
-        owner_id=owner_id or _get_conversation_owner_id(existing_conversation),
+        owner_id=effective_owner_id,
     )
 
 
@@ -5253,6 +5297,12 @@ async def _run_manager_approval_continuation(
         )
 
     for update_job in background_update_jobs:
+        # Snapshot the current state we just persisted (existing + collected).
+        # See Bug 4 — without this, the background runner re-reads Cosmos
+        # which may not yet reflect our latest append on transient failure.
+        merged_snapshot = [*existing_conversation.get("messages", []), *collected_events]
+        update_job["base_messages_snapshot"] = list(merged_snapshot)
+        update_job["base_user_input"] = existing_conversation.get("input", "")
         asyncio.create_task(_append_post_completion_updates_safe(conversation_id, update_job))
 
 
@@ -5724,6 +5774,9 @@ async def approve(
             video poll などの post-completion 更新は asyncio.create_task で
             起動して、StreamingResponse のライフサイクルから独立させる。
             """
+            previous_messages: list[dict] = []
+            merged_messages: list[dict] = []
+            user_messages: list[dict] = []
             try:
                 previous_messages = existing_conversation.get("messages", []) if existing_conversation else []
                 merged_messages = [*previous_messages, *collected_events]
@@ -5762,9 +5815,21 @@ async def approve(
             except (RuntimeError, TypeError):
                 logger.debug("承認系会話の保存に失敗（非致命的）", exc_info=True)
 
-            # クライアント切断時にも生き残るよう、StreamingResponse の BackgroundTasks ではなく
-            # asyncio.create_task で post-completion 更新を起動する。
+            # Capture a snapshot of the events we just persisted so the
+            # background task can build the next save on top of THIS state
+            # rather than re-reading Cosmos (which may be stale if the save
+            # above silently fell back to in-memory). See Bug 4.
+            base_user_input_snapshot = (
+                existing_conversation.get("input", body.response)
+                if existing_conversation
+                else body.response
+            )
             for update_job in background_update_jobs:
+                # Inject snapshot into the context so the background runner
+                # uses it as base instead of re-reading Cosmos.
+                update_job["base_messages_snapshot"] = list(merged_messages)
+                update_job["base_user_input"] = base_user_input_snapshot
+                update_job["base_user_messages"] = list(user_messages)
                 task = asyncio.create_task(_append_post_completion_updates_safe(thread_id, update_job))
                 _BACKGROUND_TASK_REGISTRY.add(task)
                 task.add_done_callback(_BACKGROUND_TASK_REGISTRY.discard)

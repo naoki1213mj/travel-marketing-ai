@@ -97,7 +97,7 @@ export function IQStatusStrip({ toolEvents, t }: IQStatusStripProps) {
               className={`rounded-xl border p-2.5 transition ${
                 isActive
                   ? meta.tileClass
-                  : 'border-[var(--panel-border)] bg-[var(--surface)] text-[var(--text-muted)] opacity-60'
+                  : 'border-[var(--panel-border)] bg-[var(--surface)] text-[var(--text-secondary)]'
               }`}
             >
               <div className="flex items-center gap-1.5">
@@ -125,7 +125,7 @@ export function IQStatusStrip({ toolEvents, t }: IQStatusStripProps) {
                 )}
               </div>
               {description ? (
-                <p className={`mt-1 text-[10px] leading-snug ${isActive ? '' : 'opacity-80'}`}>{description}</p>
+                <p className={`mt-1 text-[10px] leading-snug ${isActive ? '' : 'text-[var(--text-muted)]'}`}>{description}</p>
               ) : null}
             </div>
           )

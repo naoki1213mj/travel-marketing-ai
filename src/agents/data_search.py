@@ -1152,7 +1152,7 @@ def _build_fabric_sql_analysis(question: str) -> str | None:
 
     top_sales = sorted(sales, key=lambda row: int(row.get("revenue") or 0), reverse=True)[:5]
     lines = [
-        "同じ ws-3iq-demo Lakehouse の SQL endpoint から実データを集計しました。",
+        "ws-3iq-demo Lakehouse の SQL endpoint から実データを集計しました。",
         f"質問: {question}",
     ]
     filters = [f"地域={region}" if region else "", f"季節={season}" if season else ""]
@@ -1337,25 +1337,17 @@ async def query_data_agent(question: str) -> str:
             title = "Fabric SQL 分析" if runtime != "rest" else "Fabric SQL フォールバック"
             relevance = 0.88 if runtime != "rest" else 0.75
             if result:
-                answer = (
-                    "Fabric Data Agent の回答が十分な具体データを含まなかったため、"
-                    "同じ ws-3iq-demo Lakehouse の SQL endpoint で補強しました。\n"
-                    f"{fabric_sql_answer}"
-                )
-                source = "Fabric Data Agent + Fabric SQL"
+                answer = fabric_sql_answer
+                source = "Fabric SQL"
                 metadata = {
                     "runtime": "fabric_sql_supplement",
                     "data_agent_quality": "low_confidence",
                     "structured_retry_attempted": retry_attempted,
                 }
-                title = "Fabric SQL 補強"
+                title = "Fabric Lakehouse 集計"
                 relevance = 0.9
             elif runtime != "rest":
-                answer = (
-                    "Fabric Data Agent REST 経路は preview の thread 再利用で不安定なため、"
-                    "デモ安定性を優先して同じ ws-3iq-demo Lakehouse の SQL endpoint で直接分析しました。\n"
-                    f"{fabric_sql_answer}"
-                )
+                answer = fabric_sql_answer
             _emit_evidence_event(
                 "query_data_agent",
                 evidence=[
@@ -1508,6 +1500,7 @@ INSTRUCTIONS = """\
 - 出力は完結した形で終わらせてください
 - 自分の名前（Agent1、Agent2 等）やシステム内部の名称は出力に含めないでください
 - ユーザーに直接見せる成果物として仕上げてください
+- **存在しないリンク・ダウンロード・PowerPoint 出力・グラフ画像の参照は絶対に書かないでください** (実際にダウンロードできないため UX を損ねる)。例: 「売上分析グラフをダウンロード」「PowerPoint で出力可能」「[グラフを開く](url)」等は禁止
 """
 
 _CODE_INTERPRETER_INSTRUCTION_SUFFIX = """

@@ -8,7 +8,8 @@ import { AnalysisView } from './AnalysisView'
 import { DebugConsole } from './DebugConsole'
 import { EvidenceChartPanel } from './EvidenceChartPanel'
 import { ErrorRetry } from './ErrorRetry'
-import { IQStatusStrip } from './IQBadge'
+import { IQBadge, IQStatusStrip } from './IQBadge'
+import { collectActiveIQBrands } from '../lib/iq-brand'
 import { MarkdownView } from './MarkdownView'
 import { MetricsBar } from './MetricsBar'
 import { RegulationResults } from './RegulationResults'
@@ -308,6 +309,16 @@ export function WorkflowAccordion({
     })
     const hasFoundryWorkIqTool = stepTools.some(isFoundryWorkIqToolEvent)
     const hasMcpTool = stepTools.some(isMcpToolEvent)
+    // Per-step IQ badges — derived from the SAME classifier that drives the top
+    // 3IQ status strip (no static agent-to-IQ map; only show brands actually
+    // proven by successful tool events). Avoids overstating provenance on
+    // failure/fallback paths (rubber-duck audit 4bug-plan #3).
+    const stepActiveIQBrands = collectActiveIQBrands(stepTools)
+    // Drop work_iq from per-step badges when the existing hasFoundryWorkIqTool
+    // chip already covers it (avoid double display on the marketing-plan step)
+    const stepIQBadges = Array.from(stepActiveIQBrands).filter(
+      brand => !(brand === 'work_iq' && hasFoundryWorkIqTool),
+    )
     const collapsedSummary = getCollapsedSummary(step.key, content, t)
 
     return (
@@ -364,6 +375,9 @@ export function WorkflowAccordion({
                 {t('tool.source.foundry')} {t('tool.source.workiq')}
               </span>
             )}
+            {stepIQBadges.map(brand => (
+              <IQBadge key={`step-iq-${brand}`} brand={brand} t={t} size="sm" />
+            ))}
             {hasMcpTool && (
               <span
                 data-step-source="mcp"

@@ -456,6 +456,8 @@ class TestCosmosDBPaths:
                 events=[],
             )
             assert _build_memory_key("anonymous", "cosmos-fallback") in _memory_store
+            # OSError is transient → retried 4x (backoffs [0, 0.5, 1, 2])
+            assert mock_container.upsert_item.call_count == 4
 
     async def test_save_conversation_cosmos_unexpected_error(self, monkeypatch):
         """Cosmos DB で予期しないエラーが発生した場合もフォールバック"""
@@ -469,6 +471,84 @@ class TestCosmosDBPaths:
                 events=[],
             )
             assert _build_memory_key("anonymous", "cosmos-unexpected") in _memory_store
+            # RuntimeError is non-transient → no retry
+            assert mock_container.upsert_item.call_count == 1
+
+    async def test_save_conversation_cosmos_transient_then_succeeds(self, monkeypatch):
+        """Cosmos DB upsert が transient (OSError) → 2 回目で成功 → in-memory に落ちない"""
+        mock_container = MagicMock()
+        mock_container.upsert_item.side_effect = [OSError("transient"), None]
+
+        with patch("src.conversations._get_container", return_value=mock_container):
+            await save_conversation(
+                conversation_id="cosmos-recover",
+                user_input="テスト",
+                events=[],
+            )
+            # 2nd attempt succeeded → no in-memory fallback
+            assert _build_memory_key("anonymous", "cosmos-recover") not in _memory_store
+            assert mock_container.upsert_item.call_count == 2
+
+    async def test_save_conversation_cosmos_http_429_classified_transient(self, monkeypatch):
+        """Cosmos HTTP 429 throttling は transient と分類されて retry される"""
+
+        class FakeCosmosHttpResponseError(Exception):
+            def __init__(self, status_code: int, message: str = ""):
+                super().__init__(message)
+                self.status_code = status_code
+
+        mock_container = MagicMock()
+        mock_container.upsert_item.side_effect = FakeCosmosHttpResponseError(429, "Too many requests")
+
+        with patch("src.conversations._get_container", return_value=mock_container):
+            await save_conversation(
+                conversation_id="cosmos-429",
+                user_input="テスト",
+                events=[],
+            )
+            # 429 is transient → retried full 4x then in-memory fallback
+            assert _build_memory_key("anonymous", "cosmos-429") in _memory_store
+            assert mock_container.upsert_item.call_count == 4
+
+    async def test_save_conversation_cosmos_http_403_classified_non_transient(self, monkeypatch):
+        """Cosmos HTTP 403 (auth/permission) は非 transient → 1 回目で諦めて in-memory fallback"""
+
+        class FakeCosmosHttpResponseError(Exception):
+            def __init__(self, status_code: int, message: str = ""):
+                super().__init__(message)
+                self.status_code = status_code
+
+        mock_container = MagicMock()
+        mock_container.upsert_item.side_effect = FakeCosmosHttpResponseError(403, "Forbidden")
+
+        with patch("src.conversations._get_container", return_value=mock_container):
+            await save_conversation(
+                conversation_id="cosmos-403",
+                user_input="テスト",
+                events=[],
+            )
+            assert _build_memory_key("anonymous", "cosmos-403") in _memory_store
+            # 403 is non-transient → no retry
+            assert mock_container.upsert_item.call_count == 1
+
+    async def test_save_conversation_cosmos_service_request_error_classified_transient(self, monkeypatch):
+        """azure-core ServiceRequestError (DNS / TCP failure) は transient と分類される"""
+
+        class ServiceRequestError(Exception):
+            pass
+
+        mock_container = MagicMock()
+        mock_container.upsert_item.side_effect = ServiceRequestError("DNS resolution failed")
+
+        with patch("src.conversations._get_container", return_value=mock_container):
+            await save_conversation(
+                conversation_id="cosmos-service-req",
+                user_input="テスト",
+                events=[],
+            )
+            # ServiceRequestError matched by type name → transient → retried 4x
+            assert mock_container.upsert_item.call_count == 4
+            assert _build_memory_key("anonymous", "cosmos-service-req") in _memory_store
 
     async def test_get_conversation_cosmos_success(self, monkeypatch):
         """Cosmos DB から会話を読み取れる場合"""

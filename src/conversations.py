@@ -262,46 +262,136 @@ def _build_conversation_doc(
 
 
 async def _persist_conversation_doc(doc: dict) -> None:
-    """会話ドキュメントを実ストアへ保存する。"""
+    """会話ドキュメントを実ストアへ保存する。
+
+    Cosmos が configured のとき、transient な write 失敗 (5xx, network) は
+    短い backoff で 3 回リトライしてから in-memory にフォールバックする
+    (rubber-duck 監査 2026-05-02: bug「post-approval events が in-memory
+    fallback で Cosmos から失われ background_update が stale ベースで
+    append し regulation/brochure events が失われる」根本対応)。
+
+    リトライしても失敗した場合のみ in-memory に保存し、severity を
+    `_emit_cosmos_fallback_signal` で通知する。
+
+    リトライ対象は ValueError / OSError に加え、Cosmos / Azure SDK の
+    transient 例外 (azure-core ServiceRequest/ServiceResponse/HttpResponseError
+    の 408/429/5xx) も含める。これらは SDK 内部から AzureError として送出される
+    ため、SDK 直接 import を避けつつ exception name + status_code を判定する。
+    """
     conversation_id = str(doc.get("id", ""))
     owner_id = _get_owner_id_from_document(doc)
     container = _get_container()
     if container:
-        try:
-            await asyncio.to_thread(container.upsert_item, doc)
-            logger.info("会話 %s を Cosmos DB に保存", conversation_id)
-            return
-        except (ValueError, OSError) as exc:
-            logger.warning("Cosmos DB への保存に失敗、インメモリにフォールバック: %s", exc)
-            _emit_cosmos_fallback_signal(doc, reason=f"{type(exc).__name__}: {exc}")
-        except Exception as exc:
-            logger.exception("Cosmos DB への保存で予期しないエラー、インメモリにフォールバック: %s", exc)
-            _emit_cosmos_fallback_signal(doc, reason=f"{type(exc).__name__}: {exc}")
+        # Backoff 0.5s, 1.0s, 2.0s — 合計 3.5s 以内。承認 SSE finally に組み込む
+        # 用途のため deadline を意識した短い retry を選択する。
+        backoffs = [0.0, 0.5, 1.0, 2.0]
+        last_exc: Exception | None = None
+        for attempt, wait in enumerate(backoffs):
+            if wait > 0:
+                await asyncio.sleep(wait)
+            try:
+                await asyncio.to_thread(container.upsert_item, doc)
+                if attempt > 0:
+                    logger.info(
+                        "会話 %s を Cosmos DB に保存 (attempt=%d/%d)",
+                        conversation_id, attempt + 1, len(backoffs),
+                    )
+                else:
+                    logger.info("会話 %s を Cosmos DB に保存", conversation_id)
+                return
+            except Exception as exc:  # noqa: BLE001 — classify below
+                last_exc = exc
+                if not _is_transient_cosmos_exception(exc):
+                    logger.exception(
+                        "Cosmos DB 保存で非一時的な例外 (attempt=%d/%d): %s",
+                        attempt + 1, len(backoffs), exc,
+                    )
+                    break
+                if attempt < len(backoffs) - 1:
+                    logger.info(
+                        "Cosmos DB 保存 transient 失敗 (attempt=%d/%d): %s",
+                        attempt + 1, len(backoffs), exc,
+                    )
+                continue
+        # All attempts exhausted
+        if last_exc is not None:
+            logger.warning(
+                "Cosmos DB への保存に %d 回失敗、インメモリにフォールバック: %s",
+                len(backoffs), last_exc,
+            )
+            _emit_cosmos_fallback_signal(doc, reason=f"{type(last_exc).__name__}: {last_exc}")
 
     _memory_store[_build_memory_key(owner_id, conversation_id)] = doc
     logger.info("会話 %s をインメモリに保存", conversation_id)
 
 
+# Status codes that the Cosmos / Azure SDK marks as retriable transient writes:
+# 408 Request Timeout, 429 Too Many Requests, 449 Retry With,
+# 500 Internal Server Error, 502 Bad Gateway, 503 Service Unavailable,
+# 504 Gateway Timeout. We accept either an HTTP-style status_code attribute
+# (Azure azure-core HttpResponseError / Cosmos CosmosHttpResponseError) or
+# the well-known transient exception class names from azure-core.
+_TRANSIENT_COSMOS_STATUS_CODES = frozenset({408, 429, 449, 500, 502, 503, 504})
+_TRANSIENT_COSMOS_EXCEPTION_NAMES = frozenset({
+    "ServiceRequestError",
+    "ServiceResponseError",
+    "ServiceRequestTimeoutError",
+    "ServiceResponseTimeoutError",
+    "AzureError",
+})
+
+
+def _is_transient_cosmos_exception(exc: Exception) -> bool:
+    """Cosmos / azure-core SDK の transient (再試行で回復し得る) 例外かを判定する。
+
+    `ValueError` / `OSError` は network/parsing の一時障害で従来から retry 対象。
+    azure-core の `ServiceRequestError` / `ServiceResponseError` (DNS 解決失敗、
+    TCP reset、TLS handshake エラー、socket timeout 等) と、
+    `CosmosHttpResponseError` / `HttpResponseError` のうち status_code が
+    408/429/449/5xx のものは Cosmos 仕様上 retry 推奨。
+    """
+    if isinstance(exc, (ValueError, OSError)):
+        return True
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and status_code in _TRANSIENT_COSMOS_STATUS_CODES:
+        return True
+    name = type(exc).__name__
+    if name in _TRANSIENT_COSMOS_EXCEPTION_NAMES:
+        return True
+    return False
+
+
 def _emit_cosmos_fallback_signal(doc: dict, *, reason: str) -> None:
     """Cosmos が configured かつ失敗したケースを構造化テレメトリで通知する。
 
-    特に承認待ち (`awaiting_approval` / `awaiting_manager_approval`) の保存が
-    in-memory に落ちると、replica 再起動で承認が消える致命的状態になる。
-    rubber-duck 指摘 #1 (approval/Cosmos silent degradation = Fabric MI と同じ
-    クラスのバグ) を catch するため、ERROR ログ + App Insights customEvent を
-    emit する。
+    特に承認待ち (`awaiting_approval` / `awaiting_manager_approval`) や、
+    post-approval の `completed` 保存が in-memory に落ちると、replica 再起動で
+    成果物 (regulation/brochure/video text) が消失する致命的状態になる。
+    rubber-duck 監査 2026-05-02 で実例を catch (conv 84d2a335-..., 03:57:43 in-memory
+    fallback → background_update が stale Cosmos doc を base に上書きして
+    regulation/brochure events 喪失) したため、completed も critical 扱いに格上げした。
     """
     status = str(doc.get("status", "")).strip()
-    severity = "critical" if status in {"awaiting_approval", "awaiting_manager_approval"} else "warning"
+    msg_count = len(doc.get("messages") or [])
+    # `completed` でも post-approval events (msg_count >= ~13) を含む場合は critical
+    is_post_approval_completed = status == "completed" and msg_count >= 13
+    severity = (
+        "critical"
+        if status in {"awaiting_approval", "awaiting_manager_approval"} or is_post_approval_completed
+        else "warning"
+    )
     payload = {
         "conversation_id": str(doc.get("id", "")),
         "status": status,
         "severity": severity,
         "reason": reason,
+        "msg_count": msg_count,
     }
     if severity == "critical":
         logger.error(
-            "Cosmos 永続化失敗 (承認 critical): conversation=%s reason=%s — replica 再起動で承認状態が消失する可能性",
+            "Cosmos 永続化失敗 (critical, status=%s msg_count=%d): conversation=%s reason=%s — replica 再起動で承認/成果物が消失する可能性",
+            status,
+            msg_count,
             payload["conversation_id"],
             reason,
         )

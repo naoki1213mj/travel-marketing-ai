@@ -292,7 +292,7 @@ class TestDataSearchTools:
         parsed = json.loads(result)
 
         assert parsed["source"] == "Fabric SQL primary"
-        assert "Fabric Data Agent REST 経路は preview" in parsed["answer"]
+        assert "ws-3iq-demo Lakehouse" in parsed["answer"]
         assert "沖縄 2泊3日" in parsed["answer"]
 
     @pytest.mark.asyncio
@@ -329,8 +329,8 @@ class TestDataSearchTools:
         result = await ds.query_data_agent("春の沖縄ファミリー向け施策を分析して")
         parsed = json.loads(result)
 
-        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
-        assert "回答が十分な具体データを含まなかった" in parsed["answer"]
+        assert parsed["source"] == "Fabric SQL"
+        assert "ws-3iq-demo Lakehouse の SQL endpoint から実データを集計しました" in parsed["answer"]
         assert "沖縄 2泊3日" in parsed["answer"]
         assert "1,022,000 円" in parsed["answer"]
 
@@ -661,7 +661,7 @@ class TestDataSearchTools:
     ):
         """ライブ環境で観測された「技術的な都合により」失敗を含む Data Agent 回答が、
         0.85 信頼の "Fabric Data Agent 回答" カードではなく
-        "Fabric SQL 補強" カード (relevance=0.9) に置き換わることを検証する。"""
+        "Fabric Lakehouse 集計" カード (relevance=0.9) に置き換わることを検証する。"""
         import src.agents.data_search as ds
 
         live_failure_quote = (
@@ -706,7 +706,7 @@ class TestDataSearchTools:
             )
 
         parsed = json.loads(result)
-        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert parsed["source"] == "Fabric SQL"
         assert "ハワイ 4泊5日" in parsed["answer"]
 
         evidence_titles: list[str] = []
@@ -718,7 +718,7 @@ class TestDataSearchTools:
                 if isinstance(relevance, (int, float)):
                     evidence_relevances.append(float(relevance))
         assert "Fabric Data Agent 回答" not in evidence_titles
-        assert "Fabric SQL 補強" in evidence_titles
+        assert "Fabric Lakehouse 集計" in evidence_titles
         assert 0.85 not in evidence_relevances
 
     @pytest.mark.asyncio
@@ -726,7 +726,7 @@ class TestDataSearchTools:
         self, monkeypatch
     ):
         """技術的エラーの最終回答が Fabric Data Agent 回答カード (relevance=0.85) として
-        表示されず、Fabric SQL 補強カードに置き換わることを検証する。"""
+        表示されず、Fabric Lakehouse 集計カードに置き換わることを検証する。"""
         import src.agents.data_search as ds
 
         regression_answer = (
@@ -771,7 +771,7 @@ class TestDataSearchTools:
             )
 
         parsed = json.loads(result)
-        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert parsed["source"] == "Fabric SQL"
         assert "ハワイ 4泊5日" in parsed["answer"]
         assert "5,892,000 円" in parsed["answer"]
 
@@ -785,7 +785,7 @@ class TestDataSearchTools:
                 if isinstance(relevance, (int, float)):
                     evidence_relevances.append(float(relevance))
         assert "Fabric Data Agent 回答" not in evidence_titles
-        assert "Fabric SQL 補強" in evidence_titles
+        assert "Fabric Lakehouse 集計" in evidence_titles
         assert 0.85 not in evidence_relevances
 
     def test_low_confidence_detected_for_nl2ontology_internal_error(self):
@@ -795,7 +795,7 @@ class TestDataSearchTools:
         以前のリリースでは英語の Data Agent インフラ層エラー
         ("Failed to generate query", "NL2Ontology", '"code":"InternalError"')
         が STRONG パターンに含まれておらず、Fabric Data Agent 回答カードとして
-        relevance=0.85 で UI に出てしまっていた。Fabric SQL 補強カードに
+        relevance=0.85 で UI に出てしまっていた。Fabric Lakehouse 集計カードに
         置き換わるよう、これらは低信頼判定する必要がある。
         """
         import src.agents.data_search as ds
@@ -825,7 +825,7 @@ class TestDataSearchTools:
              旅行先別・月別の条件で集計するときに内部の仕組み上エラーが発生しました。"
 
         これは取得不能を曖昧に伝える文面で、具体的な売上指標を含まない。
-        Fabric SQL 補強カードに置き換わるよう低信頼判定する必要がある。
+        Fabric Lakehouse 集計カードに置き換わるよう低信頼判定する必要がある。
         """
         import src.agents.data_search as ds
 
@@ -1081,7 +1081,7 @@ class TestDataSearchTools:
         self, monkeypatch
     ):
         """ライブ環境で観測された NL2Ontology / InternalError 文面を含む Data Agent 回答が、
-        0.85 信頼の Fabric Data Agent 回答カードではなく Fabric SQL 補強カード (relevance=0.9)
+        0.85 信頼の Fabric Data Agent 回答カードではなく Fabric Lakehouse 集計カード (relevance=0.9)
         に置き換わることを検証する。"""
         import src.agents.data_search as ds
 
@@ -1124,7 +1124,7 @@ class TestDataSearchTools:
             )
 
         parsed = json.loads(result)
-        assert parsed["source"] == "Fabric Data Agent + Fabric SQL"
+        assert parsed["source"] == "Fabric SQL"
         assert "ハワイ 4泊5日" in parsed["answer"]
 
         evidence_titles: list[str] = []
@@ -1138,7 +1138,7 @@ class TestDataSearchTools:
                 if isinstance(relevance, (int, float)):
                     evidence_relevances.append(float(relevance))
         assert "Fabric Data Agent 回答" not in evidence_titles
-        assert "Fabric SQL 補強" in evidence_titles
+        assert "Fabric Lakehouse 集計" in evidence_titles
         assert 0.85 not in evidence_relevances
         # NL2Ontology の生エラー文面が evidence card に漏れていないことを確認する。
         assert not any("NL2Ontology" in quote for quote in evidence_quotes)

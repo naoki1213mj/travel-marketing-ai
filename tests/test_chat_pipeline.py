@@ -3777,9 +3777,17 @@ async def test_append_post_completion_updates_does_not_enable_cross_owner_for_em
     async def fake_append_conversation_events(**kwargs):
         lookup["saved_owner_id"] = kwargs["owner_id"]
 
+    async def fake_save_conversation(**kwargs):
+        # Bug 4 fix: _append_post_completion_updates now uses
+        # save_conversation directly instead of append_conversation_events
+        # so the snapshot-based path can build the next save on top of the
+        # caller's merged events. Patch both so legacy tests stay valid.
+        lookup["saved_owner_id"] = kwargs["owner_id"]
+
     monkeypatch.setattr(chat_module, "get_conversation", fake_get_conversation)
     monkeypatch.setattr(chat_module, "_trigger_logic_app", fake_trigger_logic_app)
     monkeypatch.setattr(chat_module, "append_conversation_events", fake_append_conversation_events)
+    monkeypatch.setattr(chat_module, "save_conversation", fake_save_conversation)
 
     await chat_module._append_post_completion_updates(
         "conv-owner",
