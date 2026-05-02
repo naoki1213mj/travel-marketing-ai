@@ -137,6 +137,79 @@ describe('buildRestoredPipelineState', () => {
     expect(state.approvalRequest?.approval_token).toBe('eager-save-token')
   })
 
+  it('overrides doc.status=awaiting_approval to completed when post-approval agents have emitted text after the last approval_request', () => {
+    // Regression for the user-reported bug 2026-05-02: live App Insights
+    // confirmed conv a170e5eb-... had a transient Cosmos save fallback to
+    // in-memory at 23:13:42, leaving Cosmos with stale doc.status='awaiting_approval'
+    // even though the pipeline had completed locally. Polling restoreConversation
+    // read the stale doc and regressed UI to 'approval' state. The user clicked
+    // approve again, getting APPROVAL_CONTEXT_NOT_FOUND.
+    //
+    // Fix: monotonic-progress override in buildRestoredPipelineState. Even if
+    // doc.status='awaiting_approval', if doc.messages contains post-approval
+    // agent (regulation/plan-revision/brochure/video) text/image events AFTER
+    // the last approval_request event, treat it as 'completed'.
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_approval',  // ← stale Cosmos state
+        input: '夏のハワイ学生旅行向けプランを企画して',
+        messages: [
+          { event: 'text', data: { content: 'analysis', agent: 'data-search-agent' } },
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: { prompt: 'approve?', conversation_id: 'conv-stale', plan_markdown: '# Plan v1', approval_scope: 'user' },
+          },
+          // Post-approval pipeline DID complete locally:
+          { event: 'text', data: { content: 'regulation OK', agent: 'regulation-check-agent' } },
+          { event: 'text', data: { content: '# Plan v1 (revised)', agent: 'plan-revision-agent' } },
+          { event: 'text', data: { content: '<html>brochure</html>', agent: 'brochure-gen-agent', content_type: 'html' } },
+          { event: 'image', data: { url: 'data:image/png;base64,xyz', alt: 'hero', agent: 'brochure-gen-agent' } },
+          { event: 'text', data: { content: 'https://video', agent: 'video-gen-agent', content_type: 'video' } },
+        ],
+      },
+      'conv-stale',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('completed')
+    expect(state.approvalRequest).toBeNull()
+  })
+
+  it('preserves status=approval when a NEW approval_request follows post-approval events (legitimate refine round)', () => {
+    // Negative regression: refine flow legitimately emits
+    // [..., post-approval events, marketing-plan v2, approval_request v2]
+    // and the LATEST approval_request has no post-approval events after it.
+    // The override should NOT trigger — status must stay 'approval'.
+    const state = buildRestoredPipelineState(
+      {
+        status: 'awaiting_approval',
+        input: '夏のハワイ学生旅行向けプランを企画して',
+        messages: [
+          { event: 'text', data: { content: '# Plan v1', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: { prompt: 'approve v1?', conversation_id: 'conv-refine', plan_markdown: '# Plan v1', approval_scope: 'user' },
+          },
+          { event: 'text', data: { content: 'regulation OK', agent: 'regulation-check-agent' } },
+          { event: 'text', data: { content: '<html>brochure v1</html>', agent: 'brochure-gen-agent', content_type: 'html' } },
+          { event: 'text', data: { content: 'https://video-v1', agent: 'video-gen-agent', content_type: 'video' } },
+          // User refined; new round started:
+          { event: 'text', data: { content: '# Plan v2', agent: 'marketing-plan-agent' } },
+          {
+            event: 'approval_request',
+            data: { prompt: 'approve v2?', conversation_id: 'conv-refine', plan_markdown: '# Plan v2', approval_scope: 'user' },
+          },
+        ],
+      },
+      'conv-refine',
+      DEFAULT_SETTINGS,
+    )
+
+    expect(state.status).toBe('approval')
+    expect(state.approvalRequest?.plan_markdown).toBe('# Plan v2')
+  })
+
   it('restores optional evidence, chart, trace, and debug data from image events', () => {
     const state = buildRestoredPipelineState(
       {

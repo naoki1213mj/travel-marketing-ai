@@ -78,6 +78,8 @@ class AppSettings(TypedDict):
     trusted_auth_header_name: str
     trusted_auth_header_value: str
     require_authenticated_owner: str
+    search_endpoint: str
+    search_api_key: str
 
 
 # 環境変数の優先順位。GA で一般化した FOUNDRY_* も受け付ける。
@@ -149,6 +151,8 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
     "trusted_auth_header_name": ("TRUSTED_AUTH_HEADER_NAME",),
     "trusted_auth_header_value": ("TRUSTED_AUTH_HEADER_VALUE",),
     "require_authenticated_owner": ("REQUIRE_AUTHENTICATED_OWNER",),
+    "search_endpoint": ("SEARCH_ENDPOINT", "AZURE_SEARCH_ENDPOINT"),
+    "search_api_key": ("SEARCH_API_KEY", "AZURE_SEARCH_API_KEY"),
 }
 
 # デフォルト値（オプショナルな設定のみ）

@@ -205,4 +205,4 @@ docs/                Architecture, API reference, deployment guides
 
 ## License
 
-This project is for demonstration purposes.
+[MIT License](LICENSE) — see also [SECURITY.md](SECURITY.md), [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md).

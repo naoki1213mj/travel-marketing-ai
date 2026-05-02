@@ -614,9 +614,24 @@ async def generate_hero_image(
         style: 画像スタイル（photorealistic/illustration/watercolor）
     """
     async with trace_tool_invocation("generate_hero_image", agent_name="brochure-gen-agent"):
+        conversation_id = _get_current_conversation_id()
+        # Cache hit: 事前生成 (Agent3 と並列で実行された prewarm) でヒーロー画像が既に
+        # キャッシュ済の場合、再生成せずに即返す。Agent4 の sequential tool 呼出を
+        # 30-40 秒短縮する (E2E latency 156s → 100s 程度を狙う next-parallel-image-gen)。
+        with _images_lock:
+            cached = _pending_images.get(conversation_id, {}).get("hero")
+        if cached:
+            return json.dumps(
+                {
+                    "status": "generated",
+                    "type": "hero",
+                    "size": "1536x1024",
+                    "message": "ヒーロー画像を生成しました (prewarm キャッシュ)。",
+                    "cached": True,
+                }
+            )
         full_prompt = f"{style} travel photo of {destination}. {prompt}"
         data_uri = await _generate_image(full_prompt, "1536x1024")
-        conversation_id = _get_current_conversation_id()
         with _images_lock:
             _pending_images.setdefault(conversation_id, {})["hero"] = data_uri
         return json.dumps(
@@ -637,11 +652,28 @@ async def generate_banner_image(
     """
     async with trace_tool_invocation("generate_banner_image", agent_name="brochure-gen-agent"):
         spec = _get_banner_platform_spec(platform)
+        conversation_id = _get_current_conversation_id()
+        # Cache hit: prewarm で同じ platform のバナーが既に生成済なら即返す
+        # (next-parallel-image-gen — sequential bottleneck の解消)
+        cache_key = f"banner_{spec['platform']}"
+        with _images_lock:
+            cached = _pending_images.get(conversation_id, {}).get(cache_key)
+        if cached:
+            return json.dumps(
+                {
+                    "status": "generated",
+                    "type": "banner",
+                    "platform": spec["platform"],
+                    "size": spec["size"],
+                    "display_aspect_ratio": spec["display_aspect_ratio"],
+                    "message": f"{spec['label']} 用バナーを生成しました (prewarm キャッシュ)。",
+                    "cached": True,
+                }
+            )
         full_prompt = f"{prompt}. {spec['prompt_suffix']}"
         data_uri = await _generate_image(full_prompt, spec["size"])
-        conversation_id = _get_current_conversation_id()
         with _images_lock:
-            _pending_images.setdefault(conversation_id, {})[f"banner_{spec['platform']}"] = data_uri
+            _pending_images.setdefault(conversation_id, {})[cache_key] = data_uri
         return json.dumps(
             {
                 "status": "generated",

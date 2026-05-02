@@ -1097,13 +1097,59 @@ export function buildRestoredPipelineState(
     }
   }
 
-  const status = doc.status === 'awaiting_approval' || doc.status === 'awaiting_manager_approval'
+  // Monotonic-progress guard for status derivation:
+  // doc.status は backend の last-event-wins ロジックで決まるが、まれに以下のような
+  // 不整合が起きる:
+  //   1. /approve の post-completion save が一時的に Cosmos エラーで in-memory に
+  //      フォールバック → Cosmos 側に古い status='awaiting_approval' が残る
+  //   2. 5s 間隔の polling restoreConversation がその古い doc を読んで status を
+  //      'approval' に regress させる
+  //   3. UI が「販促物完了したのに承認画面に戻った」状態に
+  //
+  // 防止策: doc.messages の中で post-approval agent (regulation-check / plan-revision /
+  // brochure-gen / video-gen / quality-review) の text/image event が、最後の
+  // approval_request event よりも後に存在すれば、doc.status='awaiting_approval' でも
+  // 実際にはパイプラインが完了済とみなして status='completed' を返す。
+  // (rubber-duck 監査 2026-05-02: bug「販促物完了後に承認画面に戻り approve すると
+  // APPROVAL_CONTEXT_NOT_FOUND」の根本対応)
+  const POST_APPROVAL_AGENTS = new Set([
+    'regulation-check-agent',
+    'plan-revision-agent',
+    'brochure-gen-agent',
+    'video-gen-agent',
+    'quality-review-agent',
+  ])
+  const messages = doc.messages ?? []
+  let lastApprovalRequestIdx = -1
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i]?.event === 'approval_request') {
+      lastApprovalRequestIdx = i
+      break
+    }
+  }
+  let hasPostApprovalProgress = false
+  if (lastApprovalRequestIdx >= 0) {
+    for (let i = lastApprovalRequestIdx + 1; i < messages.length; i += 1) {
+      const ev = messages[i]
+      if (!ev) continue
+      if (ev.event !== 'text' && ev.event !== 'image') continue
+      const data = ev.data as Record<string, unknown> | undefined
+      const agent = typeof data?.agent === 'string' ? data.agent : ''
+      if (POST_APPROVAL_AGENTS.has(agent)) {
+        hasPostApprovalProgress = true
+        break
+      }
+    }
+  }
+
+  const rawStatus = doc.status === 'awaiting_approval' || doc.status === 'awaiting_manager_approval'
     ? 'approval'
     : doc.status === 'running'
       ? 'running'
       : doc.status === 'error'
         ? 'error'
         : 'completed'
+  const status = (rawStatus === 'approval' && hasPostApprovalProgress) ? 'completed' : rawStatus
 
   const restoredRunningAgentProgress = status === 'running' && approvalRequest?.approval_scope === 'manager'
     ? latestAgentProgress && latestAgentProgress.agent !== 'approval'
@@ -1898,6 +1944,28 @@ export function useSSE() {
         buildRestoredPipelineState(doc, conversationId, stateRef.current.settings),
         getCachedEvaluationRecords(conversationId),
       )
+
+      // Monotonic-progress guard: refuse passive (polling) regression from
+      // 'completed' back to 'approval'. This protects against transient
+      // backend status drift (e.g. Cosmos save fallback to in-memory leaves
+      // stale 'awaiting_approval' visible to the next polling read).
+      // Only block the regression if local state already reached completion
+      // AND the user has not explicitly started a refine round (which would
+      // come through the foreground SSE path, not this passive poll).
+      // (rubber-duck audit 2026-05-02 — bug class: 「販促物完了後に承認画面に
+      // 勝手に戻り approve すると APPROVAL_CONTEXT_NOT_FOUND」)
+      if (
+        passive
+        && previousState.status === 'completed'
+        && restoredState.status === 'approval'
+        && previousState.versions.length > 0
+      ) {
+        console.warn(
+          '[restoreConversation] Refusing passive regression from completed to approval state',
+          { conversationId, previousVersions: previousState.versions.length },
+        )
+        return
+      }
 
       const nextState = preserveViewedCommittedVersion(previousState, {
         ...restoredState,

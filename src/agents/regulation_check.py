@@ -3,7 +3,6 @@
 import asyncio
 import json
 import logging
-import os
 import urllib.request
 from datetime import datetime, timezone
 from typing import Any
@@ -148,15 +147,28 @@ def set_iq_search_params(
 
 
 def _get_search_credentials() -> tuple[str, str]:
-    """Azure AI Search のエンドポイントと API key を取得する。"""
+    """Azure AI Search のエンドポイントと API key を取得する。
+
+    優先順位 (rubber-duck 監査 2026-05-02):
+      1. `get_settings()` から `search_endpoint` / `search_api_key` (env var
+         `SEARCH_ENDPOINT` または `AZURE_SEARCH_ENDPOINT`、`SEARCH_API_KEY`
+         または `AZURE_SEARCH_API_KEY` を解決済)
+      2. Foundry project connection (project endpoint 経由で credentials を取得)
+
+    `os.environ` を直接読むと alias env var (`AZURE_SEARCH_*`) が無視され、
+    `/api/ready/deep` が「configured」と表示しても runtime fallback に
+    流れる「looks healthy / actually fallbacking」 不整合を起こすため、
+    settings 経由で統一する。
+    """
     global _search_endpoint, _search_api_key, _search_initialized
     if _search_initialized:
         return _search_endpoint or "", _search_api_key or ""
     _search_initialized = True
 
-    # 環境変数から直接取得
-    ep = os.environ.get("SEARCH_ENDPOINT", "")
-    key = os.environ.get("SEARCH_API_KEY", "")
+    # settings 経由で取得 (alias env var も拾える)
+    settings = get_settings()
+    ep = str(settings.get("search_endpoint", "") or "").strip()
+    key = str(settings.get("search_api_key", "") or "").strip()
     if ep and key:
         _search_endpoint = ep.rstrip("/")
         _search_api_key = key
@@ -164,7 +176,6 @@ def _get_search_credentials() -> tuple[str, str]:
 
     # Foundry project connection から取得
     try:
-        settings = get_settings()
         endpoint = settings["project_endpoint"]
         if not endpoint:
             return "", ""
@@ -510,9 +521,11 @@ INSTRUCTIONS = """\
 
 修正済み企画書は出力しないでください（後続の修正エージェントが担当します）。
 
-## ツール使用ルール
-- `check_ng_expressions` と `check_travel_law_compliance` を**必ず**使用すること
-- `search_knowledge_base` で関連する規制・法令のナレッジを検索すること
+## ツール使用ルール (3IQ デモ用 — Foundry IQ の使用が必須)
+- `check_ng_expressions` と `check_travel_law_compliance` を **必ず** 使用すること
+- **`search_knowledge_base` を必ず最低 1 回呼ぶこと** (Foundry IQ Knowledge Base の使用を可視化するため、3IQ ステータスストリップで Foundry IQ を「使用済」にする目的)
+  - クエリ例: 「景品表示法 旅行広告」「旅行業法 取引条件明示」「ブランドガイドライン トーン」など、企画書の内容に合わせて適切なクエリを 1 回以上発行する
+  - Search 結果が無くても tool 呼び出し自体は必須
 - Web Search で目的地の最新安全情報を確認すること
 
 ## 出力の注意事項

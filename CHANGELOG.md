@@ -1,0 +1,60 @@
+# Changelog
+
+このプロジェクトの主要な変更を記録します。形式は [Keep a Changelog](https://keepachangelog.com/ja/1.1.0/) に準拠し、バージョニングは [Semantic Versioning](https://semver.org/lang/ja/) を採用します。
+
+ハッカソン段階のため `0.x.y` を維持し、デモブロッカー級の変更を Minor、セキュリティ / バグ修正を Patch として扱います。
+
+## [Unreleased]
+
+### 予定される変更
+
+- Anonymous fingerprint → HttpOnly session cookie 化 (D2)
+- Azure AI Search を Managed Identity 化 (A3) — `SEARCH_API_KEY` 廃止
+- Cosmos `pending_approval_token` の自動 TTL 削除 (D3)
+- `_pending_approvals` を Cosmos / Redis に移行 (D1)
+
+## [0.5.0] — 2026-05-02
+
+### Added
+
+- **Fabric Data Agent §F GQL examples + §G anti-patterns** ([4282458](https://github.com/naoki1213mj/travel-marketing-ai/commit/4282458)) — Live で「夏のハワイ学生旅行」が `¥38,926,615 / 39件 / 131名` の実データを返すようになった (NL2Ontology の `booking_id` leak バグを根治)
+- **Microsoft 3IQ ブランドの UI 可視化** ([758fd69](https://github.com/naoki1213mj/travel-marketing-ai/commit/758fd69)) — Workflow 上部に Work IQ / Fabric IQ / Foundry IQ 各タイル、各 evidence カードに色付き IQ chip を追加
+- **`/api/ready/deep` deep dependency probe** ([8dc748a](https://github.com/naoki1213mj/travel-marketing-ai/commit/8dc748a)) — Cosmos / Foundry / Search / Fabric Data Agent の実認可済 round-trip を確認 (ACA probe には繋がない設計)
+- **承認 token bearer security** ([7a554d9](https://github.com/naoki1213mj/travel-marketing-ai/commit/7a554d9)) — `/api/chat/{id}/approve` に per-conversation 32-byte urlsafe token、`hmac.compare_digest` で定数時間比較、`docs/approval-security.md` 参照
+
+### Fixed
+
+- **Workflow stepper の動画 ✓ 誤表示** ([3b2eec2](https://github.com/naoki1213mj/travel-marketing-ai/commit/3b2eec2)) — 完了後 refine round で過去版動画 URL を参照していた問題を修正
+- **ライトモード contrast** ([3b2eec2](https://github.com/naoki1213mj/travel-marketing-ai/commit/3b2eec2)) — IQStatusStrip タイル + Work IQ context tools chip の可読性向上
+- **Fabric Data Agent silent failure pattern** ([ea2c8ba](https://github.com/naoki1213mj/travel-marketing-ai/commit/ea2c8ba)) — `取得ができません` (が-particle 型) 失敗を検出する pattern を追加
+- **APPROVAL_CONTEXT_NOT_FOUND** ([ea2c8ba](https://github.com/naoki1213mj/travel-marketing-ai/commit/ea2c8ba)) — anon fingerprint shift + 単一パーティション lookup の partition mismatch を canonical owner resolve で修正
+- **`_image_settings_fallback` cross-user data leak** ([d3d2867](https://github.com/naoki1213mj/travel-marketing-ai/commit/d3d2867)) — 単一 global mutable dict → conversation-keyed dict + lock
+- **Fabric workspace MI grant** (cutover runtime fix) — 新 CA MI を Fabric workspace `ws-3iq-demo` に Member 登録、旧 MI 削除
+
+### Changed
+
+- **Phase 10 Fabric tune** ([a1133aa](https://github.com/naoki1213mj/travel-marketing-ai/commit/a1133aa)) — best-of 12/14 grade A 達成、aiInstructions 圧縮 (19k → 2.5k)、dataSourceInstructions 拡充 (6.7k → 16k → 18k with §F+§G)
+- **Blue-green CAE 移行** ([2026-05-01]) — VNet 統合 CAE `cae-wmbvhdhcsuyb2-pn` への切替完了、旧 `cae-wmbvhdhcsuyb2` 削除
+
+## [0.4.0] — 2026-04-30
+
+### Added
+
+- **Fabric Lakehouse v2** (`lh_travel_marketing_v2`) — 10 Delta tables in `dbo` schema、Travel_Ontology_DA_v2 (`b85b67a4-...`) で利用
+- **Voice Live API** (Preview) — 音声入力対応
+- **Photo Avatar 動画生成** — Lisa / casual-sitting 固定、`ja-JP-Nanami:DragonHDLatestNeural`
+
+### Fixed
+
+- **Fabric Data Agent v1 → v2 ルーティング** — `FABRIC_DATA_AGENT_RUNTIME_VERSION=v2` で env-driven 切替
+
+## 過去の主要マイルストーン
+
+- 2026-04 — Phase 9 Fabric overhaul (workspace `ws-3iq-demo` 移行)
+- 2026-03 — gpt-5.4-mini GA、画像生成 GPT Image 2 既定
+- 2026-02 — Foundry リソースモデル (Hub+Project ではなく `accounts/projects@2025-06-01`)
+
+## メモ
+
+- 詳細な commit log は `git log --oneline` で参照
+- ハッカソン期間中は破壊的変更も含む実験的更新を頻繁に行うため、production 利用は非推奨

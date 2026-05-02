@@ -4592,20 +4592,51 @@ async def _post_approval_events(
             if ctx_model_settings and ctx_model_settings.get("image_settings"):
                 set_current_image_settings(ctx_model_settings["image_settings"])
 
-            async def _pregenerate_hero():
-                from src.agents.brochure_gen import generate_hero_image
+            async def _pregenerate_brochure_images():
+                """ヒーロー画像 + 3 バナー (instagram / x / facebook) を並列で先行生成する。
 
-                try:
-                    await generate_hero_image(
-                        prompt=f"Beautiful travel destination scenery of {destination_text}",
+                Agent4 brochure-gen-agent は通常 sequential に generate_hero_image →
+                generate_banner_image (instagram) → (x) → (facebook) の 4 回 tool 呼出
+                をするため 100s+ かかる。Agent3 (regulation_check) と並列で 4 画像を
+                同時生成し、Agent4 のツール呼出を cache hit に倒すことで E2E latency を
+                30-50s 短縮する (next-parallel-image-gen)。
+
+                次に Agent4 LLM が tool 呼出するときは brochure_gen.py のキャッシュ
+                チェックで即座にキャッシュ画像が返る。
+                """
+                from src.agents.brochure_gen import generate_banner_image, generate_hero_image
+
+                hero_prompt = f"Beautiful travel destination scenery of {destination_text}"
+                # 4 つの coroutine を asyncio.gather で並列実行 (return_exceptions で
+                # 1 つ失敗しても他の 3 つは継続させる)
+                results = await asyncio.gather(
+                    generate_hero_image(
+                        prompt=hero_prompt,
                         destination=destination_text,
                         style="photorealistic",
-                    )
-                    logger.info("ヒーロー画像の先行生成完了: %s", destination_text)
-                except (ValueError, OSError, RuntimeError) as exc:
-                    logger.warning("ヒーロー画像の先行生成に失敗（Agent4 で再生成）: %s", exc)
+                    ),
+                    generate_banner_image(
+                        prompt=f"Travel promotional creative of {destination_text}",
+                        platform="instagram",
+                    ),
+                    generate_banner_image(
+                        prompt=f"Travel promotional creative of {destination_text}",
+                        platform="x",
+                    ),
+                    generate_banner_image(
+                        prompt=f"Travel promotional creative of {destination_text}",
+                        platform="facebook",
+                    ),
+                    return_exceptions=True,
+                )
+                ok = sum(1 for r in results if not isinstance(r, BaseException))
+                fail = len(results) - ok
+                logger.info(
+                    "ブローシャ画像 prewarm 完了: %d 成功 / %d 失敗 (destination=%s)",
+                    ok, fail, destination_text,
+                )
 
-            hero_image_task = asyncio.create_task(_pregenerate_hero())
+            hero_image_task = asyncio.create_task(_pregenerate_brochure_images())
 
         regulation_outcome = await _execute_agent_with_runtime(
             agent_name="regulation-check-agent",
@@ -4618,6 +4649,10 @@ async def _post_approval_events(
         for event in regulation_outcome["events"]:
             yield event
         if not regulation_outcome["success"]:
+            # Cancel background image prewarm to avoid _pending_images leak
+            # (rubber-duck audit 2026-05-02)
+            if hero_image_task is not None and not hero_image_task.done():
+                hero_image_task.cancel()
             return
         total_tool_calls += regulation_outcome["tool_calls"]
         total_tokens_sum += regulation_outcome.get("total_tokens", 0)
@@ -4641,6 +4676,10 @@ async def _post_approval_events(
         for event in revision_outcome["events"]:
             yield event
         if not revision_outcome["success"]:
+            # Cancel background image prewarm to avoid _pending_images leak
+            # (rubber-duck audit 2026-05-02)
+            if hero_image_task is not None and not hero_image_task.done():
+                hero_image_task.cancel()
             return
         total_tool_calls += revision_outcome["tool_calls"]
         total_tokens_sum += revision_outcome.get("total_tokens", 0)
@@ -4655,6 +4694,9 @@ async def _post_approval_events(
         if workflow_settings and workflow_settings.get("manager_approval_enabled"):
             manager_callback_token = manager_callback_token or _create_manager_callback_token()
             if not base_url:
+                # Cancel background image prewarm to avoid _pending_images leak
+                if hero_image_task is not None and not hero_image_task.done():
+                    hero_image_task.cancel()
                 yield format_sse(
                     SSEEventType.ERROR,
                     {
@@ -4721,6 +4763,10 @@ async def _post_approval_events(
                     manager_delivery_mode=manager_delivery_mode,
                 ),
             )
+            # Cancel background image prewarm — manager-approval flow defers
+            # brochure generation until manager approves (rubber-duck audit 2026-05-02)
+            if hero_image_task is not None and not hero_image_task.done():
+                hero_image_task.cancel()
             return
 
     if destination_text is None:
