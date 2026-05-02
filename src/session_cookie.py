@@ -8,11 +8,11 @@ and reproduced multiple times as APPROVAL_CONTEXT_NOT_FOUND in production).
 Design (rubber-duck audit `harden-plan` 2026-05-02):
 - Cookie name: `tm_session_id`
 - Value: 32-byte urlsafe random token (256-bit entropy, server-issued)
-- Attributes: HttpOnly, Secure (HTTPS only), SameSite=Lax, Path=/api,
-  Max-Age=86400 (24 h)
-- SameSite=Lax (NOT Strict) so the Vite dev proxy on localhost works and
+- Cookie attributes — HttpOnly, Secure on HTTPS, SameSite Lax, Path /api,
+  Max-Age 86400 (24 h)
+- SameSite Lax (NOT Strict) so the Vite dev proxy on localhost works and
   legitimate cross-tab navigation keeps the cookie
-- Path=/api scopes the cookie to API endpoints only (not /static)
+- Path /api scopes the cookie to API endpoints only (not /static)
 - Set by middleware ONCE per session; subsequent /api requests reuse it
 - Bearer-authenticated users IGNORE this cookie (oid+tid from JWT wins)
 
