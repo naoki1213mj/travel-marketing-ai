@@ -122,11 +122,34 @@ def main() -> int:
         try:
             conn = connections.get(connection_name)
             target = getattr(conn, "target", "") or ""
+            category = getattr(conn, "category", None) or getattr(conn, "type", None) or ""
+            auth_type = getattr(conn, "auth_type", None) or ""
             _print_check(
                 f"connection `{connection_name}` 取得",
                 "ok",
                 f"target={target[:80]}",
             )
+            # Fabric Data Agent 専用 sanity check (false-green 防止)
+            category_str = str(category).lower()
+            target_str = str(target).lower()
+            if category_str and "fabric" not in category_str:
+                _print_check(
+                    "connection.category",
+                    "warn",
+                    f"category=`{category}` (Fabric ではない可能性。MicrosoftFabricPreviewTool が消費できないかも)",
+                )
+            elif "/dataagents/" not in target_str and "fabric" not in target_str:
+                _print_check(
+                    "connection.target",
+                    "warn",
+                    f"target に `/dataagents/` が含まれない: {target[:120]}",
+                )
+            else:
+                _print_check(
+                    "Fabric DA shape 検証",
+                    "ok",
+                    f"category={category} auth={auth_type}",
+                )
         except Exception as exc:  # noqa: BLE001
             _print_check(
                 f"connection `{connection_name}` 取得",

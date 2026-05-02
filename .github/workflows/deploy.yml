@@ -39,6 +39,9 @@ jobs:
       FABRIC_LAKEHOUSE_DATABASE: ${{ vars.FABRIC_LAKEHOUSE_DATABASE }}
       FABRIC_SALES_TABLE: ${{ vars.FABRIC_SALES_TABLE }}
       FABRIC_REVIEWS_TABLE: ${{ vars.FABRIC_REVIEWS_TABLE }}
+      FOUNDRY_FABRIC_CONNECTION_ID: ${{ vars.FOUNDRY_FABRIC_CONNECTION_ID }}
+      DATA_SEARCH_RUNTIME: ${{ vars.DATA_SEARCH_RUNTIME }}
+      DATA_SEARCH_PROMPT_AGENT_NAME: ${{ vars.DATA_SEARCH_PROMPT_AGENT_NAME }}
 
     steps:
       - uses: actions/checkout@v6
@@ -111,7 +114,7 @@ jobs:
             --set-env-vars "${env_vars[@]}"
 
       - name: Configure optional Fabric endpoints
-        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_DATA_AGENT_URL_V2 != '' || env.FABRIC_DATA_AGENT_RUNTIME != '' || env.FABRIC_DATA_AGENT_RUNTIME_VERSION != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' }}
+        if: ${{ env.FABRIC_DATA_AGENT_URL != '' || env.FABRIC_DATA_AGENT_URL_V2 != '' || env.FABRIC_DATA_AGENT_RUNTIME != '' || env.FABRIC_DATA_AGENT_RUNTIME_VERSION != '' || env.FABRIC_SQL_ENDPOINT != '' || env.FABRIC_LAKEHOUSE_DATABASE != '' || env.FABRIC_SALES_TABLE != '' || env.FABRIC_REVIEWS_TABLE != '' || env.FOUNDRY_FABRIC_CONNECTION_ID != '' || env.DATA_SEARCH_RUNTIME != '' || env.DATA_SEARCH_PROMPT_AGENT_NAME != '' }}
         run: |
           env_vars=()
           if [ -n "${FABRIC_DATA_AGENT_URL}" ]; then
@@ -137,6 +140,15 @@ jobs:
           fi
           if [ -n "${FABRIC_REVIEWS_TABLE}" ]; then
             env_vars+=("FABRIC_REVIEWS_TABLE=${FABRIC_REVIEWS_TABLE}")
+          fi
+          if [ -n "${FOUNDRY_FABRIC_CONNECTION_ID}" ]; then
+            env_vars+=("FOUNDRY_FABRIC_CONNECTION_ID=${FOUNDRY_FABRIC_CONNECTION_ID}")
+          fi
+          if [ -n "${DATA_SEARCH_RUNTIME}" ]; then
+            env_vars+=("DATA_SEARCH_RUNTIME=${DATA_SEARCH_RUNTIME}")
+          fi
+          if [ -n "${DATA_SEARCH_PROMPT_AGENT_NAME}" ]; then
+            env_vars+=("DATA_SEARCH_PROMPT_AGENT_NAME=${DATA_SEARCH_PROMPT_AGENT_NAME}")
           fi
           az containerapp update \
             --name ${{ vars.CONTAINER_APP_NAME }} \
