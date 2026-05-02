@@ -169,6 +169,41 @@ async def api_key_auth_middleware(request: Request, call_next):
 
 
 @app.middleware("http")
+async def session_cookie_middleware(request: Request, call_next):
+    """API リクエストに per-session cookie を attach する。
+
+    匿名 owner_id を fingerprint (`anon-{sha256(IP+UA)}`) ではなく
+    cookie session_id (`anon-{sha256(session_id)}`) ベースに移行。
+    fingerprint shift で APPROVAL_CONTEXT_NOT_FOUND が起きる問題を構造的に解消。
+
+    詳細は src/session_cookie.py の docstring を参照。
+
+    request.state.tm_session_id に session_id を入れて、後続の
+    `extract_request_identity` から参照可能にする。
+    """
+    if not request.url.path.startswith("/api/"):
+        return await call_next(request)
+
+    from src.session_cookie import attach_session_cookie, get_or_create_session_id
+
+    session_id, is_new = get_or_create_session_id(request)
+    request.state.tm_session_id = session_id
+
+    response = await call_next(request)
+
+    if is_new:
+        # HTTPS のときだけ Secure cookie に。Container Apps Ingress 越しでも
+        # uvicorn の --proxy-headers + --forwarded-allow-ips * で
+        # x-forwarded-proto を信頼するため、request.url.scheme は正しく
+        # 'https' になる (rubber-duck audit cookie-impl-review)。
+        # dev 環境 (HTTP localhost) では Secure なしで動く。
+        secure = request.url.scheme == "https"
+        attach_session_cookie(response, session_id, secure=secure)
+
+    return response
+
+
+@app.middleware("http")
 async def logging_middleware(request: Request, call_next):
     """リクエストログとリクエスト相関 ID を付与するミドルウェア"""
     request_id = request.headers.get("x-request-id", str(uuid.uuid4()))

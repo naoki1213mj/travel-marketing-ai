@@ -47,7 +47,32 @@ def _build_user_id(oid: str, tid: str) -> str:
 
 
 def _build_anonymous_user_id(request: Request) -> str:
-    """認証なしリクエスト向けの匿名 user_id を返す。"""
+    """認証なしリクエスト向けの匿名 user_id を返す。
+
+    優先順位 (next-anonymous-auth-replacement, 2026-05-02):
+      1. `request.state.tm_session_id` (cookie 由来、安定) — 推奨
+         ただし真の str かつ >= 16 chars のみ採用 (test fixture の MagicMock や
+         malformed 値による誤判定を防ぐ — rubber-duck cookie-impl-review)
+      2. fingerprint (IP + UA + Accept-Language) — legacy fallback only
+         (fingerprint shift で APPROVAL_CONTEXT_NOT_FOUND を引き起こすため)
+
+    cookie 経路は session_cookie_middleware が /api/* リクエストに対してのみ
+    request.state.tm_session_id をセットする。それ以外 (テスト fixture や
+    static 経由の test client) では fingerprint fallback で互換性維持。
+    """
+    session_id = ""
+    state = getattr(request, "state", None)
+    if state is not None:
+        raw = getattr(state, "tm_session_id", "")
+        if isinstance(raw, str):
+            stripped = raw.strip()
+            # token_urlsafe(32) → ~43 chars。短すぎる文字列は怪しいので fallback
+            if len(stripped) >= 16:
+                session_id = stripped
+    if session_id:
+        digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:32]
+        return f"anon-{digest}"
+
     forwarded_for = _sanitize_text(request.headers.get("x-forwarded-for"))
     client_host = _sanitize_text(getattr(request.client, "host", ""))
     user_agent = _sanitize_text(request.headers.get("user-agent"))
