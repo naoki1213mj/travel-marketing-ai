@@ -501,6 +501,8 @@ def _is_recoverable_pass1_failure(exc: Exception) -> bool:
         marker in message
         for marker in (
             "tool_choice",
+            "toolchoiceallowed",
+            "allowed_tools",
             "fabric_dataagent_preview",
             "fabric",
             "extra_body",
@@ -509,6 +511,14 @@ def _is_recoverable_pass1_failure(exc: Exception) -> bool:
     if is_invalid_request and has_known_marker:
         return True
     if is_400 and ("bad request" in message or has_known_marker):
+        return True
+    # Client-side JSON serialize failure (Pydantic obj slipped into extra_body).
+    # Live で `Object of type ToolChoiceAllowed is not JSON serializable` を観測したため
+    # Pass 2 に降格して Fabric/SQL fallback へつなぐ保険。`fabric` marker は広すぎるので
+    # `toolchoice` / `allowed_tools` に限定する。
+    if "json serializable" in message and (
+        "toolchoice" in message or "allowed_tools" in message
+    ):
         return True
     return False
 
@@ -776,12 +786,19 @@ async def run_data_search_prompt_agent(
                     mode="required",
                     tools=[{"type": "fabric_dataagent_preview"}],
                 )
+                # rubber-duck `tca-serialize-fix` Blocking #1 反映:
+                # extra_body は OpenAI SDK が JSON serialize するため、Pydantic-like
+                # ToolChoiceAllowed を直接入れると `Object of type ToolChoiceAllowed is
+                # not JSON serializable` で client-side 失敗する (live App Insights
+                # 2026-05-03 で観測)。`as_dict()` で {type:"allowed_tools", mode, tools}
+                # の plain dict に変換してから渡す。
+                tool_choice_payload = tool_choice_allowed.as_dict()
                 pass1_kwargs = {
                     "model": model_name,
                     "input": user_input,
                     "extra_body": {
                         "agent_reference": {"name": agent.name, "type": "agent_reference"},
-                        "tool_choice": tool_choice_allowed,
+                        "tool_choice": tool_choice_payload,
                     },
                 }
                 token_ctx = original_user_prompt_context(user_input)

@@ -274,6 +274,11 @@ def test_is_recoverable_pass1_failure_classification() -> None:
     assert module._is_recoverable_pass1_failure(
         RuntimeError("400 Bad Request: tool_choice shape mismatch")
     )
+    # rubber-duck `tca-serialize-fix` Blocking #2: client-side JSON serialize failure
+    # (Pydantic obj が extra_body に紛れ込んだ場合) も Pass 2 に降格する。
+    assert module._is_recoverable_pass1_failure(
+        TypeError("Object of type ToolChoiceAllowed is not JSON serializable")
+    )
     assert not module._is_recoverable_pass1_failure(RuntimeError("Internal Server Error 500"))
     assert not module._is_recoverable_pass1_failure(RuntimeError("502 Bad Gateway"))
 
@@ -305,6 +310,75 @@ def test_run_data_search_prompt_agent_pass1_400_falls_back_to_pass2(monkeypatch)
 
     assert result is pass2_response
     assert len(openai_client.responses.calls) == 2, "Pass 2 must be invoked after 400 invalid_request_error"
+
+
+def test_pass1_extra_body_tool_choice_is_json_serializable_dict(monkeypatch) -> None:
+    """extra_body['tool_choice'] が JSON serialize 可能な plain dict であることを保証する。
+
+    rubber-duck `tca-serialize-fix` Blocking #1: live で `Object of type ToolChoiceAllowed
+    is not JSON serializable` 失敗を観測したため、Pydantic-like obj が extra_body に紛れ
+    込んでいないか payload レベルで固定する (回帰防止)。
+    """
+    import json as _json
+
+    _patch_common(monkeypatch)
+    pass1_response = _build_response_with_fabric()
+    openai_client = _FakeOpenAIClient([pass1_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+
+    asyncio.run(
+        module.run_data_search_prompt_agent(
+            "夏のハワイ売上",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    pass1_call = openai_client.responses.calls[0]
+    extra_body = pass1_call["extra_body"]
+    tool_choice = extra_body["tool_choice"]
+    assert isinstance(tool_choice, dict), (
+        f"tool_choice must be a plain dict (not Pydantic obj), got {type(tool_choice).__name__}"
+    )
+    assert tool_choice.get("mode") == "required"
+    assert tool_choice.get("tools") == [{"type": "fabric_dataagent_preview"}]
+    assert tool_choice.get("type") == "allowed_tools", (
+        "as_dict() output must include type='allowed_tools' for Foundry to recognize the shape"
+    )
+    # Critical: full extra_body must round-trip through json.dumps without TypeError
+    _json.dumps(extra_body)
+
+
+def test_pass1_serialize_typeerror_falls_back_to_pass2(monkeypatch) -> None:
+    """Pass 1 で client-side JSON serialize 失敗 (TypeError) が出たら Pass 2 に降格する。
+
+    rubber-duck `tca-serialize-fix` Blocking #2: as_dict() 修正後も SDK 内部の何か別の
+    Pydantic obj が extra_body に紛れ込むケースを想定して、defense in depth で Pass 2
+    fallback が効くことを固定する。
+    """
+    _patch_common(monkeypatch)
+    pass2_response = SimpleNamespace(id="resp_pass2_after_serialize", output=[])
+    serialize_err = TypeError("Object of type ToolChoiceAllowed is not JSON serializable")
+    openai_client = _FakeOpenAIClient([serialize_err, pass2_response])
+    project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: project_client)
+    monkeypatch.setattr(module, "_run_function_call_loop", _make_fake_function_call_loop(pass2_response))
+
+    result = asyncio.run(
+        module.run_data_search_prompt_agent(
+            "夏のハワイ売上",
+            None,
+            delegated_user_access_token="delegated-token",
+            fabric_connection_id="conn-id-123",
+        )
+    )
+
+    assert result is pass2_response
+    assert len(openai_client.responses.calls) == 2, (
+        "Pass 2 must be invoked after client-side serialize TypeError"
+    )
 
 
 def test_detect_fabric_tool_invoked_handles_dict_and_object_outputs() -> None:
