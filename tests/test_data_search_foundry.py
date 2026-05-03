@@ -150,7 +150,19 @@ def test_run_data_search_prompt_agent_pass1_success(monkeypatch) -> None:
 
     assert result is pass1_response
     assert len(openai_client.responses.calls) == 1, "Pass 2 should not be invoked"
-    assert openai_client.responses.calls[0]["extra_body"]["agent_reference"]["name"].startswith("travel-data-search-")
+    pass1_call = openai_client.responses.calls[0]
+    # rubber-duck `tool-choice-required-fix` 反映 (live App Insights 2026-05-03):
+    # Pass 1 は tool_choice="required" (top-level) + extra_body.agent_reference のみ。
+    # 旧 ToolChoiceAllowed (extra_body.tool_choice={type:"allowed_tools", ...}) は
+    # Foundry が `tool_choice.tools[0].type` で `file_search` 以外を拒否するため使わない。
+    assert pass1_call["tool_choice"] == "required"
+    assert pass1_call["extra_body"]["agent_reference"]["name"].startswith("travel-data-search-")
+    assert (
+        "tool_choice" not in pass1_call.get("extra_body", {})
+    ), "Pass 1 must NOT set extra_body.tool_choice (Foundry rejects allowed_tools shape for fabric_dataagent_preview)"
+    assert (
+        "tools" not in pass1_call
+    ), "Pass 1 must NOT pass top-level tools when agent_reference is set (Foundry rejects 'agent + tools')"
 
 
 def test_run_data_search_prompt_agent_pass1_zero_fabric_falls_back_to_pass2(monkeypatch) -> None:
@@ -293,8 +305,19 @@ def test_is_recoverable_pass1_failure_classification() -> None:
     assert module._is_recoverable_pass1_failure(
         RuntimeError("400 Bad Request: tool_choice shape mismatch")
     )
+    # rubber-duck `tool-choice-required-fix` defense-in-depth: 将来 Foundry が
+    # tool_choice="required" + agent_reference の組み合わせを別 invalid_value 系で
+    # reject する場合や、live App Insights で観測した
+    # `Invalid value: 'fab...iew'. Value must be 'file_search'.` (param=`tool_choice.tools[0].type`)
+    # 系の error が再発した場合に Pass 2 fallback で吸収する。
+    assert module._is_recoverable_pass1_failure(
+        RuntimeError(
+            "Error code: 400 - {'error': {'message': \"Invalid value: 'fab...iew'. Value must be 'file_search'.\", "
+            "'type': 'invalid_request_error', 'param': 'tool_choice.tools[0].type', 'code': 'invalid_value'}}"
+        )
+    )
     # rubber-duck `tca-serialize-fix` Blocking #2: client-side JSON serialize failure
-    # (Pydantic obj が extra_body に紛れ込んだ場合) も Pass 2 に降格する。
+    # (Pydantic obj が extra_body に紛れ込んだ場合) も Pass 2 に降格する (defense in depth)。
     assert module._is_recoverable_pass1_failure(
         TypeError("Object of type ToolChoiceAllowed is not JSON serializable")
     )
@@ -305,13 +328,16 @@ def test_is_recoverable_pass1_failure_classification() -> None:
 def test_run_data_search_prompt_agent_pass1_400_falls_back_to_pass2(monkeypatch) -> None:
     """Pass 1 で 400 invalid_request_error が出たら Pass 2 に降格する。
 
-    rubber-duck `pr3-impl-review` Blocking #1: 未検証の `ToolChoiceAllowed.tools=[{...}]`
-    shape を Foundry が拒否したケースを Pass 2 で吸収する保険を確認する。
+    rubber-duck `tool-choice-required-fix` 反映: live App Insights で観測した
+    `Invalid value: 'fab...iew'. Value must be 'file_search'.` (invalid_value,
+    param `tool_choice.tools[0].type`) と、過去の `Invalid type for 'extra_body.tool_choice'`
+    の両方を defense-in-depth で recoverable と扱い、Pass 2 で吸収する。
     """
     _patch_common(monkeypatch)
     pass2_response = SimpleNamespace(id="resp_pass2_after_400", output=[])
     bad_request = RuntimeError(
-        "Error code: 400 - {'error': {'message': \"Invalid type for 'extra_body.tool_choice'.\", 'type': 'invalid_request_error'}}"
+        "Error code: 400 - {'error': {'message': \"Invalid value: 'fab...iew'. Value must be 'file_search'.\", "
+        "'type': 'invalid_request_error', 'param': 'tool_choice.tools[0].type', 'code': 'invalid_value'}}"
     )
     openai_client = _FakeOpenAIClient([bad_request, pass2_response])
     project_client = _FakeProjectClient(openai_client, "travel-data-search-gpt-5-4-mini")
@@ -332,12 +358,17 @@ def test_run_data_search_prompt_agent_pass1_400_falls_back_to_pass2(monkeypatch)
     _assert_pass2_payload_shape(openai_client.responses.calls[1])
 
 
-def test_pass1_extra_body_tool_choice_is_json_serializable_dict(monkeypatch) -> None:
-    """extra_body['tool_choice'] が JSON serialize 可能な plain dict であることを保証する。
+def test_pass1_payload_uses_tool_choice_required_top_level(monkeypatch) -> None:
+    """Pass 1 が tool_choice="required" を top-level で渡し、extra_body には agent_reference のみ含むことを保証する。
 
-    rubber-duck `tca-serialize-fix` Blocking #1: live で `Object of type ToolChoiceAllowed
-    is not JSON serializable` 失敗を観測したため、Pydantic-like obj が extra_body に紛れ
-    込んでいないか payload レベルで固定する (回帰防止)。
+    rubber-duck `tool-choice-required-fix` 反映: 旧 ToolChoiceAllowed
+    (extra_body.tool_choice={type:"allowed_tools", ...}) は Foundry が
+    `tool_choice.tools[0].type` で `file_search` 以外を拒否する (live App Insights
+    2026-05-03 13:13/13:20 UTC で 3 件連続観測)。新形は
+    - tool_choice: "required" (top-level, plain string)
+    - extra_body: {"agent_reference": {...}} のみ
+    で、agent definition に MicrosoftFabricPreviewTool だけ登録されている前提に
+    依存する (live agent travel-data-search-gpt-5-4-mini:1 は Fabric only)。
     """
     import json as _json
 
@@ -357,26 +388,30 @@ def test_pass1_extra_body_tool_choice_is_json_serializable_dict(monkeypatch) -> 
     )
 
     pass1_call = openai_client.responses.calls[0]
+    assert pass1_call["tool_choice"] == "required", (
+        "Pass 1 must use tool_choice=required (string) — Foundry rejects allowed_tools shape "
+        "for fabric_dataagent_preview"
+    )
     extra_body = pass1_call["extra_body"]
-    tool_choice = extra_body["tool_choice"]
-    assert isinstance(tool_choice, dict), (
-        f"tool_choice must be a plain dict (not Pydantic obj), got {type(tool_choice).__name__}"
+    assert "agent_reference" in extra_body
+    assert extra_body["agent_reference"]["type"] == "agent_reference"
+    assert "tool_choice" not in extra_body, (
+        "Pass 1 must NOT set extra_body.tool_choice — must be top-level"
     )
-    assert tool_choice.get("mode") == "required"
-    assert tool_choice.get("tools") == [{"type": "fabric_dataagent_preview"}]
-    assert tool_choice.get("type") == "allowed_tools", (
-        "as_dict() output must include type='allowed_tools' for Foundry to recognize the shape"
+    assert "tools" not in pass1_call, (
+        "Pass 1 must NOT pass top-level tools (Foundry rejects 'Not allowed when agent is specified.')"
     )
-    # Critical: full extra_body must round-trip through json.dumps without TypeError
-    _json.dumps(extra_body)
+    # Critical: full kwargs must round-trip through json.dumps without TypeError
+    _json.dumps({"extra_body": extra_body, "tool_choice": pass1_call["tool_choice"]})
 
 
 def test_pass1_serialize_typeerror_falls_back_to_pass2(monkeypatch) -> None:
     """Pass 1 で client-side JSON serialize 失敗 (TypeError) が出たら Pass 2 に降格する。
 
-    rubber-duck `tca-serialize-fix` Blocking #2: as_dict() 修正後も SDK 内部の何か別の
-    Pydantic obj が extra_body に紛れ込むケースを想定して、defense in depth で Pass 2
-    fallback が効くことを固定する。
+    rubber-duck `tool-choice-required-fix` defense-in-depth: 新形では
+    extra_body は `{"agent_reference": {...}}` の plain dict のみで TypeError 発生
+    確率は激減するが、SDK 内部の future drift / 第三者拡張で Pydantic obj が
+    紛れ込んだ場合の保険として fallback が効くことを固定する。
     """
     _patch_common(monkeypatch)
     pass2_response = SimpleNamespace(id="resp_pass2_after_serialize", output=[])

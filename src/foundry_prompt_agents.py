@@ -742,7 +742,9 @@ async def run_data_search_prompt_agent(
     """Foundry Prompt Agent として data-search-agent を実行する。
 
     2-pass 戦略:
-    - Pass 1: ToolChoiceAllowed(mode="required", tools=[fabric_dataagent_preview]) で Fabric only 強制
+    - Pass 1: agent_reference + tool_choice="required" で Fabric only 強制
+      (agent definition の tools が `MicrosoftFabricPreviewTool` のみのため、
+       required mode で必ず 1 個 tool が呼ばれる = 論理的に Fabric only)
     - Pass 2 (Pass 1 zero-fabric / 401 / 403 / connection misconfig 時のみ): function tool fallback
     - 5xx / 一般 exception: fail loud (Pass 2 に降格しない)
     """
@@ -789,25 +791,33 @@ async def run_data_search_prompt_agent(
                 )
             )
             try:
-                from azure.ai.projects.models import ToolChoiceAllowed
-
-                tool_choice_allowed = ToolChoiceAllowed(
-                    mode="required",
-                    tools=[{"type": "fabric_dataagent_preview"}],
-                )
-                # rubber-duck `tca-serialize-fix` Blocking #1 反映:
-                # extra_body は OpenAI SDK が JSON serialize するため、Pydantic-like
-                # ToolChoiceAllowed を直接入れると `Object of type ToolChoiceAllowed is
-                # not JSON serializable` で client-side 失敗する (live App Insights
-                # 2026-05-03 で観測)。`as_dict()` で {type:"allowed_tools", mode, tools}
-                # の plain dict に変換してから渡す。
-                tool_choice_payload = tool_choice_allowed.as_dict()
+                # rubber-duck `tool-choice-required-fix` 反映 (live App Insights
+                # 2026-05-03 13:13 / 13:20 UTC で 3 件連続観測):
+                # Foundry Responses API は
+                #   tool_choice={"type":"allowed_tools","mode":"required",
+                #                "tools":[{"type":"fabric_dataagent_preview"}]}
+                # を 400 invalid_value で reject する (param=`tool_choice.tools[0].type`,
+                # message="Value must be 'file_search'.")。tool_choice.allowed_tools.tools[].type
+                # に許可されるのは現状 `file_search` のみで、preview hosted tool
+                # (`fabric_dataagent_preview` 等) は allowed_tools 形式で named-allow できない。
+                #
+                # Microsoft Foundry docs (microsoft_docs_search 確認) でも tool_choice の
+                # deterministic 制御値は `auto` / `required` / `none` のみと記載されている。
+                # agent definition には MicrosoftFabricPreviewTool だけ登録しているので
+                # (live agent travel-data-search-gpt-5-4-mini:1 の definition.tools で
+                # 2026-05-03 確認済)、tool_choice="required" で
+                # 「必ず何か 1 つ tool を呼ぶ」 = 「Fabric tool を呼ぶ」が論理的に保証される。
+                #
+                # 注意: ENABLE_CODE_INTERPRETER=true で agent に CodeInterpreterTool が
+                # 同居登録されると、required mode では Fabric vs CodeInterpreter のどちらが
+                # 選ばれるかが model 依存になる。現運用では false 固定なので問題ないが、
+                # 有効化する場合は別 variant の Fabric-only agent を新設する設計に切り替えること。
                 pass1_kwargs = {
                     "model": model_name,
                     "input": user_input,
+                    "tool_choice": "required",
                     "extra_body": {
                         "agent_reference": {"name": agent.name, "type": "agent_reference"},
-                        "tool_choice": tool_choice_payload,
                     },
                 }
                 token_ctx = original_user_prompt_context(user_input)
