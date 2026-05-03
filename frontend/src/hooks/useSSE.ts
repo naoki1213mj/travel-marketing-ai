@@ -14,6 +14,7 @@ import {
 } from '../components/SettingsPanel'
 import { isApprovalResponseText } from '../lib/approval-flow'
 import { getDelegatedApiAuth } from '../lib/api-auth'
+import { apiUrl } from '../lib/api-base'
 import {
   normalizeChartSpecs,
   normalizeDebugEvents,
@@ -2008,7 +2009,11 @@ export function useSSE() {
     activeRestoreRequestIdRef.current = restoreRequestId
 
     try {
-      const restoreUrl = new URL(`/api/conversations/${conversationId}`, window.location.origin)
+      // Bug C fix 2026-05-03: APIM `/app/*` SPA reverse proxy で動かすため、
+      // window.location.origin を直接組み立てると `/api/...` が APIM の API
+      // matching に引っかからず 404 になる。`apiUrl()` 経由で `BASE_URL` (prod:
+      // `/app/`) prefix を付ける。dev (`/`) では従来通りの相対 URL になる。
+      const restoreUrl = apiUrl(`/api/conversations/${conversationId}`)
       const headers: Record<string, string> = {
         'Cache-Control': 'no-cache',
       }
@@ -2030,7 +2035,7 @@ export function useSSE() {
       if (knownEtag) {
         headers['If-None-Match'] = knownEtag
       }
-      const resp = await fetch(restoreUrl.toString(), {
+      const resp = await fetch(restoreUrl, {
         cache: 'no-store',
         headers,
       })

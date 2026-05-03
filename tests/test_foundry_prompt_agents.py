@@ -192,7 +192,8 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_
     assert result == {"id": "resp_123"}
     kwargs = responses_client.calls[0]
     assert kwargs["model"] == "gpt-5-4-mini"
-    assert "Work IQ MCP 利用ガイド" in kwargs["input"]
+    assert "Work IQ MCP + Web Search 利用ガイド" in kwargs["input"]
+    assert "Web Search ツールを最低 1 回は呼び出して" in kwargs["input"]
     assert "ユーザー入力:\ntest input" in kwargs["input"]
     assert kwargs["extra_body"] == {
         "agent_reference": {"name": "travel-marketing-plan-gpt-5-4-mini", "type": "agent_reference"},
@@ -329,3 +330,210 @@ def test_sync_marketing_plan_agent_creates_new_version_with_work_iq_tool(monkeyp
     assert fake_client.closed is True
     definition_tools = fake_client.agents.calls[0]["definition"].as_dict()["tools"]
     assert [tool["type"] for tool in definition_tools] == ["web_search", "mcp"]
+
+
+def test_build_work_iq_tool_guidance_includes_web_search_requirement() -> None:
+    """Bug D fix 2026-05-03: Work IQ guidance includes mandatory Web Search instruction."""
+    config = {"enabled": True, "source_scope": ["emails", "teams_chats"]}
+    guidance = module._build_work_iq_tool_guidance(config)
+
+    assert "Work IQ" in guidance
+    assert "Web Search" in guidance
+    assert "最低 1 回は呼び出して" in guidance
+    assert "禁止" in guidance
+
+
+def test_build_marketing_plan_agent_definition_instructions_mention_web_search_compliance() -> None:
+    """Agent definition の instructions も Web Search 利用を強調する。"""
+    definition = module.build_marketing_plan_agent_definition("gpt-5-4-mini")
+
+    instructions = definition.as_dict()["instructions"]
+    # 既存 web_search tool は attach されているが、これまでは「使ってもよい」レベル
+    # だったため LLM が Work IQ で済ませてしまうケースがあった (Bug D)。instructions
+    # 側でも Web Search 呼び出しを必須化する文言が含まれていることを確認する。
+    assert "web_search" in instructions or "Web Search" in instructions
+    # _WORK_IQ_BASELINE_GUIDANCE 側にも mandatory ルールが入っていること (rubber-duck NB#2)。
+    assert "最低 1 回は呼び出して" in instructions
+    assert "禁止" in instructions
+
+
+def test_detect_marketing_plan_tool_usage_detects_bing_grounding_call() -> None:
+    """Bug D rubber-duck NB#1: bing_grounding_call も Web Search として扱う。
+
+    chat.py:_TOOL_CALL_TYPE_MAP は bing_grounding_call を web_search にマップしている。
+    Foundry preview SDK が bing_grounding_call で返すケースを Web Search として
+    検出しないと、本当は Web Search が呼ばれているのに WARN ログが false-positive で
+    噴き出してしまう。
+    """
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot"),
+            SimpleNamespace(type="bing_grounding_call"),
+        ],
+    )
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is True
+    assert web_search_called is True
+
+
+def test_detect_marketing_plan_tool_usage_traverses_nested_output() -> None:
+    """Bug D rubber-duck NB#1: nested item.output / item.contents も走査する。
+
+    Foundry preview SDK は実行サマリ item の中に nested output / contents を入れて
+    返すケースがある。top-level だけ見ていると tool 呼び出しを取りこぼす。
+    """
+    nested = SimpleNamespace(
+        type="run_summary",
+        output=[
+            SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot"),
+        ],
+        contents=[
+            SimpleNamespace(type="web_search_call"),
+        ],
+    )
+    response = SimpleNamespace(output=[nested])
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is True
+    assert web_search_called is True
+
+
+def test_detect_marketing_plan_tool_usage_detects_both_tools() -> None:
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot"),
+            SimpleNamespace(type="web_search_call"),
+            SimpleNamespace(type="message"),
+        ],
+    )
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is True
+    assert web_search_called is True
+
+
+def test_detect_marketing_plan_tool_usage_handles_dict_output() -> None:
+    response = SimpleNamespace(
+        output=[
+            {"type": "mcp_call", "server_label": "mcp_M365Copilot"},
+            {"type": "web_search_call_completed"},
+        ],
+    )
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is True
+    assert web_search_called is True
+
+
+def test_detect_marketing_plan_tool_usage_when_only_work_iq() -> None:
+    response = SimpleNamespace(
+        output=[
+            SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot"),
+            SimpleNamespace(type="message"),
+        ],
+    )
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is True
+    assert web_search_called is False
+
+
+def test_detect_marketing_plan_tool_usage_when_neither() -> None:
+    response = SimpleNamespace(output=[SimpleNamespace(type="message")])
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is False
+    assert web_search_called is False
+
+
+def test_detect_marketing_plan_tool_usage_handles_missing_output() -> None:
+    response = SimpleNamespace()  # no output attribute at all
+    work_iq_called, web_search_called = module._detect_marketing_plan_tool_usage(response)
+    assert work_iq_called is False
+    assert web_search_called is False
+
+
+def test_run_marketing_plan_prompt_agent_logs_warning_when_web_search_missing(
+    monkeypatch, caplog
+) -> None:
+    """Bug D fix 2026-05-03: Work IQ enabled で Web Search 不在は WARN ログを出す。"""
+    responses_client = _FakeResponsesClient()
+
+    # Override create() to return a response that has Work IQ call but no web_search.
+    def _create(**kwargs):
+        responses_client.calls.append(kwargs)
+        return SimpleNamespace(
+            id="resp_no_web_search",
+            output=[SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot")],
+        )
+
+    responses_client.create = _create  # type: ignore[assignment]
+    fake_client = _FakeProjectClient(
+        responses_client,
+        connections=[
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            )
+        ],
+    )
+    monkeypatch.setattr(module, "get_settings", _settings)
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
+
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger=module.logger.name):
+        module.run_marketing_plan_prompt_agent(
+            "test input",
+            work_iq={"enabled": True, "source_scope": ["emails"]},
+            work_iq_access_token="delegated-token",
+        )
+
+    assert any(
+        "Web Search tool が呼ばれませんでした" in rec.getMessage() for rec in caplog.records
+    ), [rec.getMessage() for rec in caplog.records]
+
+
+def test_run_marketing_plan_prompt_agent_logs_info_when_both_tools_called(
+    monkeypatch, caplog
+) -> None:
+    """Work IQ + Web Search 両方呼ばれた場合は INFO ログ (compliance OK)。"""
+    responses_client = _FakeResponsesClient()
+
+    def _create(**kwargs):
+        responses_client.calls.append(kwargs)
+        return SimpleNamespace(
+            id="resp_with_both",
+            output=[
+                SimpleNamespace(type="mcp_call", server_label="mcp_M365Copilot"),
+                SimpleNamespace(type="web_search_call"),
+            ],
+        )
+
+    responses_client.create = _create  # type: ignore[assignment]
+    fake_client = _FakeProjectClient(
+        responses_client,
+        connections=[
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            )
+        ],
+    )
+    monkeypatch.setattr(module, "get_settings", _settings)
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
+
+    import logging
+
+    with caplog.at_level(logging.INFO, logger=module.logger.name):
+        module.run_marketing_plan_prompt_agent(
+            "test input",
+            work_iq={"enabled": True, "source_scope": ["emails"]},
+            work_iq_access_token="delegated-token",
+        )
+
+    assert any(
+        "Work IQ + Web Search 両方を確認" in rec.getMessage() for rec in caplog.records
+    ), [rec.getMessage() for rec in caplog.records]
+    assert not any(
+        "Web Search tool が呼ばれませんでした" in rec.getMessage() for rec in caplog.records
+    )

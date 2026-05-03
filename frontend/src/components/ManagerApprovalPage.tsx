@@ -1,6 +1,7 @@
 import { Check, LoaderCircle, RefreshCcw, ShieldAlert, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { ApprovalDiffView } from './ApprovalDiffView'
+import { apiUrl } from '../lib/api-base'
 
 interface ManagerApprovalPageProps {
   conversationId: string
@@ -51,7 +52,7 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
     setErrorMessage('')
 
     try {
-      const response = await fetch(`/api/chat/${encodeURIComponent(conversationId)}/manager-approval-request`, {
+      const response = await fetch(apiUrl(`/api/chat/${encodeURIComponent(conversationId)}/manager-approval-request`), {
         headers: {
           'X-Manager-Approval-Token': approvalToken,
         },
@@ -87,7 +88,7 @@ export function ManagerApprovalPage({ conversationId, approvalToken, t }: Manage
     setStatus('submitting')
     setErrorMessage('')
     try {
-      const response = await fetch(`/api/chat/${encodeURIComponent(conversationId)}/manager-approval-callback`, {
+      const response = await fetch(apiUrl(`/api/chat/${encodeURIComponent(conversationId)}/manager-approval-callback`), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -36,7 +36,10 @@ _WORK_IQ_BASELINE_GUIDANCE = (
     "社内方針・過去施策・承認条件・会議メモ・メール・チャット・文書の確認にそれらを優先利用してください。\n"
     "- ツールから得た情報は、個人情報や長い原文を転載せず、企画判断に必要な要点だけを要約して反映してください。\n"
     "- この実行で Work IQ MCP tool が有効な場合は、少なくとも一度は Work IQ を参照してから企画書を作成してください。\n"
-    "- Work IQ MCP tool が利用できない場合は、推測で続行せず失敗として扱ってください。"
+    "- Work IQ MCP tool が利用できない場合は、推測で続行せず失敗として扱ってください。\n"
+    "- Work IQ で社内文脈を確認した後は、最新の旅行市場トレンド・競合情報の根拠を取るため "
+    "**web_search ツールを最低 1 回は呼び出して** ください。"
+    "Work IQ だけで企画書を完結させることは禁止です（社内文脈に偏り、市場根拠が古くなるため）。"
 )
 
 
@@ -183,12 +186,15 @@ def _build_work_iq_tool_guidance(
     source_labels = [_SOURCE_LABELS.get(scope, scope) for scope in config["source_scope"] if scope]
     selected_sources = "、".join(source_labels) if source_labels else "Microsoft 365"
     return (
-        "Work IQ MCP 利用ガイド:\n"
+        "Work IQ MCP + Web Search 利用ガイド:\n"
         f"- 選択された職場ソース（{selected_sources}）に関係する追加文脈を確認するため、Work IQ MCP tool を優先利用してください。\n"
         "- まず Work IQ から、過去の会議・メール・チャット・社内文書にある方針、制約、過去施策、承認条件を高レベルに把握してください。\n"
         "- 原文の長い引用や個人情報の転載は避け、企画判断に必要な要点だけを要約して利用してください。\n"
         "- この実行では Work IQ MCP tool を少なくとも一度は参照してから企画書を作成してください。\n"
-        "- Work IQ MCP tool が使えない場合は、推測で続行せずエラーとして終了してください。"
+        "- Work IQ MCP tool が使えない場合は、推測で続行せずエラーとして終了してください。\n"
+        "- Work IQ で社内文脈を整理した後は、必ず Web Search ツールを最低 1 回は呼び出して、最新の旅行市場トレンド・競合情報・観光統計・公式情報を確認してください。\n"
+        "- Web Search で得た最新情報は、企画書の「販促チャネル」「差別化ポイント」「KPI」セクションに反映してください。\n"
+        "- Web Search を一度も呼び出さずに企画書を仕上げることは禁止です。社内文脈だけでは市場・競合状況を担保できないため、必ず外部情報源で裏付けを取ってください。"
     )
 
 
@@ -220,6 +226,60 @@ def _build_work_iq_responses_tool(
 def _build_work_iq_tool_choice() -> dict[str, str]:
     """Responses API に Work IQ MCP を最低 1 回使わせる tool_choice を返す。"""
     return {"type": "mcp", "server_label": _WORK_IQ_SERVER_LABEL}
+
+
+def _detect_marketing_plan_tool_usage(response: object) -> tuple[bool, bool]:
+    """Foundry Responses API の output から Work IQ / Web Search 呼び出しを検出する。
+
+    返り値: (work_iq_called, web_search_called)
+
+    Bug D rubber-duck NB#1 (2026-05-03): chat.py:_TOOL_CALL_TYPE_MAP は
+    `bing_grounding_call` も Web Search にマップしているため両方を正規化検出する。
+    また、output が nested (item.output / item.contents) になる SDK preview 形状にも
+    対応するため queue ベースで再帰的に走査する。
+    """
+    work_iq_called = False
+    web_search_called = False
+
+    def _value(item: object, attr: str) -> object:
+        if isinstance(item, dict):
+            return item.get(attr)
+        return getattr(item, attr, None)
+
+    queue: list[object] = []
+    initial_output = getattr(response, "output", None)
+    if isinstance(initial_output, list):
+        queue.extend(initial_output)
+
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, list):
+            queue[:0] = item
+            continue
+        item_type_raw = _value(item, "type") or ""
+        item_type = str(item_type_raw)
+        server_label_raw = _value(item, "server_label") or ""
+        server_label = str(server_label_raw)
+        if item_type:
+            if item_type == "mcp_call" or item_type.startswith("mcp_"):
+                if not server_label or server_label == _WORK_IQ_SERVER_LABEL:
+                    work_iq_called = True
+            elif (
+                item_type == "web_search_call"
+                or item_type.startswith("web_search")
+                or item_type == "bing_grounding_call"
+                or item_type.startswith("bing_grounding")
+            ):
+                web_search_called = True
+
+        nested_output = _value(item, "output")
+        if isinstance(nested_output, list):
+            queue.extend(nested_output)
+        nested_contents = _value(item, "contents")
+        if isinstance(nested_contents, list):
+            queue.extend(nested_contents)
+
+    return work_iq_called, web_search_called
 
 
 def run_marketing_plan_prompt_agent(
@@ -273,9 +333,29 @@ def run_marketing_plan_prompt_agent(
                 "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
             }
             openai_client = project_client.get_openai_client()
-        return openai_client.responses.create(
+        response = openai_client.responses.create(
             **response_kwargs,
         )
+        if work_iq_config["enabled"]:
+            work_iq_called, web_search_called = _detect_marketing_plan_tool_usage(response)
+            if not web_search_called:
+                # Bug D fix 2026-05-03: Work IQ enabled でも Web Search が呼ばれないと
+                # 企画書の市場・競合根拠が社内文脈に偏る。tool_choice=mcp は Work IQ
+                # 強制を維持しつつ、Web Search 不在を観測ログとして残してデモ品質を
+                # 計測可能にする。tool_choice="required" は LLM が WorkIQ を skip する
+                # リスクが上がるため使わない。
+                logger.warning(
+                    "marketing-plan Foundry path で Web Search tool が呼ばれませんでした (work_iq_called=%s)。"
+                    "instructions で必ず 1 回は呼び出すよう指示しているため、モデルの compliance ログとして記録。",
+                    work_iq_called,
+                )
+            else:
+                logger.info(
+                    "marketing-plan Foundry path で Work IQ + Web Search 両方を確認 (work_iq_called=%s, web_search_called=%s)",
+                    work_iq_called,
+                    web_search_called,
+                )
+        return response
     finally:
         close_openai = getattr(openai_client, "close", None)
         if callable(close_openai):

@@ -94,7 +94,7 @@ export function PdfUpload({ disabled, conversationId, onConversationId, t }: Pdf
     setReviewing(true)
     setResult(null)
     try {
-      const res = await fetch(`/api/sources/${encodeURIComponent(source.id)}/review`, {
+      const res = await fetch(apiUrl(`/api/sources/${encodeURIComponent(source.id)}/review`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved, summary: source.summary }),
@@ -122,7 +122,7 @@ export function PdfUpload({ disabled, conversationId, onConversationId, t }: Pdf
     setReviewing(true)
     setResult(null)
     try {
-      const res = await fetch(`/api/sources/${encodeURIComponent(source.id)}`, {
+      const res = await fetch(apiUrl(`/api/sources/${encodeURIComponent(source.id)}`), {
         method: 'DELETE',
       })
       if (!res.ok) {

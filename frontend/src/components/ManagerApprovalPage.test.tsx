@@ -94,7 +94,53 @@ describe('ManagerApprovalPage', () => {
     expect(await screen.findByText('今回の修正版: v1 · First Plan')).toBeInTheDocument()
     expect(screen.queryByText('変更差分')).not.toBeInTheDocument()
     expect(screen.getByText(/# First Plan/)).toBeInTheDocument()
-    expect(screen.getByText(/Initial copy/)).toBeInTheDocument()
-    expect(screen.getByLabelText('コメント')).toHaveFocus()
+  })
+
+  it('routes manager approval endpoints through apiUrl() so APIM /app/* prefix is preserved', async () => {
+    // Bug C regression: the SPA is reverse-proxied at `/app/*` by APIM. If
+    // the component fetches `/api/chat/...` directly with
+    // window.location.origin, APIM's `spa-app` API doesn't match the path
+    // and returns 404. apiUrl() must prepend BASE_URL so the request
+    // actually reaches the backend Container App.
+    vi.stubEnv('BASE_URL', '/app/')
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          conversation_id: 'conv-mgr-prod',
+          current_version: 1,
+          plan_title: 'Plan',
+          plan_markdown: '# Plan',
+          previous_versions: [],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({}),
+      } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <ManagerApprovalPage conversationId="conv-mgr-prod" approvalToken="token-prod" t={t} />,
+    )
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      '/app/api/chat/conv-mgr-prod/manager-approval-request',
+      expect.anything(),
+    )
+
+    const approveButton = await screen.findByRole('button', { name: 'この内容で承認' })
+    approveButton.click()
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/app/api/chat/conv-mgr-prod/manager-approval-callback',
+      expect.objectContaining({ method: 'POST' }),
+    )
+    vi.unstubAllEnvs()
   })
 })

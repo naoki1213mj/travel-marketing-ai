@@ -64,6 +64,25 @@ jobs:
       - name: Frontend lint
         run: cd frontend && npm run lint
 
+      - name: Guard against APIM /app prefix bypass (Bug C regression)
+        # Bug C (2026-05-03): SPA は APIM の /app/* reverse proxy 経由で配信される。
+        # `fetch('/api/...'` や `new URL('/api/...', window.location.origin)` のような
+        # 直接書きは BASE_URL を bypass し、APIM の `spa-app` API (path=app) に
+        # match せず silent 404 になる。test ファイル以外で発見したら CI を fail させる。
+        run: |
+          set +e
+          BAD_FETCH=$(grep -RInE "fetch\(\s*['\"\`]/api" frontend/src --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx' || true)
+          BAD_NEW_URL=$(grep -RInE "new URL\(\s*['\"\`]/api" frontend/src --include='*.ts' --include='*.tsx' --exclude='*.test.ts' --exclude='*.test.tsx' || true)
+          if [ -n "$BAD_FETCH" ] || [ -n "$BAD_NEW_URL" ]; then
+            echo "ERROR: Found raw /api fetch / new URL bypass that skips apiUrl() helper:"
+            echo "$BAD_FETCH"
+            echo "$BAD_NEW_URL"
+            echo ""
+            echo "Use apiUrl(path) from frontend/src/lib/api-base.ts so the APIM /app/* prefix is preserved."
+            exit 1
+          fi
+          echo "OK: no raw /api fetch / new URL bypass found"
+
       - name: TypeScript check
         run: cd frontend && npx tsc --noEmit
 
