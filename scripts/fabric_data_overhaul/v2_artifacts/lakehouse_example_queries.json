@@ -1,0 +1,62 @@
+[
+  {
+    "question": "予約コード BK-2026-000123 の詳細を教えてください",
+    "sqlQuery": "SELECT TOP (1)\n    booking_id,\n    booking_code,\n    plan_name,\n    product_type,\n    destination_country,\n    destination_region,\n    destination_city,\n    season,\n    departure_date,\n    return_date,\n    duration_days,\n    pax,\n    total_revenue_jpy,\n    booking_status,\n    booking_date\nFROM dbo.booking\nWHERE booking_code = 'BK-2026-000123';"
+  },
+  {
+    "question": "顧客コード C-2025-000456 の登録情報を確認したい",
+    "sqlQuery": "SELECT TOP (1)\n    customer_id,\n    customer_code,\n    age_band,\n    gender,\n    customer_segment,\n    loyalty_tier,\n    acquisition_channel,\n    prefecture,\n    email_opt_in\nFROM dbo.customer\nWHERE customer_code = 'C-2025-000456';"
+  },
+  {
+    "question": "キャンペーンコード CMP-2026-Q1-007 の概要が知りたい",
+    "sqlQuery": "SELECT TOP (1)\n    campaign_id,\n    campaign_code,\n    campaign_name,\n    campaign_type,\n    target_segment,\n    target_destination_type,\n    start_date,\n    end_date,\n    discount_percent,\n    total_budget_jpy,\n    total_redemptions\nFROM dbo.campaign\nWHERE campaign_code = 'CMP-2026-Q1-007';"
+  },
+  {
+    "question": "決済 ID 9e2f4a6b-9abc-4def-9012-000000000003 の決済明細を見たい",
+    "sqlQuery": "-- 決済 ID は payment テーブルの payment_id (UUID) で検索。\nSELECT TOP (1)\n    payment_id,\n    booking_id,\n    payment_method,\n    payment_status,\n    amount_jpy,\n    currency,\n    exchange_rate_to_jpy,\n    paid_at,\n    installment_count\nFROM dbo.payment\nWHERE payment_id = '9e2f4a6b-9abc-4def-9012-000000000003';"
+  },
+  {
+    "question": "レビュー ID 7c0d2e4f-5678-4abc-9def-000000000002 の元データを確認したい",
+    "sqlQuery": "SELECT TOP (1)\n    review_id,\n    booking_id,\n    customer_id,\n    plan_name,\n    destination_region,\n    rating,\n    nps,\n    sentiment,\n    review_date\nFROM dbo.tour_review\nWHERE review_id = '7c0d2e4f-5678-4abc-9def-000000000002';"
+  },
+  {
+    "question": "直近に登録された予約 10 件のヘッドラインを見せて",
+    "sqlQuery": "SELECT TOP (10)\n    booking_code,\n    plan_name,\n    destination_region,\n    season,\n    departure_date,\n    pax,\n    total_revenue_jpy,\n    booking_status,\n    booking_date\nFROM dbo.booking\nORDER BY booking_date DESC, booking_id DESC;"
+  },
+  {
+    "question": "最新のキャンセル 10 件を時系列で確認したい",
+    "sqlQuery": "SELECT TOP (10)\n    c.booking_id,\n    b.booking_code,\n    b.plan_name,\n    b.destination_region,\n    c.cancelled_at,\n    c.cancellation_reason,\n    c.cancellation_lead_days,\n    c.refund_amount_jpy\nFROM dbo.cancellation AS c\nJOIN dbo.booking AS b ON b.booking_id = c.booking_id\nORDER BY c.cancelled_at DESC, c.booking_id DESC;"
+  },
+  {
+    "question": "最近の決済 10 件を新しい順に表示して",
+    "sqlQuery": "SELECT TOP (10)\n    p.payment_id,\n    p.booking_id,\n    b.booking_code,\n    p.payment_method,\n    p.payment_status,\n    p.amount_jpy,\n    p.currency,\n    p.exchange_rate_to_jpy,\n    p.paid_at\nFROM dbo.payment AS p\nJOIN dbo.booking AS b ON b.booking_id = p.booking_id\nORDER BY p.paid_at DESC, p.payment_id DESC;"
+  },
+  {
+    "question": "直近のお問い合わせ 10 件を新しい順に見せて",
+    "sqlQuery": "SELECT TOP (10)\n    inquiry_id,\n    customer_id,\n    channel,\n    inquiry_type,\n    subject,\n    received_at,\n    resolved_at,\n    resolution_minutes,\n    csat,\n    assigned_team\nFROM dbo.inquiry\nORDER BY received_at DESC, inquiry_id DESC;"
+  },
+  {
+    "question": "最新のレビュー 10 件を時系列で確認したい",
+    "sqlQuery": "SELECT TOP (10)\n    review_id,\n    booking_id,\n    plan_name,\n    destination_region,\n    rating,\n    nps,\n    sentiment,\n    review_date\nFROM dbo.tour_review\nORDER BY review_date DESC, review_id DESC;"
+  },
+  {
+    "question": "「沖縄」と「ファミリー」を含むプラン名の予約はそもそも存在しますか",
+    "sqlQuery": "SELECT COUNT(*) AS match_count\nFROM dbo.booking\nWHERE plan_name LIKE N'%沖縄%' AND plan_name LIKE N'%ファミリー%';"
+  },
+  {
+    "question": "顧客コード C-2025-000456 の予約は何件登録されていますか",
+    "sqlQuery": "SELECT COUNT(*) AS booking_count\nFROM dbo.booking AS b\nJOIN dbo.customer AS c ON c.customer_id = b.customer_id\nWHERE c.customer_code = 'C-2025-000456';"
+  },
+  {
+    "question": "予約コード BK-2026-000123 はすでに支払い完了していますか",
+    "sqlQuery": "-- yes/no 質問は EXISTS で 1 (完了) / 0 (未完了) を返す。複数回決済 (split / installment) でも結果は 0/1 に正規化される。\nSELECT CASE\n    WHEN EXISTS (\n        SELECT 1\n        FROM dbo.payment AS p\n        JOIN dbo.booking AS b ON b.booking_id = p.booking_id\n        WHERE b.booking_code = 'BK-2026-000123'\n          AND p.payment_status = 'succeeded'\n    ) THEN 1\n    ELSE 0\nEND AS is_paid;"
+  },
+  {
+    "question": "顧客コード C-2025-000456 の予約履歴を直近順に見せて",
+    "sqlQuery": "SELECT TOP (10)\n    b.booking_code,\n    b.plan_name,\n    b.destination_region,\n    b.season,\n    b.departure_date,\n    b.booking_date,\n    b.pax,\n    b.total_revenue_jpy,\n    b.booking_status\nFROM dbo.booking AS b\nJOIN dbo.customer AS c ON c.customer_id = b.customer_id\nWHERE c.customer_code = 'C-2025-000456'\nORDER BY b.booking_date DESC, b.booking_id DESC;"
+  },
+  {
+    "question": "予約コード BK-2026-000123 の旅程明細を一覧で出して",
+    "sqlQuery": "SELECT\n    i.itinerary_item_id,\n    i.item_type,\n    i.item_name,\n    i.start_date,\n    i.end_date,\n    i.nights,\n    i.unit_price_jpy,\n    i.quantity,\n    i.total_price_jpy\nFROM dbo.itinerary_item AS i\nJOIN dbo.booking AS b ON b.booking_id = i.booking_id\nWHERE b.booking_code = 'BK-2026-000123'\nORDER BY i.start_date, i.itinerary_item_id;"
+  }
+]
