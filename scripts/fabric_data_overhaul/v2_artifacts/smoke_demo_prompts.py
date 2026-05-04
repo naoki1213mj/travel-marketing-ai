@@ -42,6 +42,10 @@ def main() -> int:
     for qid, q in DEMO_PROMPTS:
         print(f"\n=== {qid}: {q}")
         r = smoke_test_v6.run_one(None, qid, q)
+        # `run_one` returns a dict keyed off the qid passed in; defensively ensure
+        # the result carries an "id" entry so downstream gating lookups work even
+        # if the helper's schema drifts.
+        r.setdefault("id", qid)
         # Apply strict grader (bestof_strict.grade2) on top of v6 grader to catch
         # false-A from no-data narratives that contain incidental small numbers.
         strict_grade, strict_reason = bestof_strict.grade2(r.get("answer") or "")

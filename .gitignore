@@ -23,7 +23,12 @@ _quarantine_for_review/
 # Local Playwright probe artifacts (never commit; large PNGs + reports)
 validation-screenshots/
 
-# Fabric DA tune artifacts: backups (large agent definition snapshots) + run logs
+# Fabric DA tune artifacts: backups (large agent definition snapshots) + run logs + dry-run dumps
 scripts/fabric_data_overhaul/v2_artifacts/backups/
 scripts/fabric_data_overhaul/v2_artifacts/*_log.txt
 scripts/fabric_data_overhaul/v2_artifacts/*.log
+scripts/fabric_data_overhaul/v2_artifacts/*_dryrun_*.json
+scripts/fabric_data_overhaul/v2_artifacts/v1_agent_definition.json
+scripts/fabric_data_overhaul/v2_artifacts/v1_decoded/
+scripts/fabric_data_overhaul/v2_artifacts/smoke_demo_results.json
+scripts/fabric_data_overhaul/v2_artifacts/smoke_demo_results_post_lakehouse_run1.json

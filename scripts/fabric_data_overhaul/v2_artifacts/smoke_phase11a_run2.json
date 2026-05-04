@@ -1,0 +1,370 @@
+[
+  {
+    "qid": "D01",
+    "question": "春の沖縄ファミリー向けプランを企画して",
+    "status": "completed",
+    "answer": "春の沖縄でファミリー向け旅行を企画するなら、「沖縄3泊4日ファミリープラン」「沖縄2泊3日ファミリープラン」「沖縄4泊5日ファミリープラン」が主要な売れ筋です。平均単価の目安は25万〜98万円（1予約・平均単価は人数規模で変動）です。\n\n【使用条件】  \n・春シーズン（season=春）  \n・沖縄（destination_region=沖縄）  \n・ファミリーセグメント、またはプラン名に「ファミリー」を含むもの  \n・個々の予約単位の集計（各1件、商品設計のヒント用）\n\n【主要指標ランキング（抜粋）】\n\n| プラン名                  | 予約件数 | 平均単価           | 売上（1予約あたり）    |\n|---------------------------|---------|--------------------|-----------------------|\n| 沖縄3泊4日ファミリープラン (春) | 1       | ¥680,304〜758,124  | ¥2,516,080〜4,081,824 |\n| 沖縄2泊3日ファミリープラン (春) | 1       | ¥519,234〜980,305  | ¥2,255,904〜3,921,220 |\n| 沖縄4泊5日ファミリープラン (春) | 1       | ¥394,389〜544,963  | ¥2,760,723〜3,814,741 |\n| 沖縄5泊6日ファミリープラン (春) | 1       | ¥350,269           | ¥2,802,152            |\n\n【補足】  \n・今春のデータは各プラン予約件数が1件ずつですが、複数プランで「ファミリー」需要・受注が確認できています。  \n・平均単価・売上は同一商品でも人数により大きく幅が出るため、グループサイズ設定や特典設計で差別化を推奨します。  \n・「3泊4日」「2泊3日」「4泊5日」など複数日程が受け入れられており、日数バリエーションを持たせることが効果的です。",
+    "grade": "A",
+    "reason": "grounded_numeric",
+    "elapsed_s": 62.4,
+    "id": "D01",
+    "strict_grade": "A",
+    "strict_reason": "grounded_numeric"
+  },
+  {
+    "qid": "D02",
+    "question": "冬の北海道カップル向けプランを企画して",
+    "status": "failed",
+    "answer": null,
+    "grade": "C",
+    "reason": "run.failed",
+    "last_error": {
+      "code": "server_error",
+      "message": "Status code BadRequest: OpenAI request to 'openai/threads/thread_tdPGbXvkCBlSbHtv5cY1vs6g/runs/run_wbXNuFsOdgXfh5gt6fk0xLbW/submit_tool_outputs' failed."
+    },
+    "steps": [
+      {
+        "id": "step_fab4MKd0Qwc1i2T1tafeHDX09MRq",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabkKqRyuVzpQCFmnLomQgClBFmM",
+            "function": {
+              "arguments": "{\"natural_language_description\":\"seasonの存在値を調べ、冬に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "generate.filename",
+              "output": "{\"generated_filename\":\"result_0.json\"}"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabSQG5Qb5P09b5rKJ7tUilYjIkZ",
+        "status": "in_progress",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_1ErX9l4I1KQDFTBsGrbwmAwU",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"seasonの存在値を調べ、冬に該当する値がデータ内でどのように記載されているか確認してください。\",\"code\":\"```ontology\\n{\\\"entitySelector\\\":{\\\"queryType\\\":\\\"GQL\\\",\\\"query\\\":\\\"MATCH (node_booking:`booking`) WHERE node_booking.`season` IS NOT NULL RETURN node_booking.`booking_id` AS `booking_id`, node_booking.`season` AS `season`\\\"}}\\n```\"}",
+              "name": "analyze.database.execute",
+              "output": null
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fab3QpemvpTVjHqyDDwkjoEVQqb6",
+        "status": "in_progress",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_1ErX9l4I1KQDFTBsGrbwmAwU",
+            "function": {
+              "arguments": "{\"query\":\"seasonの存在値を調べ、冬に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "trace.analyze_ontology",
+              "output": null
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabPxq7XD62FubfhcMQVe5YxwV15",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_1ErX9l4I1KQDFTBsGrbwmAwU",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"seasonの存在値を調べ、冬に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "analyze.database.nl2code",
+              "output": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`) WHERE node_booking.`season` IS NOT NULL RETURN node_booking.`booking_id` AS `booking_id`, node_booking.`season` AS `season`\"}}\n```"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fab6naMYMAwwRYG0w5iXgebyQiGe",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabyfSVOGuiMcAZwNj2Biba3RmOf",
+            "function": {
+              "arguments": "{\"natural_language_description\":\"destination_regionの存在値を調べ、北海道に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "generate.filename",
+              "output": "{\"generated_filename\":\"result_0.json\"}"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabm8W8Z3vDZdKppxGAli6YGKl0e",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_kEixnJmB8tcwOw91DmE6Lxdt",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"destination_regionの存在値を調べ、北海道に該当する値がデータ内でどのように記載されているか確認してください。\",\"code\":\"```ontology\\n{\\\"entitySelector\\\":{\\\"queryType\\\":\\\"GQL\\\",\\\"query\\\":\\\"MATCH (node_booking:`booking`)\\\\nRETURN DISTINCT node_booking.`destination_region` AS `destination_region`\\\"}}\\n```\"}",
+              "name": "analyze.database.execute",
+              "output": "| destination_region |\r\n|:-------------------|\r\n| タイ                 |\r\n| 中国                 |\r\n| 京都                 |\r\n| ハワイ                |\r\n| 石川                 |\r\n| パリ                 |\r\n| 韓国                 |\r\n| 愛知                 |\r\n| アメリカ西海岸            |\r\n| ロンドン               |\r\n| 鹿児島                |\r\n| ベトナム               |\r\n| 北海道                |\r\n| 静岡                 |\r\n| シンガポール             |\r\n| 福岡                 |\r\n| オーストラリア            |\r\n| ニューヨーク             |\r\n| ドバイ                |\r\n| 沖縄                 |\r\n| 宮城                 |\r\n| その他                |\r\n| 大阪                 |\r\n| 東京                 |\r\n| 青森                 |\r\n| 広島                 |\r\n| イタリア               |\r\n| 長野                 |\r\n| 台湾                 |\r\n| 三重                 |"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabq8k7XtThf6l5a9uqgCF2hIovv",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_kEixnJmB8tcwOw91DmE6Lxdt",
+            "function": {
+              "arguments": "{\"query\":\"destination_regionの存在値を調べ、北海道に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "trace.analyze_ontology",
+              "output": "| destination_region |\r\n|:-------------------|\r\n| タイ                 |\r\n| 中国                 |\r\n| 京都                 |\r\n| ハワイ                |\r\n| 石川                 |\r\n| パリ                 |\r\n| 韓国                 |\r\n| 愛知                 |\r\n| アメリカ西海岸            |\r\n| ロンドン               |\r\n| 鹿児島                |\r\n| ベトナム               |\r\n| 北海道                |\r\n| 静岡                 |\r\n| シンガポール             |\r\n| 福岡                 |\r\n| オーストラリア            |\r\n| ニューヨーク             |\r\n| ドバイ                |\r\n| 沖縄                 |\r\n| 宮城                 |\r\n| その他                |\r\n| 大阪                 |\r\n| 東京                 |\r\n| 青森                 |\r\n| 広島                 |\r\n| イタリア               |\r\n| 長野                 |\r\n| 台湾                 |\r\n| 三重                 |"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabcJIg1vd1m8sYdva7wxzDvV6SG",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_kEixnJmB8tcwOw91DmE6Lxdt",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"destination_regionの存在値を調べ、北海道に該当する値がデータ内でどのように記載されているか確認してください。\"}",
+              "name": "analyze.database.nl2code",
+              "output": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (node_booking:`booking`)\\nRETURN DISTINCT node_booking.`destination_region` AS `destination_region`\"}}\n```"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabxJN0GQEXlS3h9JD2OqzVuPlcz",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabV2Vw8ySDDdNrm7mmFAbP6HSxA",
+            "function": {
+              "arguments": "{\"natural_language_description\":\"北海道エリア、冬シーズン、カップル向け（customer_segmentがcouple）の予約でbooking_statusがconfirmedまたはcompletedのものについて、人気の高いプラン名ごとに売上・予約件数・平均単価を集計し、売上順で上位を取得してください。\"}",
+              "name": "generate.filename",
+              "output": "{\"generated_filename\":\"result_0.json\"}"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabhYGSAgVTuqIyI3zjXCQoanZ4y",
+        "status": "failed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_j4QyEYdLyuAW9VbE32LR995J",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"北海道エリア、冬シーズン、カップル向け（customer_segmentがcouple）の予約でbooking_statusがconfirmedまたはcompletedのものについて、人気の高いプラン名ごとに売上・予約件数・平均単価を集計し、売上順で上位を取得してください。\",\"code\":\"```ontology\\n{\\\"entitySelector\\\":{\\\"queryType\\\":\\\"GQL\\\",\\\"query\\\":\\\"MATCH (booking_node:`booking`)-[booking_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\\\nWHERE LOWER(booking_node.`destination_region`) = LOWER(\\\\\\\"北海道\\\\\\\")\\\\n  AND LOWER(booking_node.`season`) = LOWER(\\\\\\\"冬\\\\\\\")\\\\n  AND LOWER(customer_node.`customer_segment`) = LOWER(\\\\\\\"couple\\\\\\\")\\\\n  AND (LOWER(booking_node.`booking_status`) = LOWER(\\\\\\\"confirmed\\\\\\\") OR LOWER(booking_node.`booking_status`) = LOWER(\\\\\\\"completed\\\\\\\"))\\\\nRETURN\\\\n  booking_node.`plan_name` AS `plan_name`,\\\\n  SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy_sum`,\\\\n  COUNT(booking_node.`booking_id`) AS `booking_count`,\\\\n  AVG(booking_node.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\\\nGROUP BY plan_name\\\\nORDER BY total_revenue_jpy_sum DESC\\\"}}\\n```\"}",
+              "name": "analyze.database.execute",
+              "output": "No data found after query execution."
+            }
+          }
+        ],
+        "last_error": {
+          "code": "server_error",
+          "message": "Failed to execute step (RAID: 4997da14-c47a-49c5-8663-9e5f20ba4e51). Error: No data found after query execution."
+        }
+      },
+      {
+        "id": "step_fab36XukdO4fXXzkAPQNxsNYQh82",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_j4QyEYdLyuAW9VbE32LR995J",
+            "function": {
+              "arguments": "{\"query\":\"北海道エリア、冬シーズン、カップル向け（customer_segmentがcouple）の予約でbooking_statusがconfirmedまたはcompletedのものについて、人気の高いプラン名ごとに売上・予約件数・平均単価を集計し、売上順で上位を取得してください。\"}",
+              "name": "trace.analyze_ontology",
+              "output": "All attempts to generate and execute code failed after reaching maximum retries.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nWHERE LOWER(booking_node.`destination_region`) = LOWER(\\\"北海道\\\")\\n  AND LOWER(booking_node.`season`) = LOWER(\\\"冬\\\")\\n  AND LOWER(customer_node.`customer_segment`) = LOWER(\\\"couple\\\")\\n  AND (LOWER(booking_node.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(booking_node.`booking_status`) = LOWER(\\\"completed\\\"))\\nRETURN\\n  booking_node.`plan_name` AS `plan_name`,\\n  SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy_sum`,\\n  COUNT(booking_node.`booking_id`) AS `booking_count`,\\n  AVG(booking_node.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy_sum DESC\"}}\r\n```\r\n\r\nThe error was: No data found after query execution."
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fab6Oi5CR6wWp1wK9eytllqTu4qW",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_j4QyEYdLyuAW9VbE32LR995J",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"北海道エリア、冬シーズン、カップル向け（customer_segmentがcouple）の予約でbooking_statusがconfirmedまたはcompletedのものについて、人気の高いプラン名ごとに売上・予約件数・平均単価を集計し、売上順で上位を取得してください。\"}",
+              "name": "analyze.database.nl2code",
+              "output": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking_node:`booking`)-[booking_customer_edge:`booking_has_customer`]->(customer_node:`customer`)\\nWHERE LOWER(booking_node.`destination_region`) = LOWER(\\\"北海道\\\")\\n  AND LOWER(booking_node.`season`) = LOWER(\\\"冬\\\")\\n  AND LOWER(customer_node.`customer_segment`) = LOWER(\\\"couple\\\")\\n  AND (LOWER(booking_node.`booking_status`) = LOWER(\\\"confirmed\\\") OR LOWER(booking_node.`booking_status`) = LOWER(\\\"completed\\\"))\\nRETURN\\n  booking_node.`plan_name` AS `plan_name`,\\n  SUM(booking_node.`total_revenue_jpy`) AS `total_revenue_jpy_sum`,\\n  COUNT(booking_node.`booking_id`) AS `booking_count`,\\n  AVG(booking_node.`price_per_person_jpy`) AS `avg_price_per_person_jpy`\\nGROUP BY plan_name\\nORDER BY total_revenue_jpy_sum DESC\"}}\n```"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabrSiuXatJMGNxmYnmmdglVz6D3",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabvgTH0NizKm4tjfVBr90N6ojru",
+            "function": {
+              "arguments": "{\"natural_language_description\":\"冬の北海道向けのカップル顧客に人気の高い旅行プラン・商品のランキングと、主要な売上・予約件数・平均単価を教えてください。\"}",
+              "name": "generate.filename",
+              "output": "{\"generated_filename\":\"result_0.json\"}"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabkchMmCU9Hf1CmwZPQR2AwgYtk",
+        "status": "failed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_vXZ7Grk16Q9Sa89GbgWWQTYI",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"冬の北海道向けのカップル顧客に人気の高い旅行プラン・商品のランキングと、主要な売上・予約件数・平均単価を教えてください。\",\"code\":\"```ontology\\n{\\\"entitySelector\\\":{\\\"queryType\\\":\\\"GQL\\\",\\\"query\\\":\\\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\\\nWHERE booking.season = \\\\\\\"winter\\\\\\\" AND booking.destination_region = \\\\\\\"北海道\\\\\\\" AND customer.customer_segment = \\\\\\\"couple\\\\\\\" AND booking.booking_status IN [\\\\\\\"confirmed\\\\\\\", \\\\\\\"completed\\\\\\\"]\\\\nRETURN booking.plan_name AS plan_name,\\\\n       COUNT(booking) AS bookings,\\\\n       SUM(booking.total_revenue_jpy) AS revenue_jpy,\\\\n       AVG(booking.price_per_person_jpy) AS avg_pp_price\\\\nORDER BY revenue_jpy DESC LIMIT 10\\\"}}\\n```\"}",
+              "name": "analyze.database.execute",
+              "output": null
+            }
+          }
+        ],
+        "last_error": {
+          "code": "server_error",
+          "message": "Failed to execute step (RAID: 4997da14-c47a-49c5-8663-9e5f20ba4e51). Error: Failed to execute Ontology query with error \"The query is invalid. Reason: BadRequest: Resource: Graph query (graphModelId=84083db6-74b7-41cd-bf63-01b341f4244f). InternalCode: '42000'. Message: error: syntax error or access rule violation. Cause: error: data exception; The identifier `booking.plan_name` cannot be used, as it is neither part of the GROUP BY nor an aggregation..\""
+        }
+      },
+      {
+        "id": "step_fabN11Y8va7mSLRmlIWoJianQEim",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_vXZ7Grk16Q9Sa89GbgWWQTYI",
+            "function": {
+              "arguments": "{\"query\":\"冬の北海道向けのカップル顧客に人気の高い旅行プラン・商品のランキングと、主要な売上・予約件数・平均単価を教えてください。\"}",
+              "name": "trace.analyze_ontology",
+              "output": "All variations in attempt 1 failed, and no retryable errors were found to guide regeneration.\r\n\r\nThe first code candidate tried was:\r\n```ontology\r\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\nWHERE booking.season = \\\"winter\\\" AND booking.destination_region = \\\"北海道\\\" AND customer.customer_segment = \\\"couple\\\" AND booking.booking_status IN [\\\"confirmed\\\", \\\"completed\\\"]\\nRETURN booking.plan_name AS plan_name,\\n       COUNT(booking) AS bookings,\\n       SUM(booking.total_revenue_jpy) AS revenue_jpy,\\n       AVG(booking.price_per_person_jpy) AS avg_pp_price\\nORDER BY revenue_jpy DESC LIMIT 10\"}}\r\n```\r\n\r\nThe error was: Failed to execute Ontology query with error \"The query is invalid. Reason: BadRequest: Resource: Graph query (graphModelId=84083db6-74b7-41cd-bf63-01b341f4244f). InternalCode: '42000'. Message: error: syntax error or access rule violation. Cause: error: data exception; The identifier `booking.plan_name` cannot be used, as it is neither part of the GROUP BY nor an aggregation..\""
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fabRDc7wu06oSm11EiZ7s6mQaADf",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_vXZ7Grk16Q9Sa89GbgWWQTYI",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\",\"natural_language_query\":\"冬の北海道向けのカップル顧客に人気の高い旅行プラン・商品のランキングと、主要な売上・予約件数・平均単価を教えてください。\"}",
+              "name": "analyze.database.nl2code",
+              "output": "# Variation 1\n\n```ontology\n{\"entitySelector\":{\"queryType\":\"GQL\",\"query\":\"MATCH (booking:booking)-[edge_booking_has_customer:booking_has_customer]->(customer:customer)\\nWHERE booking.season = \\\"winter\\\" AND booking.destination_region = \\\"北海道\\\" AND customer.customer_segment = \\\"couple\\\" AND booking.booking_status IN [\\\"confirmed\\\", \\\"completed\\\"]\\nRETURN booking.plan_name AS plan_name,\\n       COUNT(booking) AS bookings,\\n       SUM(booking.total_revenue_jpy) AS revenue_jpy,\\n       AVG(booking.price_per_person_jpy) AS avg_pp_price\\nORDER BY revenue_jpy DESC LIMIT 10\"}}\n```"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fab3XIAWN1UIyKCiZZIcFZkdtY7l",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabVMC1ODnqtaDgojiZsHstpETFe",
+            "function": {
+              "arguments": "{\"datasource_name\":\"travelIQ_v2\",\"datasource_type\":\"Ontology\",\"datasource_artifact_id\":\"10cd6675-405a-4366-b91b-d57242a28914\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\"}",
+              "name": "analyze.database.fewshots.loading",
+              "output": "Loaded 0 fewshots"
+            }
+          }
+        ]
+      },
+      {
+        "id": "step_fab1wGYZlFcjjQQtbQ34lhKcTrH3",
+        "status": "completed",
+        "type": "tool_calls",
+        "step_type": "tool_calls",
+        "tool_calls": [
+          {
+            "type": "function",
+            "id": "call_fabogunj7kDKzYqwjtO08a8LqTqf",
+            "function": {
+              "arguments": "{\"datasource_name\":\"lh_travel_marketing_v2\",\"datasource_type\":\"LakehouseTables\",\"datasource_artifact_id\":\"5e02348e-d2a4-47fb-b63d-257ed3be7731\",\"datasource_workspace_id\":\"096ff72a-6174-4aba-8f0c-140454fa6c3f\"}",
+              "name": "analyze.database.fewshots.loading",
+              "output": "Loaded 0 fewshots"
+            }
+          }
+        ]
+      }
+    ],
+    "elapsed_s": 186.4,
+    "id": "D02",
+    "strict_grade": "C",
+    "strict_reason": "no_answer"
+  },
+  {
+    "qid": "D03",
+    "question": "秋の京都シニア向けプランを企画して",
+    "status": "completed",
+    "answer": "秋の京都でシニアを含む全顧客向け人気プランは「京都5泊6日グループプラン (秋)」「京都4泊5日グループプラン (秋)」など長めの滞在型が好調です。シニア専用プランでは3〜6泊のプランが選ばれており、売上・利用実績とも安定しています。\n\n■ 使用条件\n- 期間：秋シーズン\n- 地域：京都\n- セグメント：全顧客（「シニア」限定だと一部サンプルが少ないため拡張）\n- サンプルが少ない場合は注記\n\n■ 主要指標（秋・京都：人気プランランキング抜粋）\n\n| プラン名                      | 売上 (¥)     | 予約件数 | 平均単価 (¥) |\n|-------------------------------|-------------|----------|--------------|\n| 京都5泊6日グループプラン (秋) | ¥30,965,149 | 20       | ¥167,431     |\n| 京都4泊5日グループプラン (秋) | ¥23,522,709 | 26       | ¥120,804     |\n| 京都3泊4日シニアプラン (秋)   | ¥4,277,729  | 13       | ¥164,829     |\n| 京都6泊7日シニアプラン (秋)   | ¥2,925,755  | 14       | ¥105,846     |\n| 京都2泊3日シニアプラン (秋)   | ¥2,760,318  | 12       | ¥124,414     |\n| 京都5泊6日シニアプラン (秋)   | ¥1,879,484  | 7 サンプル少 | ¥149,274     |\n| 京都4泊5日シニアプラン (秋)   | ¥2,103,943  | 4 サンプル少 | ¥218,916     |\n\n■ 補足\n- シニア専用プランは3～6泊/¥10万～20万円台の設定が多く、件数も一定（ただし4～7件程度のプランはサンプルが少ないため要注意）。\n- 滞在日数が長めのグループ・ファミリー向けプランも併せて打ち出すとシニア層に響きやすい傾向です。\n- 予約件数30未満は販促強化の余地あり。既存人気プランの「シニア限定割引」化や、体験型コンテンツ追加もおすすめです。",
+    "grade": "A",
+    "reason": "grounded_numeric",
+    "elapsed_s": 129.7,
+    "id": "D03",
+    "strict_grade": "A",
+    "strict_reason": "grounded_numeric"
+  },
+  {
+    "qid": "D04",
+    "question": "夏のハワイ学生向けプランを企画して",
+    "status": "completed",
+    "answer": "夏のハワイ学生向け旅行プランは、現在データベース上に該当する予約実績がありません。\n\n使用条件: 夏シーズン、目的地「ハワイ」、顧客セグメント「学生」で集計しました。\n\n主要指標:\n| 該当予約件数 |\n|:---------|\n| 0        |\n\n補足: 実在値を確認しましたが該当予約が見つかりませんでした。条件を緩和（例: 学生以外／シーズンなし）すると傾向把握は可能です。条件変更が必要な場合はご指示ください。",
+    "grade": "C",
+    "reason": "no_data_no_grounding",
+    "elapsed_s": 107.7,
+    "id": "D04",
+    "strict_grade": "C",
+    "strict_reason": "no_data_no_grounding"
+  }
+]
