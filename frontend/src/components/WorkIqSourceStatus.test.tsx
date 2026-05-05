@@ -17,6 +17,7 @@ const translations: Record<string, string> = {
   'settings.workiq.sourceStatus.consent_required': '同意が必要',
   'settings.workiq.sourceStatus.unavailable': '利用不可',
   'settings.workiq.sourceStatus.used': '使用済み',
+  'settings.workiq.sourceStatus.connector_used': 'コネクタ実行',
   'settings.workiq.sourceStatus.count': '{count} 件',
   'settings.workiq.sourceStatus.noPreview': '表示できるサニタイズ済みプレビューはまだありません。',
 }
@@ -81,5 +82,29 @@ describe('WorkIqSourceStatus', () => {
     expect(screen.getByText('3 件')).toBeInTheDocument()
     expect(screen.getByText('メールでは上質感重視の方針です。')).toBeInTheDocument()
     expect(screen.getAllByText('オフ')).toHaveLength(3)
+  })
+
+  it('renders connector_used status from foundry MCP without count or label', () => {
+    render(
+      <WorkIqSourceStatus
+        enabled
+        selectedSources={['meeting_notes', 'emails', 'teams_chats', 'documents_notes']}
+        status="enabled"
+        sourceMetadata={[
+          { source: 'meeting_notes', status: 'connector_used' },
+          { source: 'emails', status: 'connector_used' },
+          { source: 'teams_chats', status: 'connector_used' },
+          { source: 'documents_notes', status: 'connector_used' },
+        ]}
+        t={t}
+      />,
+    )
+
+    // 4 sources should all show connector_used badge ("コネクタ実行")
+    expect(screen.getAllByText('コネクタ実行')).toHaveLength(4)
+    // Should not show "確認待ち" (ready) anymore — bug previously stuck UI here
+    expect(screen.queryByText('確認待ち')).not.toBeInTheDocument()
+    // Should not overclaim as "使用済み"
+    expect(screen.queryByText('使用済み')).not.toBeInTheDocument()
   })
 })

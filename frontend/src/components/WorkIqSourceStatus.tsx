@@ -1,7 +1,14 @@
 import type { WorkIqSourceMetadata } from '../lib/event-schemas'
 import type { WorkIqSourceScope, WorkIqUiStatus } from './SettingsPanel'
 
-type WorkIqSourceDisplayStatus = 'off' | 'ready' | 'sign_in_required' | 'consent_required' | 'unavailable' | 'used'
+type WorkIqSourceDisplayStatus =
+  | 'off'
+  | 'ready'
+  | 'sign_in_required'
+  | 'consent_required'
+  | 'unavailable'
+  | 'connector_used'
+  | 'used'
 
 interface WorkIqSourceStatusProps {
   enabled: boolean
@@ -18,6 +25,7 @@ const STATUS_STYLES: Record<WorkIqSourceDisplayStatus, string> = {
   sign_in_required: 'border-amber-300/80 bg-amber-100/80 text-amber-800 dark:border-amber-700/60 dark:bg-amber-950/40 dark:text-amber-200',
   consent_required: 'border-violet-300/80 bg-violet-100/80 text-violet-800 dark:border-violet-700/60 dark:bg-violet-950/40 dark:text-violet-200',
   unavailable: 'border-rose-300/80 bg-rose-100/80 text-rose-800 dark:border-rose-700/60 dark:bg-rose-950/40 dark:text-rose-200',
+  connector_used: 'border-sky-300/80 bg-sky-100/80 text-sky-800 dark:border-sky-700/60 dark:bg-sky-950/40 dark:text-sky-200',
   used: 'border-emerald-300/70 bg-emerald-100/80 text-emerald-800 dark:border-emerald-700/60 dark:bg-emerald-950/40 dark:text-emerald-200',
 }
 
@@ -30,6 +38,9 @@ function normalizeSourceStatus(metadata: WorkIqSourceMetadata | undefined): Work
     case 'ok':
     case 'used':
       return 'used'
+    case 'connector_used':
+    case 'connector_completed':
+      return 'connector_used'
     case 'auth_required':
     case 'sign_in_required':
       return 'sign_in_required'

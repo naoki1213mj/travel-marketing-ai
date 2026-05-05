@@ -2890,6 +2890,210 @@ async def test_workflow_event_generator_uses_foundry_work_iq_tool_event_semantic
     assert not any(payload.get("tool") == "generate_workplace_context_brief" for payload in tool_events)
 
 
+def test_build_foundry_workiq_source_metadata_marks_selected_sources_connector_used() -> None:
+    """Foundry MCP 成功時は選択された有効ソースに status=connector_used を付ける。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes", "emails", "documents_notes"],
+    }
+
+    metadata = chat_module._build_foundry_workiq_source_metadata(session)
+
+    assert metadata == [
+        {"source": "meeting_notes", "status": "connector_used"},
+        {"source": "emails", "status": "connector_used"},
+        {"source": "documents_notes", "status": "connector_used"},
+    ]
+    # session にも永続化される (再開時に UI 状態を復元できる)
+    assert session["brief_source_metadata"] == metadata
+
+
+def test_build_foundry_workiq_source_metadata_filters_invalid_sources() -> None:
+    """allow-list 外のソース名と空文字は除外し、重複も除去する。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes", "unknown_source", "", "meeting_notes", "emails"],
+    }
+
+    metadata = chat_module._build_foundry_workiq_source_metadata(session)
+
+    assert metadata == [
+        {"source": "meeting_notes", "status": "connector_used"},
+        {"source": "emails", "status": "connector_used"},
+    ]
+
+
+def test_build_foundry_workiq_source_metadata_empty_scope_clears_session_metadata() -> None:
+    """source_scope が空なら brief_source_metadata は session から消す。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": [],
+        "brief_source_metadata": [{"source": "emails", "status": "completed"}],
+    }
+
+    metadata = chat_module._build_foundry_workiq_source_metadata(session)
+
+    assert metadata == []
+    assert "brief_source_metadata" not in session
+
+
+def test_build_foundry_workiq_source_metadata_handles_invalid_session() -> None:
+    """session が None や非 dict なら空リストを返し副作用を起こさない。"""
+    assert chat_module._build_foundry_workiq_source_metadata(None) == []
+    assert chat_module._build_foundry_workiq_source_metadata({"enabled": True}) == []
+    assert chat_module._build_foundry_workiq_source_metadata({"enabled": True, "source_scope": "not-a-list"}) == []
+
+
+def test_build_work_iq_tool_event_data_propagates_source_metadata_from_session() -> None:
+    """session に brief_source_metadata がある場合、tool_event SSE payload に source_metadata を載せる。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes", "emails"],
+        "brief_source_metadata": [
+            {"source": "meeting_notes", "status": "connector_used"},
+            {"source": "emails", "status": "connector_used"},
+        ],
+    }
+
+    payload = chat_module._build_work_iq_tool_event_data(
+        session,
+        "completed",
+        work_iq_runtime="foundry_tool",
+    )
+
+    assert payload["tool"] == "workiq_foundry_tool"
+    assert payload["status"] == "completed"
+    assert payload["source_scope"] == ["meeting_notes", "emails"]
+    assert payload.get("source_metadata") == [
+        {"source": "meeting_notes", "status": "connector_used"},
+        {"source": "emails", "status": "connector_used"},
+    ]
+
+
+def test_build_work_iq_tool_event_data_omits_source_metadata_when_session_has_none() -> None:
+    """session に brief_source_metadata が無いときは source_metadata field を含めない。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes"],
+    }
+
+    payload = chat_module._build_work_iq_tool_event_data(
+        session,
+        "running",
+        work_iq_runtime="foundry_tool",
+    )
+
+    assert "source_metadata" not in payload
+
+
+def test_format_work_iq_brief_for_prompt_skips_connector_used_in_source_listing() -> None:
+    """status=connector_used のみのソースは prompt の '参照ソース' に列挙しない (LLM 過信防止)。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes", "emails"],
+        "brief_summary": "今週のチームは秋の京都プランを議論していました。",
+        "brief_source_metadata": [
+            {"source": "meeting_notes", "status": "connector_used"},
+            {"source": "emails", "status": "connector_used"},
+        ],
+    }
+
+    prompt = chat_module._format_work_iq_brief_for_prompt(session)
+
+    assert "## Work IQ の職場コンテキスト" in prompt
+    assert "今週のチーム" in prompt
+    # connector_used のみのソースは "参照ソース" 行に出さない
+    assert "### 参照ソース" not in prompt
+    assert "会議メモ" not in prompt
+    assert "メール" not in prompt
+
+
+def test_format_work_iq_brief_for_prompt_keeps_count_based_listing() -> None:
+    """count>0 のソース (graph_prefetch path) は従来どおり '参照ソース' に列挙する。"""
+    session: dict[str, object] = {
+        "enabled": True,
+        "source_scope": ["meeting_notes", "emails"],
+        "brief_summary": "Graph prefetch result summary.",
+        "brief_source_metadata": [
+            {"source": "meeting_notes", "label": "会議メモ", "count": 3},
+            {"source": "emails", "label": "メール", "count": 2},
+        ],
+    }
+
+    prompt = chat_module._format_work_iq_brief_for_prompt(session)
+
+    assert "### 参照ソース" in prompt
+    assert "- 会議メモ: 3 件" in prompt
+    assert "- メール: 2 件" in prompt
+
+
+@pytest.mark.asyncio
+async def test_workflow_event_generator_propagates_connector_used_source_metadata(monkeypatch) -> None:
+    """Foundry MCP 成功 simulation: completed tool_event に per-source connector_used metadata が乗る。"""
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: chat_module.WorkflowSettings | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings, workflow_settings, work_iq_access_token
+        del total_steps, include_done
+        # 実 foundry 成功 path が brief_source_metadata を populate するのを simulate する
+        if (
+            agent_name == "marketing-plan-agent"
+            and isinstance(work_iq_session, dict)
+            and work_iq_session.get("enabled")
+        ):
+            chat_module._build_foundry_workiq_source_metadata(work_iq_session)
+        return {
+            "events": [],
+            "text": "analysis output" if agent_name == "data-search-agent" else "plan output",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    chat_module._pending_approvals.clear()
+
+    events = [
+        event
+        async for event in chat_module.workflow_event_generator(
+            "夏の北海道プランを企画して",
+            "conv-foundry-workiq-source-metadata",
+            {"temperature": 0.2},
+            workflow_settings={"manager_approval_enabled": False, "manager_email": "", "work_iq_runtime": "foundry_tool"},
+            conversation_settings={"work_iq_enabled": True, "source_scope": ["meeting_notes", "emails"]},
+            work_iq_session={
+                "enabled": True,
+                "source_scope": ["meeting_notes", "emails"],
+                "auth_mode": "delegated",
+                "owner_oid": "oid-123",
+                "owner_tid": "tid-123",
+                "owner_upn": "user@example.com",
+            },
+            work_iq_access_token="foundry-token",
+        )
+    ]
+    parsed = [_parse_sse(event) for event in events]
+    tool_events = [payload for event_name, payload in parsed if event_name == chat_module.SSEEventType.TOOL_EVENT]
+
+    completed_events = [p for p in tool_events if p.get("tool") == "workiq_foundry_tool" and p.get("status") == "completed"]
+    assert completed_events, "expected at least one workiq_foundry_tool completed event"
+    completed = completed_events[-1]
+    assert completed.get("source_metadata") == [
+        {"source": "meeting_notes", "status": "connector_used"},
+        {"source": "emails", "status": "connector_used"},
+    ]
+
+
 @pytest.mark.asyncio
 async def test_refine_events_reuse_pending_plan_context(monkeypatch) -> None:
     """承認待ちの修正では元の分析・企画書を含めて Agent2 を再実行する"""

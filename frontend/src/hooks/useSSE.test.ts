@@ -1872,6 +1872,45 @@ describe('buildRestoredPipelineState', () => {
     vi.unstubAllGlobals()
   })
 
+  it('propagates connector_used source_metadata from a Work IQ tool_event to workIq state', async () => {
+    connectSSE.mockImplementationOnce(async (_message, handlers) => {
+      handlers.tool_event?.({
+        tool: 'workiq_foundry_tool',
+        status: 'completed',
+        agent: 'marketing-plan-agent',
+        provider: 'foundry',
+        source: 'workiq',
+        source_scope: ['meeting_notes', 'emails', 'teams_chats', 'documents_notes'],
+        source_metadata: [
+          { source: 'meeting_notes', status: 'connector_used' },
+          { source: 'emails', status: 'connector_used' },
+          { source: 'teams_chats', status: 'connector_used' },
+          { source: 'documents_notes', status: 'connector_used' },
+        ],
+      })
+    })
+
+    const { result } = renderHook(() => useSSE())
+
+    act(() => {
+      result.current.updateConversationSettings({
+        workIqEnabled: true,
+        workIqSourceScope: ['meeting_notes', 'emails', 'teams_chats', 'documents_notes'],
+      })
+    })
+
+    await act(async () => {
+      await result.current.sendMessage('沖縄プランを企画して')
+    })
+
+    expect(result.current.state.workIq.sourceMetadata).toEqual([
+      { source: 'meeting_notes', status: 'connector_used' },
+      { source: 'emails', status: 'connector_used' },
+      { source: 'teams_chats', status: 'connector_used' },
+      { source: 'documents_notes', status: 'connector_used' },
+    ])
+  })
+
   it('assigns the pending version number to live tool events during a refinement run', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
       status: 'completed',

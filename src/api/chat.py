@@ -13,7 +13,7 @@ import time
 import urllib.parse
 import urllib.request
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from enum import StrEnum
 from html import escape
 from html.parser import HTMLParser
@@ -421,6 +421,7 @@ _WORK_IQ_SOURCE_LABELS = {
     "teams_chats": "Teams チャット",
     "documents_notes": "文書 / ノート",
 }
+_WORK_IQ_VALID_SOURCES = frozenset(_WORK_IQ_SOURCE_LABELS.keys())
 _WORK_IQ_BLOCKING_STATUSES = {
     "auth_required",
     "consent_required",
@@ -435,6 +436,38 @@ _WORK_IQ_BLOCKING_STATUSES = {
 def _format_tool_event_sse(payload: ToolEventPayload) -> str:
     """Canonical tool_event payload を SSE へ変換する。"""
     return format_sse(SSEEventType.TOOL_EVENT, payload)
+
+
+def _build_foundry_workiq_source_metadata(
+    work_iq_session: WorkIQSessionMetadata | None,
+) -> list[dict[str, object]]:
+    """Foundry MCP 経由で Work IQ が成功したときの per-source metadata を組み立て、session に永続化する。
+
+    Foundry MCP の出力は per-source attribution を含まないため、各選択ソースに対して
+    `status="connector_used"` を返す（"使用済み" と断定せず "コネクタ実行済" として表現する）。
+    結果は `work_iq_session["brief_source_metadata"]` にも保存し、永続化 / 再開 時にも UI が同じ
+    badge を再現できるようにする。
+    """
+    if not isinstance(work_iq_session, dict):
+        return []
+    raw_scope = work_iq_session.get("source_scope")
+    if not isinstance(raw_scope, list):
+        return []
+
+    seen: set[str] = set()
+    metadata: list[dict[str, object]] = []
+    for raw_source in raw_scope:
+        source = _sanitize_optional_text(raw_source)
+        if not source or source in seen or source not in _WORK_IQ_VALID_SOURCES:
+            continue
+        seen.add(source)
+        metadata.append({"source": source, "status": "connector_used"})
+
+    if metadata:
+        work_iq_session["brief_source_metadata"] = metadata
+    else:
+        work_iq_session.pop("brief_source_metadata", None)
+    return metadata
 
 
 def _build_agent_tool_event(
@@ -459,6 +492,7 @@ def _build_agent_tool_event(
     source_scope: list[str] | None = None,
     evidence: list[Mapping[str, object]] | None = None,
     charts: list[Mapping[str, object]] | None = None,
+    source_metadata: Sequence[Mapping[str, object]] | None = None,
 ) -> ToolEventPayload:
     """agent 実行由来の canonical tool_event payload を構築する。"""
     return build_tool_event_data(
@@ -483,6 +517,7 @@ def _build_agent_tool_event(
         source_scope=source_scope,
         evidence=evidence,
         charts=charts,
+        source_metadata=source_metadata,
     )
 
 
@@ -968,8 +1003,13 @@ def _format_work_iq_brief_for_prompt(work_iq_session: WorkIQSessionMetadata | No
                 continue
             label = _sanitize_optional_text(item.get("label")) or _WORK_IQ_SOURCE_LABELS.get(source, source)
             count = item.get("count")
+            item_status = _sanitize_optional_text(item.get("status")).lower()
             if isinstance(count, int) and count > 0:
                 source_lines.append(f"- {label}: {count} 件")
+            elif item_status == "connector_used":
+                # Foundry MCP 経由は per-source attribution が無いため、prompt 側ではソースを列挙しない
+                # (LLM に「全ソース参照済み」と誤認させない)。UI には connector_used バッジで表示する。
+                continue
             else:
                 source_lines.append(f"- {label}")
         if source_lines:
@@ -984,6 +1024,12 @@ def _build_work_iq_tool_event_data(
     work_iq_runtime: WorkIQRuntime = "graph_prefetch",
 ) -> dict[str, object]:
     """Work IQ status を UI 向け tool_event payload に整形する。"""
+    raw_source_metadata = work_iq_session.get("brief_source_metadata")
+    source_metadata: Sequence[Mapping[str, object]] | None = None
+    if isinstance(raw_source_metadata, list) and raw_source_metadata:
+        cleaned: list[Mapping[str, object]] = [item for item in raw_source_metadata if isinstance(item, Mapping)]
+        source_metadata = cleaned or None
+
     payload: dict[str, object] = _build_agent_tool_event(
         "workiq_foundry_tool" if work_iq_runtime == "foundry_tool" else "generate_workplace_context_brief",
         status,
@@ -993,6 +1039,7 @@ def _build_work_iq_tool_event_data(
         provider="foundry" if work_iq_runtime == "foundry_tool" else "workiq",
         display_name="Work IQ context tools" if work_iq_runtime == "foundry_tool" else None,
         source_scope=None,
+        source_metadata=source_metadata,
     )
     source_scope = work_iq_session.get("source_scope")
     if isinstance(source_scope, list) and source_scope:
@@ -3669,6 +3716,7 @@ async def _execute_agent(
                     provider="foundry",
                     display_name="Work IQ context tools",
                     source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                    source_metadata=_build_foundry_workiq_source_metadata(work_iq_session) or None,
                 )
             )
         collected_tool_events.append(
