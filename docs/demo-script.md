@@ -58,7 +58,7 @@ UI 上で 7 段階の進捗バー（データ検索 → 施策生成 → 承認 
 
 **ポイント**:
 - バックエンドが Foundry Prompt Agent + Work IQ MCP connection を `tool_choice` で呼び、Teams meeting / SharePoint notes を per-user delegated でフェッチ。
-- ツール呼び出しカードに **Work IQ** バッジが表示され、参照したソース種別（meeting_notes / documents_notes）が明示される。
+- ツール呼び出しカードに **Work IQ** バッジが表示され、コネクタが正常実行されたことが可視化される（Foundry MCP は per-source attribution を expose しないため、個別ソース別の取得件数は表示されない／`graph_prefetch` rollback runtime のみ件数が出る）。
 
 ### 2.3 シーン B: Fabric IQ（Travel_Ontology_DA_v2 でリアル分析）
 

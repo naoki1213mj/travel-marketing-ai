@@ -66,16 +66,32 @@ interface AgentProgressEvent {
 interface ToolEvent {
   type: 'tool_event';
   tool: string;           // ツール識別子
-  status: 'running' | 'completed' | 'error';
+  status:
+    | 'running'
+    | 'completed'
+    | 'error'
+    | 'failed'
+    | 'auth_required'
+    | 'consent_required'
+    | 'identity_mismatch'
+    | 'unavailable'
+    | 'timeout'
+    | 'skipped'
+    | 'partial';
   agent: string;          // 呼び出し元エージェント
-  source?: string;        // データソース種別（例: "fabric_da_v2", "search", "iq"）
-  source_scope?: string;  // スコープ詳細
+  source?: string;        // データソース種別（例: "fabric_da_v2", "search", "iq", "workiq"）
+  source_scope?: string[];  // スコープ詳細（Work IQ では選択ソース配列、その他は単一値の配列）
+  source_metadata?: WorkIqSourceMetadata[];  // §2.2.1 を参照（Work IQ 系のみ）
   version?: number;       // 企画書バージョン
   background_update?: boolean;  // バックグラウンド更新の場合 true
   // ツール固有の追加フィールド（任意）
   [key: string]: unknown;
 }
 ```
+
+> **status の使われ方**: `running` / `completed` / `error` が大半の経路で使われます。
+> `failed` / `auth_required` / `consent_required` / `identity_mismatch` / `unavailable` /
+> `timeout` / `skipped` / `partial` は Work IQ MCP 連携・規制チェック・動画生成など特定の経路で使われます。
 
 **source フィールドの値と対応ツール**:
 
@@ -90,6 +106,49 @@ interface ToolEvent {
 | `code_interpreter` | Code Interpreter |
 | `image` | 画像生成モデル |
 | `avatar` | Photo Avatar API |
+
+---
+
+### 2.2.1 Work IQ tool_event 拡張
+
+Agent2 (`marketing-plan-agent`) で Work IQ が有効化されている場合、`tool_event` には
+追加で `source_metadata` 配列が付きます。`source_metadata` 各 item の schema は
+`src/pipeline_schemas.py` の `WorkIQSourceMetadata` model と
+`frontend/src/lib/event-schemas.ts` の `WorkIqSourceMetadata` 型に対応します。
+
+```typescript
+interface WorkIqSourceMetadata {
+  source: 'meeting_notes' | 'emails' | 'teams_chats' | 'documents_notes';
+  label?: string;        // ローカライズ済みラベル（フロント側で補完される場合あり）
+  count?: number;        // 取得件数（graph_prefetch のみ。foundry_tool では未提供）
+  connector?: string;    // 上流コネクタ識別子
+  status?:
+    | 'completed'
+    | 'connector_used'   // foundry_tool 用: コネクタは実行されたが per-source attribution 不明
+    | 'auth_required'
+    | 'consent_required'
+    | 'unavailable'
+    | 'failed'
+    | 'pending';
+  summary?: string;      // sanitized 要約（公開しても安全な短文）
+  preview?: string;      // sanitized プレビュー
+  confidence?: number;   // 0.0–1.0
+  latest_timestamp?: string;
+  evidence_ids?: string[];
+}
+```
+
+**`connector_used` セマンティクス**: Foundry MCP は per-source attribution
+（どのソースから何件取れたか）を expose しないため、`foundry_tool` runtime では
+コネクタ実行成功後に `selected_sources` 全件を `status="connector_used"` でマークします。
+`count` / `preview` / `summary` は付かず、UI 側 (`WorkIqSourceStatus.tsx`) では sky tone
+の「コネクタ実行」バッジで表示されます。`graph_prefetch` runtime では従来通り
+`status="completed"` + `count` + `preview` が付きます。
+
+> **UI 表示ルール**: `sourceMetadata` が全件 `connector_used` で
+> `count` / `preview` / `summary` / `briefSummary` も無い場合、
+> `WorkIqSourceStatus` コンポーネントは描画自体を省略します
+> （ランタイム表示と「この会話で有効」バッジで Work IQ アクティブ状態は伝わるため）。
 
 ---
 
@@ -284,19 +343,23 @@ interface EvaluationResult {
 
 | `tool` 値 | エージェント | 説明 |
 | --- | --- | --- |
+| `query_data_agent` | Agent1 | Fabric Data Agent 呼び出し（v1/v2、Foundry path では `MicrosoftFabricPreviewTool` 経由）。`source="fabric_da_v2"` |
 | `search_sales_history` | Agent1 | Fabric Lakehouse 売上履歴検索（Pass 2 fallback） |
 | `search_customer_reviews` | Agent1 | Fabric Lakehouse 顧客レビュー検索（Pass 2 fallback） |
-| `MicrosoftFabricPreviewTool` | Agent1 | Fabric Data Agent v2 呼び出し（Pass 1） |
-| `search_market_trends` | Agent2 | Web Search によるマーケットトレンド検索 |
-| `search_knowledge_base` | Agent3a | Foundry IQ ナレッジベース検索 |
+| `code_interpreter` | Agent1 | Foundry built-in Code Interpreter（`ENABLE_CODE_INTERPRETER=true` のときのみ） |
+| `web_search` | Agent2 / Agent3a | Bing grounding / Web Search（マーケットトレンド・安全情報の双方で使用） |
+| `workiq_foundry_tool` | Agent2 | 既定 `foundry_tool` runtime: 事前作成済み Foundry Prompt Agent + Work IQ MCP connection |
+| `generate_workplace_context_brief` | Agent2 | rollback `graph_prefetch` runtime: Microsoft Graph Copilot Chat API |
+| `foundry_iq_search` | Agent3a | Foundry IQ ナレッジベース検索（実装上の関数名は `search_knowledge_base`、テレメトリでは alias として `foundry_iq_search` に正規化） |
 | `check_ng_expressions` | Agent3a | 禁止表現スキャン（ローカル処理） |
 | `check_travel_law_compliance` | Agent3a | 旅行業法チェック（ローカル処理） |
-| `search_safety_info` | Agent3a | Web Search による渡航先安全情報 |
 | `generate_hero_image` | Agent4 | ヒーロー画像生成（GPT Image 2 / 1.5 / MAI-Image-2） |
 | `generate_banner_image` | Agent4 | SNS バナー画像生成 |
+| `analyze_existing_brochure` | Agent4 | Content Understanding による既存パンフレット PDF 解析 |
 | `generate_promo_video` | Agent5 | Photo Avatar 販促動画生成 |
 | `review_plan_quality` | Agent6 | 企画書品質レビュー（ローカル処理） |
 | `review_brochure_accessibility` | Agent6 | ブローシャアクセシビリティチェック（ローカル処理） |
+| `generate_improvement_brief` | Agent2 (refine) | APIM 配下の Functions MCP 改善ブリーフ生成 |
 
 ---
 

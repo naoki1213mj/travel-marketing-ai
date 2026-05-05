@@ -131,17 +131,13 @@ azd up                                    # プロビジョニング + ビルド
 | `COSMOS_DB_ENDPOINT` | 任意 | 会話履歴保存（未設定時はインメモリ） |
 | `SEARCH_ENDPOINT` | 任意 | Foundry IQ / 直接 KB 検索で使う Azure AI Search endpoint |
 | `SEARCH_API_KEY` | 任意 | Azure AI Search 管理キー（live tenant では Container Apps secret で保持） |
-| `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent Published URL |
-| `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL analytics endpoint fallback |
 | `FABRIC_DATA_AGENT_URL` | 推奨 | Fabric Data Agent v1 Published URL (`Travel_Ontology_DA` / `travel_sales` / `travel_review` schema、rollback 用) |
 | `FABRIC_DATA_AGENT_URL_V2` | 推奨 | Fabric Data Agent v2 Published URL (`Travel_Ontology_DA_v2` / `lh_travel_marketing_v2`、現在の本番) |
 | `FABRIC_DATA_AGENT_RUNTIME_VERSION` | 任意 | `v1` (既定) または `v2`。`v2` にすると Agent1 が Phase 9/10 v2 lakehouse へルーティング |
 | `FABRIC_SQL_ENDPOINT` | 任意 | Fabric SQL analytics endpoint fallback |
-| `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL fallback 用 Lakehouse database 名（live 既定: `lh_travel_marketing_v2`） |
-| `FABRIC_SALES_TABLE` | 任意 | Fabric SQL fallback 用販売テーブル名（v2 既定: `booking`） |
-| `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL fallback 用レビューテーブル名（v2 既定: `tour_review`） |
-| `FABRIC_SALES_TABLE` | 任意 | Fabric SQL fallback 用の販売テーブル名（既定: `sales_results`） |
-| `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL fallback 用のレビューテーブル名（既定: `customer_reviews`） |
+| `FABRIC_LAKEHOUSE_DATABASE` | 任意 | Fabric SQL fallback 用 Lakehouse database 名（コード default: `Travel_Lakehouse`、live 本番値: `lh_travel_marketing_v2`） |
+| `FABRIC_SALES_TABLE` | 任意 | Fabric SQL fallback 用販売テーブル名（コード default: `sales_results`、v2 lakehouse 運用時の推奨値: `booking`） |
+| `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL fallback 用レビューテーブル名（コード default: `customer_reviews`、v2 lakehouse 運用時の推奨値: `tour_review`） |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan の runtime 切替（既定: `foundry_preprovisioned`、`legacy` は rollback / 検証用） |
 | `WORKIQ_RUNTIME` | 任意 | Work IQ runtime 切替（既定: `foundry_tool`、`graph_prefetch` は明示 rollback 用） |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | `graph_prefetch` rollback 経路で Microsoft Graph Copilot Chat API から短い Work IQ brief を取得するときの timeout（既定: `120`） |

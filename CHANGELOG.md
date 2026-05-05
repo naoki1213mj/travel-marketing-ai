@@ -6,9 +6,25 @@
 
 ## [Unreleased]
 
-### 予定される変更
+### Added
 
-- Anonymous fingerprint → HttpOnly session cookie 化 (D2)
+- **Work IQ ソース別観測性 + コネクタ実行バッジ** — backend が `tool_event.source_metadata[]` を発行、frontend は `connector_used` を sky-tone バッジで表示。Foundry MCP は per-source attribution を expose しないため、selected sources を一律 'used' と claim する代わりに「コネクタが正常実行された」という honest セマンティクスを採用。`graph_prefetch` rollback path のみ件数とプレビューが付く ([0721f85](https://github.com/naoki1213mj/travel-marketing-ai/commit/0721f85))
+- **Microsoft 3IQ パネルの Fabric IQ 説明に `Ontology` を追加** — Fabric Data Agent v2 は semantic ontology (`travelIQ_v2`) を使うため UI 表示を更新 ([79016b0](https://github.com/naoki1213mj/travel-marketing-ai/commit/79016b0))
+- **SSE event schema (`docs/sse-event-schema.md`)** — Work IQ 拡張 `WorkIqSourceMetadata` 型 + `connector_used` セマンティクス + UI hide rule + tool subtype table を追加
+- **Fabric Data Agent v2 Phase 11d 指示** — aiInstructions 10,458 chars master block + lakehouse userDescription / dataSourceInstructions のリファクタ。Demo 4/4 grade A、smoke 11/14 grade A (P10 timeout / P13/P14 platform バグを除く全グリーン) ([c954e66](https://github.com/naoki1213mj/travel-marketing-ai/commit/c954e66))
+- **Phase 12 エージェント instructions tuning** — Gap 1/2/3/5/6/7 全対応。`src/agents/_shared_instructions.py` で SHARED_PREFIX + NO_FOLLOWUP_RULE + SCOPE_RESPECT_RULE を共有化 ([122601d](https://github.com/naoki1213mj/travel-marketing-ai/commit/122601d), [a3f3b38](https://github.com/naoki1213mj/travel-marketing-ai/commit/a3f3b38))
+
+### Changed
+
+- **Work IQ ソース別ステータスパネルを auto-hide** — `foundry_tool` runtime で全ソースが `connector_used` のみ・件数 / プレビュー / サマリ無しの場合、UI ノイズになるため非表示。runtime 表示と Settings の "この会話で有効" バッジで activation は別途可視化される ([79016b0](https://github.com/naoki1213mj/travel-marketing-ai/commit/79016b0))
+- **ブローシャ画像出力を JPEG @ 85 に変更** — gpt-image-2 medium PNG が 25–43 MB で Cosmos 永続化 threshold を超過し cold reload で SVG placeholder 化していた問題を解消 (~50–100x size reduction) ([0c0eb40](https://github.com/naoki1213mj/travel-marketing-ai/commit/0c0eb40))
+
+### Fixed
+
+- **Refine without explicit `refineContext` の観測性** — frontend が完了状態 RefineChat から refine を投げるとき `source: 'post_completion'` を明示。backend は明示なしの refine を WARN ログで App Insights に記録 (重複 refine round の regression detector) ([25bcb34](https://github.com/naoki1213mj/travel-marketing-ai/commit/25bcb34))
+
+### Predicted next changes
+
 - Azure AI Search を Managed Identity 化 (A3) — `SEARCH_API_KEY` 廃止
 - Cosmos `pending_approval_token` の自動 TTL 削除 (D3)
 - `_pending_approvals` を Cosmos / Redis に移行 (D1)
