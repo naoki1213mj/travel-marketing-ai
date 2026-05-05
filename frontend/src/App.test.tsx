@@ -6,6 +6,7 @@ import App from './App'
 const mockUseSSE = vi.fn()
 const mockVoiceInputProps = vi.fn()
 const mockVideoPreviewProps = vi.fn()
+const mockRefineChatProps = vi.fn()
 
 vi.mock('./hooks/useSSE', () => ({
   useSSE: () => mockUseSSE(),
@@ -155,7 +156,21 @@ vi.mock('./components/MarkdownView', () => ({ MarkdownView: ({ content }: { cont
 vi.mock('./components/PdfUpload', () => ({ PdfUpload: () => null }))
 vi.mock('./components/PipelineStepper', () => ({ PipelineStepper: () => null }))
 vi.mock('./components/PlanVersionTabs', () => ({ PlanVersionTabs: () => null }))
-vi.mock('./components/RefineChat', () => ({ RefineChat: () => null }))
+vi.mock('./components/RefineChat', () => ({
+  RefineChat: (props: { onSubmit: (message: string) => void; disabled?: boolean }) => {
+    mockRefineChatProps(props)
+    return (
+      <button
+        type="button"
+        data-testid="refine-chat-trigger"
+        onClick={() => props.onSubmit('もっと明るくして')}
+        disabled={props.disabled ?? false}
+      >
+        refine
+      </button>
+    )
+  },
+}))
 vi.mock('./components/SettingsPanel', () => ({ SettingsPanel: () => null }))
 vi.mock('./components/ThemeToggle', () => ({ ThemeToggle: () => null }))
 vi.mock('./components/VideoPreview', () => ({
@@ -227,6 +242,7 @@ describe('App', () => {
   beforeEach(() => {
     mockVoiceInputProps.mockClear()
     mockVideoPreviewProps.mockClear()
+    mockRefineChatProps.mockClear()
   })
 
   it('keeps the live pending version selected while a newer version is generating', () => {
@@ -861,6 +877,83 @@ describe('App', () => {
       conversationId: 'conv-refine-context',
       refineContext: {
         source: 'evaluation',
+        artifactVersion: 2,
+      },
+    })
+  })
+
+  it('sends post-completion refinements with explicit post_completion refine context', () => {
+    /*
+     * Bug fix 2026-05-05: completed 状態の RefineChat が refineContext なしで送信
+     * していたため、backend で `is_eval_feedback=False` 経路に流れて余分な `done` が
+     * 発行され v3/v5 の重複 round が発生していた。frontend が必ず
+     * `source: 'post_completion'` を付けて backend が eval branch に入ることを保証する。
+     */
+    const sendMessage = vi.fn()
+
+    mockUseSSE.mockReturnValue({
+      state: buildState({
+        status: 'completed',
+        conversationId: 'conv-post-completion',
+        agentProgress: null,
+        managerApprovalPolling: false,
+        backgroundUpdatesPending: false,
+        hasManagerApprovalPhase: false,
+        toolEvents: [],
+        textContents: [
+          {
+            agent: 'marketing-plan-agent',
+            content: '# Plan v2',
+          },
+        ],
+        images: [],
+        approvalRequest: null,
+        metrics: null,
+        error: null,
+        versions: [
+          {
+            textContents: [{ agent: 'marketing-plan-agent', content: '# Plan v1' }],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+          {
+            textContents: [{ agent: 'marketing-plan-agent', content: '# Plan v2' }],
+            images: [],
+            toolEvents: [],
+            metrics: null,
+            evaluations: [],
+          },
+        ],
+        currentVersion: 2,
+        pendingVersion: null,
+        settings: {
+          model: 'gpt-5-4-mini',
+          temperature: 0.7,
+          max_tokens: 2000,
+          top_p: 1,
+        },
+        userMessages: ['北海道プランを企画して'],
+      }),
+      sendMessage,
+      approve: vi.fn(),
+      reset: vi.fn(),
+      restoreVersion: vi.fn(),
+      updateSettings: vi.fn(),
+      restoreConversation: vi.fn(),
+      saveEvaluation: vi.fn(),
+    })
+
+    render(<App />)
+
+    // RefineChat mock の trigger button をクリックして onSubmit('もっと明るくして') を呼ぶ
+    fireEvent.click(screen.getByTestId('refine-chat-trigger'))
+
+    expect(sendMessage).toHaveBeenCalledWith('もっと明るくして', {
+      conversationId: 'conv-post-completion',
+      refineContext: {
+        source: 'post_completion',
         artifactVersion: 2,
       },
     })

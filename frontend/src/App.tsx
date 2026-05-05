@@ -560,7 +560,12 @@ function App() {
                 <div className="flex-1">
                   {state.status === 'completed' ? (
                     <RefineChat
-                      onSubmit={handleSendMessage}
+                      onSubmit={(msg) => handleSendMessage(msg, {
+                        refineContext: {
+                          source: 'post_completion',
+                          artifactVersion: latestCommittedVersion,
+                        },
+                      })}
                       disabled={isRunning}
                       placeholder={t('refine.placeholder')}
                       sendLabel={t('input.send')}

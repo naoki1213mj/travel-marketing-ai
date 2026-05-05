@@ -3681,6 +3681,166 @@ async def test_refine_events_evaluation_does_not_require_work_iq_token(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_refine_events_post_completion_uses_legacy_keyword_path(monkeypatch, caplog) -> None:
+    """`source='post_completion'` の refine は legacy keyword path で動く (現状挙動維持)。
+
+    Observability fix 2026-05-05: completed RefineChat が refineContext なしで送信する
+    と、duplicate refine round が発生した場合の root cause 切り分けが困難。frontend は
+    `source='post_completion'` を必ず付けるが、backend は behavior を変えず legacy path
+    のまま動かす (image/regulation などの単一エージェント rerun を維持)。warn log は
+    refine_context が明示的に渡された時には fire しないことを確認する。
+    """
+
+    captured_calls: list[dict[str, object]] = []
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        del agent_step, user_input, conversation_id, model_settings
+        del workflow_settings, work_iq_session, work_iq_access_token, total_steps
+        captured_calls.append({"agent_name": agent_name, "include_done": include_done})
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test/project",
+            "marketing_plan_runtime": "legacy",
+            "work_iq_runtime": "graph_prefetch",
+            "data_search_runtime": "legacy",
+        },
+    )
+
+    with caplog.at_level("WARNING", logger="src.api.chat"):
+        _ = [
+            event
+            async for event in chat_module._refine_events(
+                "もっと明るくして",
+                "conv-post-completion",
+                chat_module.RefineContext(source="post_completion"),
+            )
+        ]
+
+    # explicit refine_context なので warn log は fire しない (regression 検知器を誤発火させない)
+    warn_records = [
+        rec for rec in caplog.records
+        if rec.levelname == "WARNING" and "refine without explicit refineContext" in rec.getMessage()
+    ]
+    assert warn_records == []
+
+    # text に keyword「明るく」が含まれているので legacy path で brochure-gen-agent が呼ばれる
+    # (observability-only fix: behavior は変えない、現状維持)
+    assert any(call["agent_name"] == "brochure-gen-agent" for call in captured_calls)
+
+
+@pytest.mark.asyncio
+async def test_refine_events_without_context_warns(monkeypatch, caplog) -> None:
+    """refine_context なしで refine を呼ぶと warn log を残す (frontend regression 検知用)。"""
+
+    captured_calls: list[dict[str, object]] = []
+
+    async def fake_execute_agent(
+        agent_name: str,
+        agent_step: int,
+        user_input: str,
+        conversation_id: str,
+        model_settings: dict | None = None,
+        workflow_settings: dict | None = None,
+        work_iq_session: dict | None = None,
+        work_iq_access_token: str = "",
+        total_steps: int = 5,
+        include_done: bool = False,
+    ):
+        captured_calls.append(
+            {
+                "agent_name": agent_name,
+                "agent_step": agent_step,
+                "include_done": include_done,
+            }
+        )
+        return {
+            "events": [],
+            "text": "改善版企画書",
+            "success": True,
+            "latency_seconds": 0.1,
+            "tool_calls": 1,
+            "total_tokens": 20,
+        }
+
+    monkeypatch.setattr(chat_module, "_execute_agent", fake_execute_agent)
+    monkeypatch.setattr(
+        chat_module,
+        "get_settings",
+        lambda: {
+            "project_endpoint": "https://example.test/project",
+            "marketing_plan_runtime": "legacy",
+            "work_iq_runtime": "graph_prefetch",
+            "data_search_runtime": "legacy",
+        },
+    )
+
+    with caplog.at_level("WARNING", logger="src.api.chat"):
+        events = [
+            event
+            async for event in chat_module._refine_events(
+                "もっと明るくして",
+                "conv-no-context",
+                None,
+            )
+        ]
+
+    # warn log が記録される (frontend が refineContext を送り忘れている可能性を観測可能に)
+    warn_records = [
+        rec for rec in caplog.records
+        if rec.levelname == "WARNING" and "refine without explicit refineContext" in rec.getMessage()
+    ]
+    assert len(warn_records) >= 1
+    assert "conv-no-context" in warn_records[0].getMessage()
+
+    # legacy heuristic は依然として動く (backward compatibility): text に「明るく」が
+    # 含まれるので brochure-gen-agent に routing されるはず
+    assert any(call["agent_name"] == "brochure-gen-agent" for call in captured_calls)
+    # legacy path は include_done=True を保つ (frontend が完了を検知できるように)
+    assert any(call["include_done"] is True for call in captured_calls)
+    # SSE 出力は events リストに依存 (mocked agent returns events=[]、無問題)
+    assert isinstance(events, list)
+    assert any(call["include_done"] is True for call in captured_calls)
+    # SSE 出力は events リストに依存 (mocked agent returns events=[]、無問題)
+    assert isinstance(events, list)
+
+
+@pytest.mark.asyncio
+async def test_refine_context_accepts_post_completion_source() -> None:
+    """RefineContext は 'post_completion' を valid source として accept する。"""
+
+    ctx = chat_module.RefineContext(source="post_completion", artifact_version=2)
+    assert ctx.source == "post_completion"
+    assert ctx.artifact_version == 2
+
+    # 既存の 'evaluation' も引き続き valid
+    ctx_eval = chat_module.RefineContext(source="evaluation", artifact_version=1)
+    assert ctx_eval.source == "evaluation"
+
+
+@pytest.mark.asyncio
 async def test_post_approval_uses_revised_plan_for_review_and_logic_app(monkeypatch) -> None:
     """承認後の品質レビューと Logic Apps 連携は修正版企画書を使う"""
 

@@ -47,7 +47,7 @@ export type SSEEventType =
 export type SSEHandlers = Partial<Record<SSEEventType, (data: unknown) => void>>
 
 export interface RefineContext {
-  source?: 'evaluation'
+  source?: 'evaluation' | 'post_completion'
   artifactVersion?: number
 }
 

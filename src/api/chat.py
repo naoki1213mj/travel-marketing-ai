@@ -375,7 +375,7 @@ class AgentMetricSnapshot(TypedDict, total=False):
 class RefineContext(BaseModel):
     """改善リクエストの補助文脈。"""
 
-    source: Literal["evaluation"] | None = Field(default=None)
+    source: Literal["evaluation", "post_completion"] | None = Field(default=None)
     artifact_version: int | None = Field(default=None, ge=1)
 
 
@@ -4543,13 +4543,29 @@ async def _refine_events(
         return
 
     text_lower = refine_text.lower()
-    # 評価フィードバック（品質評価結果に基づく改善指示）は常に企画書修正として処理
+    # 評価フィードバックは承認フロー再入り (full pipeline)。それ以外 (post_completion 自由 refine /
+    # legacy keyword match) は legacy keyword path で動作させ、現状の挙動を維持する。
+    # Observability fix 2026-05-05: completed 状態の RefineChat が refineContext なしで送信
+    # していた場合に、duplicate refine round が再発した際の root cause 切り分けが困難だった
+    # ため、frontend が source を付けない caller を warn log で検知できるようにする
+    # (frontend regression / 3rd party caller の検出器)。挙動は変更しない。
     is_eval_feedback = (
         (refine_context is not None and refine_context.source == "evaluation")
         or "品質評価" in refine_text
         or "評価結果" in refine_text
         or "evaluation" in text_lower
     )
+    if refine_context is None or refine_context.source is None:
+        # 完了後の自由テキスト refine は frontend が必ず source を付けるべき。
+        # 観測された場合は古い frontend / 直接 API 呼出が疑われるので App Insights で
+        # 検知できるよう warn log を残す (root cause: frontend regression or 3rd party caller)。
+        logger.warning(
+            "refine without explicit refineContext: conversation_id=%s text_first_60=%r "
+            "is_eval_feedback=%s",
+            conversation_id,
+            refine_text[:60],
+            is_eval_feedback,
+        )
     if is_eval_feedback:
         # 評価フィードバック → 企画書を再生成して承認フローに再突入
         conversation = await get_conversation(conversation_id, owner_id=owner_id)
