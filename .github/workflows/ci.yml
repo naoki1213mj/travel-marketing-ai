@@ -33,6 +33,11 @@ jobs:
         # SDK のメジャーアップデートで location が drift していないかを CI で早期検知する。
         run: uv run python -c "from azure.ai.projects.models import MicrosoftFabricPreviewTool, FabricDataAgentToolParameters, ToolProjectConnection, ToolChoiceAllowed; print('preview SDK ok')"
 
+      - name: Bicep build (infra/main.bicep)
+        # IaC fresh-deploy は azd の `provider: bicep` 経由で main.bicep を直接コンパイルする。
+        # チェックイン済の main.json は廃止したので、CI で構文/参照エラーが入らないかをここで担保する。
+        run: az bicep build --file infra/main.bicep --outfile $RUNNER_TEMP/main_check.json
+
       - name: Ruff lint
         run: uv run ruff check .
 

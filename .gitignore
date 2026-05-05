@@ -17,6 +17,10 @@ docs/presentation.md
 .vscode
 playwrightscratch/
 
+# Auto-generated ARM template; azd uses infra/main.bicep directly via `provider: bicep`.
+# Regenerate locally with `az bicep build --file infra/main.bicep` if a raw ARM artifact is needed.
+infra/main.json
+
 # Triage quarantine for files awaiting deletion review
 _quarantine_for_review/
 

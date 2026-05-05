@@ -88,25 +88,76 @@ azd deploy
 
 `azd up` により Bicep でインフラを作成し、ACR リモートビルドと Container Apps デプロイまで自動実行されます。
 
-### postprovision で自動構成される項目
+### 新規 Azure 環境への fresh deploy 早見表
 
-- AI Gateway 接続 (`travel-ai-gateway`) と token policy
-- Improvement MCP 用 Function App の作成・managed identity storage 構成・zip 配備・APIM route 登録
-- Voice Agent (Prompt Agent) の作成
-- Marketing-plan Prompt Agent の作成 / 再同期
-- Entra SPA アプリ登録 (Voice Live + Work IQ delegated auth 用)
+> 「`azd up` 1 発で動くか？」の Yes/No は、**機能ごとに分けて把握する** 必要があります。同じコマンドで終わる作業 (IaC) と、コマンド成功後も残る作業 (postprovision / portal manual) を、以下のマトリクスで明示します。
 
-### postprovision 後の手動作業
+| 機能 / コンポーネント | IaC (`azd up` Bicep) で完結 | postprovision で best-effort 構成 | 完全 manual / portal 必須 | 未構成時のアプリ挙動 |
+| --- | --- | --- | --- | --- |
+| Container App + CAE + ACR + Cosmos DB + Key Vault + App Insights + Log Analytics | ✅ | — | — | 起動成功 |
+| Azure AI Services account + `gpt-5.4-mini` (capacity 100) + `gpt-image-2` (capacity 9) | ✅ | — | — | 起動成功 |
+| AI Project + Foundry Project endpoint | ✅ | — | — | 起動成功 |
+| API Management `StandardV2` (~30 分 provisioning) | ✅ | — | — | 起動成功（D2 cutover は別途要 env 設定） |
+| Container App MI ↔ AI Services / ACR / Storage の RBAC | ✅ | — | — | 起動成功 |
+| **Foundry Connections** (APIM→Foundry / Foundry IQ→Search / Voice Agent / Marketing / Data Search Prompt Agent) | — | ✅ (`scripts/postprovision.py` Step 1, 4, 4.5, 4.6) | — | 該当ツール mock fallback (Web Search / Foundry IQ / Marketing は legacy ChatClient に degrade) |
+| **Improvement MCP Function App** + Storage + APIM ルート | — | ✅ (Step 3.5、Storage 名は英数字 24 文字 cap) | — | UI で Improvement brief 取得が空応答 |
+| Entra SPA App Registration (Voice Live + Work IQ) | — | ✅ (Step 5、tenant admin consent は portal 必須) | redirect URI の追加・admin consent | 認証なしモード (Work IQ off) で動作 |
+| **Azure AI Search + `regulations-index`** | — | — | ✅ (検索 ksb は別途 indexer) | regulation-check が静的レスポンスに fall-through |
+| **Microsoft Fabric Lakehouse (`lh_travel_marketing_v2`) + Data Agent (`Travel_Ontology_DA_v2`)** | — | — | ✅ (Fabric ポータルで作成、portal-only) | data-search が CSV → ハードコードに degrade |
+| **Foundry Fabric DA Connection (`travel-fabric-da`)** | — | — | ✅ (Foundry ポータル限定、management plane 非対応) | PR 3 path 無効 → legacy SQL fallback |
+| Photo Avatar (Speech / Avatar) | — | — | ✅ (Speech リソース別途) | Agent5 動画生成 skip |
+| Logic Apps (manager-approval / SharePoint / Teams) | 部分的 (`logic-app.bicep`) | — | ✅ (Teams / SharePoint connector authentication) | 承認後通知 / SharePoint 保存が無効 |
+| MAI-Image-2 (East US 別 endpoint) | — | — | ✅ (`IMAGE_PROJECT_ENDPOINT_MAI` 設定) | UI で MAI 選択時に SVG プレースホルダー |
 
-- 現在の rebuilt `workiq-dev` tenant では **Search/KB**, **Work IQ admin consent**, **gpt-4.1 / gpt-5.4 deployments**, **別 East US MAI endpoint**, **Fabric rebuild**, **manager approval workflow**, **post-approval Teams channel notification** までは完了済みです
-- 新しい tenant を一から立ち上げる場合は、以下の項目が引き続き手動です
+#### 必須前提条件 (fresh tenant 共通)
+
+- **推奨リージョン**: East US 2 / Sweden Central（Code Interpreter のリージョン制約）
+- **必要 quota**:
+  - `gpt-5.4-mini`: 100K TPM 以上 (`infra/modules/ai-services.bicep:6,29-46`)
+  - `gpt-image-2`: 9K TPM 以上 (`infra/modules/ai-services.bicep:7,49-63`)
+  - `gpt-5.5` / `MAI-Image-2` は将来 opt-in、quota 申請を別途実施
+- **Foundry quota**: AI Project + Hub-less Foundry リソースが当該サブスクリプションで作成可能か事前確認
+
+#### `azd up` のローカル vs CI Deploy の挙動差
+
+- **ローカル `azd up`**: `azure.yaml` の `continueOnError: true` により、postprovision のどこかが失敗しても Bicep deploy 自体は ✅ で終わる。Foundry connection / Improvement MCP / Entra App Registration が部分的に未構成のまま完了することがある
+- **GitHub Actions `deploy.yml`**: Improvement MCP の deploy step (`.github/workflows/deploy.yml` 後半) は `continue-on-error` がついておらず、失敗すると workflow が ❌ になる
+- 結果: ローカル `azd up` の成功は「CA + Cosmos + Foundry endpoint まで起動した」相当。Foundry connections や PR 3 のような portal-only setup は別途 §5.x を参照
+
+#### postprovision で自動構成される項目 (Step 番号は `scripts/postprovision.py`)
+
+- Step 0: Fabric workspace への Container App MI Member 付与（`FABRIC_WORKSPACE_ID` 設定時のみ）
+- Step 1: AI Gateway 接続 (`travel-ai-gateway`) と APIM token policy
+- Step 3: AI Gateway 用の追加 APIM policy
+- Step 3.5: Improvement MCP 用 Function App の作成・managed identity storage 構成・zip 配備・APIM route 登録
+- Step 4: Voice Agent (Prompt Agent) の作成
+- Step 4.5/4.6: Marketing-plan / data-search Prompt Agent の作成・再同期 (UI で選択可能な 4 model variants 全件)
+- Step 5: Entra SPA app registration (Voice Live + Work IQ delegated auth 用)
+
+#### postprovision 後に残る portal manual 作業 (新 tenant のとき)
+
 - Azure AI Search の作成と `regulations-index` の投入
-- Foundry → AI Search 接続の追加
-- `FABRIC_DATA_AGENT_URL` / `SPEECH_SERVICE_ENDPOINT` 等の設定
+- Foundry → AI Search 接続 (`regulations-search`) の追加
+- `FABRIC_DATA_AGENT_URL` / `SPEECH_SERVICE_ENDPOINT` 等の azd env 反映
 - Work IQ 用 SPA app registration の Graph delegated permissions 追加 + admin consent
-- Fabric Lakehouse / SQL endpoint / Fabric Data Agent の新テナント側再作成
-- SharePoint 保存経路の復旧（preferred: site permission grant to Logic App MI、fallback: SharePoint connector 再認証）
+- Microsoft Fabric Lakehouse / SQL endpoint / Fabric Data Agent の新テナント側再作成
+- Foundry Portal で Fabric DA connection (`travel-fabric-da`) を作成 (PR 3 §5.x 参照、management plane API 非対応のため portal-only)
+- SharePoint 保存経路の復旧 (preferred: site permission grant to Logic App MI、fallback: SharePoint connector 再認証)
 - Logic Apps の Teams / SharePoint connector や trigger URL が変わる場合の再接続 / 再設定
+
+#### APIM cutover (D2 trusted boundary) を有効化する場合の追加 azd env
+
+> 既定では `TRUSTED_AUTH_HEADER_NAME` 等は空で動作するため、fresh deploy 直後は **anonymous fallback policy** で APIM が動く。production cutover を行うときだけ以下を設定する。
+
+- `azd env set TRUSTED_AUTH_HEADER_SECRET <secrets.token_hex(32)>`
+- `azd env set TRUSTED_AUTH_HEADER_NAME 'X-Apim-Trusted'`
+- `azd env set FRONTEND_CLIENT_ID <SPA App Reg client id>`
+- `azd env set EXPECTED_JWT_AUDIENCE 'https://ai.azure.com'`
+- `azd env set PUBLIC_APP_BASE_URL 'https://<apim-name>.azure-api.net/app'`
+
+> ⚠️ `TRUST_AUTH_HEADER_CLAIMS=true` は **設定しない** (header/secret 検証なしに常に trust する footgun)。
+
+### Work IQ runtime と graph_prefetch fallback
 
 Work IQ は既定で **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`** を使います。`postprovision.py` が Agent2 用の事前作成済み Foundry Prompt Agent を同期し、実行時はその `agent_reference` を **Foundry delegated token (`https://ai.azure.com/user_impersonation`)** 付きの Responses API で呼び出します。Prompt Agent 側の instructions は、添付済みの Work IQ / Microsoft 365 tools を優先利用する前提で同期されます。postprovision は **UI で選択できる text model 全件** (`gpt-5-4-mini`, `gpt-5.4`, `gpt-4-1-mini`, `gpt-4.1`) をまとめて同期します。**`graph_prefetch` は明示 rollback** で、Microsoft Graph Copilot Chat API を per-user delegated token で呼び出して短い brief を先読みします。必要なのは SPA app registration の権限/consent であり、追加の Work IQ API endpoint 環境変数はありません。instructions を変えた場合は marketing-plan agent を再同期してください。
 

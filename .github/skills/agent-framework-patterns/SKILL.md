@@ -1,10 +1,10 @@
 ---
 name: agent-framework-patterns
 description: >-
-    Microsoft Agent Framework (Python) GA 1.0.0 のコードパターン集。
+  Microsoft Agent Framework (Python) GA 1.0.0 のコードパターン集。
   エージェント作成、ツール定義、Workflow 構築、middleware、Hosted Agent デプロイの正しい書き方を提供する。
   Triggers: "agent-framework", "Agent Framework", "エージェント作成", "ツール定義", "@tool",
-    "Workflow", "SequentialBuilder", "middleware", "FoundryChatClient"
+  "Workflow", "SequentialBuilder", "middleware", "FoundryChatClient"
 ---
 
 # Microsoft Agent Framework パターン集（GA 1.0.0 準拠）

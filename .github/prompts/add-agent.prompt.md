@@ -16,7 +16,7 @@ tools: ['filesystem', 'terminal']
    - `client.as_agent()` でエージェントを作成
    - `docs/requirements_v4.0.md` の該当セクションを参照して要件を満たすこと
 
-2. `src/tools/{{agent_name}}_tools.py` を作成する（ツールが多い場合）
+2. `src/agents/{{agent_name}}_tools.py` を作成する（ツールが多い場合、`src/agents/` 配下に置く）
 
 3. `tests/test_{{agent_name}}.py` を作成する
    - ツール関数のユニットテスト
