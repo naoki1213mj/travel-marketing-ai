@@ -240,10 +240,16 @@ def _build_work_iq_mcp_tool_from_connection(connection: WorkIQConnectionConfig) 
 
 
 def _build_work_iq_mcp_tools(project_client: AIProjectClient) -> list[MCPTool]:
-    """Work IQ MCP を primary にしつつ、旧 Copilot tool も互換用に attach する。"""
+    """Prompt Agent definition には legacy Copilot MCP だけを attach する。
+
+    generic WorkIQMCP は OAuth2 header token が必要なため、agent_reference の
+    静的 tool として attach すると list_tools 認証が空 token になりやすい。
+    WorkIQMCP は run 時に request-level tool として渡す。
+    """
     return [
         _build_work_iq_mcp_tool_from_connection(connection)
         for connection in _resolve_work_iq_connections(project_client)
+        if connection["server_label"] == _WORK_IQ_LEGACY_SERVER_LABEL
     ]
 
 
@@ -558,6 +564,15 @@ def run_marketing_plan_prompt_agent(
                     else:
                         raise
             else:
+                work_iq_connections = [
+                    connection
+                    for connection in work_iq_connections
+                    if connection["server_label"] != _WORK_IQ_MCP_SERVER_LABEL
+                ]
+                if not work_iq_connections:
+                    raise ValueError(
+                        "Work IQ is enabled, but the legacy WorkIQCopilot fallback connection was not found."
+                    )
                 openai_client = project_client.get_openai_client(api_key=access_token)
             for index, work_iq_connection in enumerate(work_iq_connections):
                 response_kwargs: dict[str, object] = {

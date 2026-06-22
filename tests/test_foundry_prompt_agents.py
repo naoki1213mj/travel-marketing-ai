@@ -180,8 +180,8 @@ def test_build_work_iq_mcp_tool_ignores_generic_work_iq_mcp_without_opt_in() -> 
     assert tool.as_dict()["project_connection_id"] == "WorkIQCopilot"
 
 
-def test_build_work_iq_mcp_tools_keeps_legacy_connection_for_compatibility(monkeypatch) -> None:
-    """同期済み agent は新旧 app revision の tool_choice を両方受けられるようにする。"""
+def test_build_work_iq_mcp_tools_attaches_only_legacy_connection(monkeypatch) -> None:
+    """Prompt Agent definition には list_tools が安定している legacy connection だけを attach する。"""
     monkeypatch.setenv("ENABLE_WORKIQ_MCP", "true")
     fake_client = _FakeProjectClient(
         _FakeResponsesClient(),
@@ -201,8 +201,8 @@ def test_build_work_iq_mcp_tools_keeps_legacy_connection_for_compatibility(monke
 
     tools = module._build_work_iq_mcp_tools(fake_client)
 
-    assert [tool.as_dict()["server_label"] for tool in tools] == ["WorkIQMCP", "mcp_M365Copilot"]
-    assert [tool.as_dict()["project_connection_id"] for tool in tools] == ["WorkIQMCP", "WorkIQCopilot"]
+    assert [tool.as_dict()["server_label"] for tool in tools] == ["mcp_M365Copilot"]
+    assert [tool.as_dict()["project_connection_id"] for tool in tools] == ["WorkIQCopilot"]
 
 
 def test_build_work_iq_mcp_tool_uses_default_label_for_generic_workiq_endpoint(monkeypatch) -> None:
@@ -305,7 +305,7 @@ def test_run_marketing_plan_prompt_agent_uses_agent_reference_with_work_iq_tool_
 
 
 def test_run_marketing_plan_prompt_agent_prefers_work_iq_mcp_tool_choice(monkeypatch) -> None:
-    """Work IQ MCP connection がある場合は新 server_label を tool_choice に使う。"""
+    """Work IQ MCP token がある場合だけ request-level tool_choice に使う。"""
     monkeypatch.setenv("ENABLE_WORKIQ_MCP", "true")
     responses_client = _FakeResponsesClient()
     fake_client = _FakeProjectClient(
@@ -331,26 +331,52 @@ def test_run_marketing_plan_prompt_agent_prefers_work_iq_mcp_tool_choice(monkeyp
         "test input",
         work_iq={"enabled": True, "source_scope": ["emails", "teams_chats"]},
         work_iq_access_token="delegated-token",
+        work_iq_mcp_access_token="workiq-mcp-token",
     )
 
     kwargs = responses_client.calls[0]
-    assert kwargs["extra_body"]["tool_choice"] == {"type": "mcp", "server_label": "WorkIQMCP"}
-    assert fake_client.openai_client_kwargs == [{"api_key": "delegated-token"}]
+    assert kwargs["tool_choice"] == {"type": "mcp", "server_label": "WorkIQMCP"}
+    assert kwargs["tools"][1]["headers"] == {"Authorization": "Bearer workiq-mcp-token"}
+    assert fake_client.openai_client_kwargs == [{}]
 
 
-def test_run_marketing_plan_prompt_agent_falls_back_to_legacy_work_iq_on_mcp_auth_error(monkeypatch) -> None:
-    """WorkIQMCP preview auth が未成立なら旧 WorkIQCopilot でデモを継続する。"""
+def test_run_marketing_plan_prompt_agent_uses_legacy_when_work_iq_mcp_token_missing(monkeypatch) -> None:
+    """ENABLE_WORKIQ_MCP=true でも MCP token が無ければ legacy agent_reference 経路にする。"""
+    monkeypatch.setenv("ENABLE_WORKIQ_MCP", "true")
+    responses_client = _FakeResponsesClient()
+    fake_client = _FakeProjectClient(
+        responses_client,
+        connections=[
+            _FakeConnection("WorkIQMCP", "RemoteTool", "https://workiq.svc.cloud.microsoft/mcp"),
+            _FakeConnection(
+                "WorkIQCopilot",
+                "RemoteTool",
+                "https://agent365.svc.cloud.microsoft/agents/servers/mcp_M365Copilot",
+            ),
+        ],
+    )
+    monkeypatch.setattr(module, "get_settings", _settings)
+    monkeypatch.setattr(module, "DefaultAzureCredential", lambda: object())
+    monkeypatch.setattr(module, "AIProjectClient", lambda endpoint, credential: fake_client)
+
+    module.run_marketing_plan_prompt_agent(
+        "test input",
+        work_iq={"enabled": True, "source_scope": ["emails"]},
+        work_iq_access_token="delegated-token",
+    )
+
+    kwargs = responses_client.calls[0]
+    assert kwargs["extra_body"]["tool_choice"] == {"type": "mcp", "server_label": "mcp_M365Copilot"}
+    assert "tools" not in kwargs
+
+
+def test_run_marketing_plan_prompt_agent_uses_legacy_without_direct_work_iq_mcp_token(monkeypatch) -> None:
+    """MCP token が無ければ WorkIQMCP を試さず旧 WorkIQCopilot でデモを継続する。"""
     monkeypatch.setenv("ENABLE_WORKIQ_MCP", "true")
     responses_client = _FakeResponsesClient()
 
     def _create(**kwargs):
         responses_client.calls.append(kwargs)
-        server_label = kwargs["extra_body"]["tool_choice"]["server_label"]
-        if server_label == "WorkIQMCP":
-            raise RuntimeError(
-                "Authentication failed when connecting to the MCP server: 401 Unauthorized. "
-                "Access token is empty. code=tool_user_error"
-            )
         return {"id": "resp_legacy"}
 
     responses_client.create = _create  # type: ignore[assignment]
@@ -381,7 +407,6 @@ def test_run_marketing_plan_prompt_agent_falls_back_to_legacy_work_iq_on_mcp_aut
 
     assert result == {"id": "resp_legacy"}
     assert [call["extra_body"]["tool_choice"]["server_label"] for call in responses_client.calls] == [
-        "WorkIQMCP",
         "mcp_M365Copilot",
     ]
 
@@ -621,8 +646,8 @@ def test_sync_marketing_plan_agent_creates_new_version_with_work_iq_tool(monkeyp
     assert definition_tools[1]["server_label"] == "mcp_M365Copilot"
 
 
-def test_sync_marketing_plan_agent_attaches_work_iq_mcp_and_legacy_tools(monkeypatch) -> None:
-    """WorkIQMCP 作成後も旧 app revision の mcp_M365Copilot tool_choice を受けられる。"""
+def test_sync_marketing_plan_agent_attaches_legacy_tool_only(monkeypatch) -> None:
+    """WorkIQMCP は request-level tool 専用にし、Prompt Agent には legacy のみ同期する。"""
     monkeypatch.setenv("ENABLE_WORKIQ_MCP", "true")
     fake_client = _FakeProjectClient(
         _FakeResponsesClient(),
@@ -652,8 +677,8 @@ def test_sync_marketing_plan_agent_attaches_work_iq_mcp_and_legacy_tools(monkeyp
     assert module.sync_marketing_plan_agent("https://example.test", "gpt-5-4-mini") is True
 
     definition_tools = fake_client.agents.calls[0]["definition"].as_dict()["tools"]
-    assert [tool["type"] for tool in definition_tools] == ["web_search", "mcp", "mcp"]
-    assert [tool["server_label"] for tool in definition_tools[1:]] == ["WorkIQMCP", "mcp_M365Copilot"]
+    assert [tool["type"] for tool in definition_tools] == ["web_search", "mcp"]
+    assert [tool["server_label"] for tool in definition_tools[1:]] == ["mcp_M365Copilot"]
 
 
 def test_build_work_iq_tool_guidance_includes_web_search_requirement() -> None:
