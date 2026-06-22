@@ -14,7 +14,7 @@ flowchart TD
 
     api --> flow[FastAPI Orchestration]
     api -.-> apimMcp[APIM improvement-mcp]
-    flow -. default: Foundry Work IQ MCP .-> m365[Microsoft 365 Connectors]
+    flow -. default: Foundry Work IQ tool .-> m365[Microsoft 365 Connectors]
     flow -. rollback only .-> workiq[Microsoft Graph Copilot Chat API]
     apimMcp --> mcpFunc[Azure Functions MCP]
     mcpFunc --> mcpTool[generate_improvement_brief]
@@ -73,12 +73,13 @@ flowchart TD
 
 | Runtime | 既定 | 実装 |
 | --- | --- | --- |
-| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行する。ブラウザが取得した `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、Prompt Agent に添付済みの Work IQ MCP connection を per-user で実行する。`source_scope` は connector 動的 overlay ではなく、instructions / UI / metadata のガイダンス |
+| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行する。ブラウザが取得した `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、Prompt Agent に添付済みの Work IQ connection を per-user で実行する。`ENABLE_WORKIQ_MCP=true` かつ `X-Work-IQ-MCP-Authorization` がある場合のみ Foundry UI の `WorkIQMCP` (`https://workiq.svc.cloud.microsoft/mcp`) を primary にし、未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback を使う。live Prompt Agents は code deploy + env opt-in まで legacy のみに同期済み。`source_scope` は connector 動的 overlay ではなく、instructions / UI / metadata のガイダンス |
 | `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
 
-- `source_scope` ごとの guidance は `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive です。実際の利用可否は事前作成済み Prompt Agent に添付した Work IQ MCP connection と tenant-wide enablement に依存します。
+- `source_scope` ごとの guidance は `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive です。実際の利用可否は事前作成済み Prompt Agent に添付した Work IQ connection（`WorkIQMCP` または legacy `WorkIQCopilot`）と tenant-wide enablement に依存します。
 - フロントエンドは Work IQ 有効化時の auth preflight で `auth_required` / `consent_required` / `redirecting` を先に反映します。
 - バックエンドは `work_iq_session` の status / source scope / sanitized brief metadata を会話 metadata に保存するため、会話復元後も Work IQ UI 状態が一致します。
+- Agent1 は Web Search / Web IQ を使わず、Fabric Data Agent first の required-tool 設計と data boundary を維持します。Web IQ は docs / SDK が成熟した後に Agent2 / Agent3 の web grounding 候補として扱います。
 
 ## 2. Azure リソース構成
 
@@ -153,7 +154,7 @@ flowchart TD
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成 |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live MSAL.js 認証 |
 | `MANAGER_APPROVAL_TRIGGER_URL` / `LOGIC_APP_CALLBACK_URL` | 上司通知 workflow / 承認後アクション workflow の callback を live URL へ合わせるため |
-| Work IQ admin consent + tenant member ブラウザアカウント | delegated Work IQ 経路を tenant 内ユーザーで検証するため |
+| Work IQ admin consent + tenant member ブラウザアカウント | delegated Work IQ 経路を tenant 内ユーザーで検証するため。WorkIQMCP primary は `WorkIQAgent.Ask` admin grant + `ENABLE_WORKIQ_MCP=true` + browser header が揃ってから有効化 |
 
 上記以外の環境変数（`IMPROVEMENT_MCP_ENDPOINT`, `COSMOS_DB_ENDPOINT` 等）は `azd up` で自動注入されます。rebuilt `workiq-dev` tenant では Search / Work IQ / Fabric / Teams 通知までは live で復旧済みで、残件は主に SharePoint 保存経路です。
 
@@ -162,7 +163,7 @@ flowchart TD
 | 実行主体 | 認証方式 | 用途 |
 | --- | --- | --- |
 | Container App | `DefaultAzureCredential` | Foundry, Fabric, Cosmos DB, AI Search |
-| ブラウザ利用者 | delegated token (`https://ai.azure.com/user_impersonation` / `https://cognitiveservices.azure.com/user_impersonation`) | 既定の Work IQ Foundry tool auth、Voice Live auth、owner-bound 会話 API、評価保存。`graph_prefetch` rollback を使う場合だけ Graph delegated token も利用 |
+| ブラウザ利用者 | delegated token (`https://ai.azure.com/user_impersonation` / `https://cognitiveservices.azure.com/user_impersonation` / `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`) | 既定の Work IQ Foundry tool auth、Voice Live auth、owner-bound 会話 API、評価保存。`ENABLE_WORKIQ_MCP=true` のときだけ WorkIQMCP token も利用し、`graph_prefetch` rollback を使う場合だけ Graph delegated token も利用 |
 | APIM | Managed Identity | Foundry バックエンド接続 |
 | AI Search bootstrap | Foundry connection or API key | 初期インデックス投入 |
 

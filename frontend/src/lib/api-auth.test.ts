@@ -7,16 +7,19 @@ const originalFetch = global.fetch
 const {
   getWorkIqFoundryAuth,
   getWorkIqGraphAuth,
+  getWorkIqMcpAuth,
   initMsal,
 } = vi.hoisted(() => ({
   getWorkIqFoundryAuth: vi.fn(),
   getWorkIqGraphAuth: vi.fn(),
+  getWorkIqMcpAuth: vi.fn(),
   initMsal: vi.fn(async () => {}),
 }))
 
 vi.mock('./msal-auth', () => ({
   getWorkIqFoundryAuth,
   getWorkIqGraphAuth,
+  getWorkIqMcpAuth,
   initMsal,
 }))
 
@@ -34,7 +37,9 @@ describe('getDelegatedApiAuth', () => {
     initMsal.mockResolvedValue(undefined)
     getWorkIqFoundryAuth.mockReset()
     getWorkIqGraphAuth.mockReset()
+    getWorkIqMcpAuth.mockReset()
     getWorkIqGraphAuth.mockResolvedValue({ token: '', status: 'unavailable' })
+    getWorkIqMcpAuth.mockResolvedValue({ token: '', status: 'unavailable' })
   })
 
   afterEach(() => {
@@ -45,16 +50,34 @@ describe('getDelegatedApiAuth', () => {
   it('uses Foundry user auth and Graph fallback auth for interactive foundry_tool requests', async () => {
     getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
     getWorkIqGraphAuth.mockResolvedValue({ token: 'graph-token', status: 'ok' })
+    getWorkIqMcpAuth.mockResolvedValue({ token: 'mcp-token', status: 'ok' })
 
     const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
 
     expect(initMsal).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' })
     expect(getWorkIqFoundryAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
+    expect(getWorkIqMcpAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
     expect(getWorkIqGraphAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, true)
     expect(result).toEqual({
       headers: {
         Authorization: 'Bearer foundry-token',
+        'X-Work-IQ-MCP-Authorization': 'Bearer mcp-token',
         'X-Work-IQ-Graph-Authorization': 'Bearer graph-token',
+      },
+      status: 'ok',
+    })
+  })
+
+  it('does not block foundry_tool requests when optional Work IQ MCP auth is unavailable', async () => {
+    getWorkIqFoundryAuth.mockResolvedValue({ token: 'foundry-token', status: 'ok' })
+    getWorkIqMcpAuth.mockResolvedValue({ token: '', status: 'auth_required' })
+
+    const result = await getDelegatedApiAuth({ interactive: true, workIqRuntime: 'foundry_tool' })
+
+    expect(getWorkIqMcpAuth).toHaveBeenCalledWith({ clientId: 'client-id', tenantId: 'tenant-id' }, false)
+    expect(result).toEqual({
+      headers: {
+        Authorization: 'Bearer foundry-token',
       },
       status: 'ok',
     })

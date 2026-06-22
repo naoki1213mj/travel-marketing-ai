@@ -1,4 +1,4 @@
-import { getWorkIqFoundryAuth, getWorkIqGraphAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
+import { getWorkIqFoundryAuth, getWorkIqGraphAuth, getWorkIqMcpAuth, initMsal, type DelegatedAuthStatus } from './msal-auth'
 import { apiUrl } from './api-base'
 import {
   normalizeMsalConfig,
@@ -99,6 +99,14 @@ export async function getDelegatedApiAuth(
     }
   }
   const headers: Record<string, string> = foundryResult.token ? { Authorization: `Bearer ${foundryResult.token}` } : {}
+  try {
+    const mcpResult = await getWorkIqMcpAuth(config, false)
+    if (mcpResult.status === 'ok' && mcpResult.token) {
+      headers['X-Work-IQ-MCP-Authorization'] = `Bearer ${mcpResult.token}`
+    }
+  } catch (error) {
+    console.warn('Optional Work IQ MCP auth failed:', error)
+  }
   try {
     const graphResult = await getWorkIqGraphAuth(config, options?.interactive === true)
     if (graphResult.status === 'ok' && graphResult.token) {

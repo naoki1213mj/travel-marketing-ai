@@ -37,6 +37,7 @@ export interface DelegatedTokenResult {
 
 const VOICE_LIVE_SCOPES = ['https://cognitiveservices.azure.com/user_impersonation']
 const FOUNDRY_USER_SCOPES = ['https://ai.azure.com/user_impersonation']
+const WORK_IQ_MCP_SCOPES = ['api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask']
 const WORK_IQ_GRAPH_SCOPES = [
   'https://graph.microsoft.com/Sites.Read.All',
   'https://graph.microsoft.com/Mail.Read',
@@ -291,4 +292,8 @@ export async function getWorkIqFoundryToken(config: MsalConfig, interactive = fa
 
 export async function getWorkIqFoundryAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
   return acquireDelegatedToken(config, FOUNDRY_USER_SCOPES, interactive)
+}
+
+export async function getWorkIqMcpAuth(config: MsalConfig, interactive = false): Promise<DelegatedTokenResult> {
+  return acquireDelegatedToken(config, WORK_IQ_MCP_SCOPES, interactive)
 }

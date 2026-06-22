@@ -24,13 +24,13 @@
 2. **Improvement MCP**: Flex Consumption Function App の作成、managed identity ベースの storage 構成、vendored 依存入り ready-to-run zip 配備、MCP runtime 応答確認、APIM `improvement-mcp` route 同期
 3. **Voice Agent**: Foundry SDK 経由で Voice Live 対応 Prompt Agent を作成
 4. **Marketing plan Agent**: Foundry SDK 経由で Agent2 用の事前作成済み Prompt Agent を作成/同期（UI で選択できる `gpt-5-4-mini` / `gpt-5.4` / `gpt-4-1-mini` / `gpt-4.1` をまとめて同期）
-5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Voice Live / Foundry delegated scopes、`graph_prefetch` rollback 用の Graph delegated permissions を同期）
+5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Voice Live / Foundry delegated scopes、WorkIQMCP 用 `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`、`graph_prefetch` rollback 用の Graph delegated permissions を同期）
 
 ## 3. Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-18)
 
 | 領域 | 状態 | 補足 |
 | --- | --- | --- |
-| Work IQ | 完了 | SPA redirect URI、Foundry delegated auth (`https://ai.azure.com/user_impersonation`)、`graph_prefetch` rollback 用 Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。既定 runtime は `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool` です。Agent2 は事前作成済み Foundry Agent を使い、backend がユーザーの Foundry delegated token を Responses API へ渡して、添付済みの Work IQ MCP connection を per-user で実行します。`graph_prefetch` は明示 rollback 用で、必要時だけ Microsoft Graph Copilot Chat API（`chatOverStream` 優先、既定 `WORK_IQ_TIMEOUT_SECONDS=120`）から短い brief を先読みします |
+| Work IQ | 完了 | SPA redirect URI、Foundry delegated auth (`https://ai.azure.com/user_impersonation`)、Work IQ SP + SPA `WorkIQAgent.Ask` delegated permission/admin grant、`graph_prefetch` rollback 用 Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。Foundry UI には OAuth2 の `WorkIQMCP` connection（`https://workiq.svc.cloud.microsoft/mcp`, server label `WorkIQMCP`）を作成済みですが、live Prompt Agents は既存 image 互換のため legacy `WorkIQCopilot` のみに同期済みです。code deploy 後に `ENABLE_WORKIQ_MCP=true` と browser の `X-Work-IQ-MCP-Authorization` で primary 化できます |
 | Search / Foundry IQ | 完了 | Azure AI Search は **East US** に作成。`regulations-index`、`regulations-ks`、`regulations-kb` を投入済み |
 | 追加モデル | 完了 / 要 quota | メイン East US 2 Foundry account に `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4` を配備済み。`gpt-5.5` は East US 2 catalog で GA（version `2026-04-24`、`GlobalStandard` / `DataZoneStandard`、Responses 対応）ですが、現 subscription の quota は 0 TPM なので未配備です。アプリ既定の画像経路は `gpt-image-2` で、GPT 系画像モデルは `AZURE_AI_PROJECT_ENDPOINT` から導出した AI Services account endpoint の Azure OpenAI Images API を Managed Identity で呼びます。deployment 名が既定と異なる場合は `GPT_IMAGE_2_DEPLOYMENT_NAME` で上書きできます。`gpt-image-1.5` も引き続き利用可能です |
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
@@ -293,20 +293,21 @@ GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger
 > rebuilt `workiq-dev` tenant ではすでに完了済みです。以下は **別 tenant を作り直す場合だけ** の手順です。
 
 1. 新テナントの Global Administrator または Cloud Application Administrator で Entra admin center にサインインする
-2. SPA アプリ登録に Microsoft Graph delegated permissions を追加する: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`
-3. Work IQ / Microsoft 365 Copilot 用の enterprise app / app registration を開き、上記権限に **Grant admin consent** を実行する
-4. `foundry_tool` を使うため、同じ SPA app registration から **Foundry data-plane delegated permission** を取得できるようにする
+2. SPA アプリ登録に WorkIQMCP 用 delegated permission `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask` を追加する
+3. `graph_prefetch` rollback を残す場合だけ、SPA アプリ登録に Microsoft Graph delegated permissions を追加する: `Sites.Read.All`, `Mail.Read`, `People.Read.All`, `OnlineMeetingTranscript.Read.All`, `Chat.Read`, `ChannelMessage.Read.All`, `ExternalItem.Read.All`
+4. Work IQ / Microsoft 365 Copilot 用の enterprise app / app registration を開き、上記権限に **Grant admin consent** を実行する
+5. `foundry_tool` を使うため、同じ SPA app registration から **Foundry data-plane delegated permission** を取得できるようにする
    - browser/MSAL が要求する scope は `https://ai.azure.com/user_impersonation`
    - これは FastAPI が Foundry Responses API を **ユーザーとして** 呼ぶための token で、Graph token の代替ではない
    - Work IQ / Microsoft 365 Copilot connector 側の tenant-wide enablement は別途必要だが、SPA が Agent 365 Tools scope を直接要求する必要はない
-5. SPA redirect URI にはアプリ本体 URL に加えて **専用 redirect bridge ページ** も登録する
+6. SPA redirect URI にはアプリ本体 URL に加えて **専用 redirect bridge ページ** も登録する
    - `http://localhost:5173/auth-redirect.html`
    - `http://localhost:8000/auth-redirect.html`
    - `https://<container-app-host>/auth-redirect.html`
-6. 既定 runtime は **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`**。`postprovision.py` が Agent2 用の Foundry Prompt Agent を同期し、実行時はその `agent_reference` を使う。instructions を更新した場合も、反映には `scripts/postprovision.py` の再実行で marketing-plan agent の再同期が必要
-7. `WORKIQ_RUNTIME=foundry_tool` では、事前作成済み Agent に対して read-only の Microsoft 365 connector を使う。frontend は `https://ai.azure.com/user_impersonation` を取得し、backend はその token で Foundry Responses API をユーザーとして呼ぶ。`meeting_notes` は Teams、`emails` は Outlook Email、`teams_chats` は Teams、`documents_notes` は SharePoint を使う。追加の Work IQ endpoint 環境変数は不要
-8. `WORKIQ_RUNTIME=graph_prefetch` は明示 rollback 用で、この場合だけ **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出して短い brief を先読みする
-9. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、preflight の状態が `auth_required` / `consent_required` / `redirecting` から `ready` / `enabled` へ進むこと、そしてバックエンドに保存された `work_iq_session.status` を復元しても同じ UI 状態が表示されることを確認する
+7. 既定 runtime は **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`**。`postprovision.py` が Agent2 用の Foundry Prompt Agent を同期し、実行時はその `agent_reference` を使う。instructions を更新した場合も、反映には `scripts/postprovision.py` の再実行で marketing-plan agent の再同期が必要
+8. `WORKIQ_RUNTIME=foundry_tool` では、live 互換の既定は legacy `WorkIQCopilot` / `mcp_M365Copilot`。Foundry UI の OAuth2 `WorkIQMCP` connection（server_url `https://workiq.svc.cloud.microsoft/mcp`）を primary にするのは、code deploy 後に `ENABLE_WORKIQ_MCP=true` を設定し、frontend が `X-Work-IQ-MCP-Authorization` を送れる状態を確認してからにする
+9. `WORKIQ_RUNTIME=graph_prefetch` は明示 rollback 用で、この場合だけ **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出して短い brief を先読みする
+10. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、preflight の状態が `auth_required` / `consent_required` / `redirecting` から `ready` / `enabled` へ進むこと、そしてバックエンドに保存された `work_iq_session.status` を復元しても同じ UI 状態が表示されることを確認する
 
 tenant-wide consent はユーザー個人の delegated sign-in では代替できないため、この部分だけは外部手順として残ります。
 
@@ -442,7 +443,7 @@ curl https://<app>/api/sources/limits
 | MCP 改善が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認。新 tenant では Function App が managed identity storage に切り替わっているかも確認する |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |
 | Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
-| `work_iq_runtime=foundry_tool` がエラーになる | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。`legacy` と組み合わせるのは未サポート |
+| `work_iq_runtime=foundry_tool` がエラーになる | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。`ENABLE_WORKIQ_MCP=true` の場合は `X-Work-IQ-MCP-Authorization` が届いているか確認し、必要なら env を外して legacy `WorkIQCopilot` fallback で切り分ける |
 | Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
 | `/api/sources/*` が 503 | `ENABLE_SOURCE_INGESTION=true` が Container App に反映済みか確認。音声だけ失敗する場合は MAI Transcribe の endpoint / deployment / API path を確認 |
 | `/api/capabilities` で `configured=true` だが `available=false` | 必須 endpoint、App Insights、sample rate、deployment/quota、または privacy gate が不足していないか確認 |

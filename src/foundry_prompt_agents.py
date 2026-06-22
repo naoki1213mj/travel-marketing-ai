@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any, TypedDict
@@ -25,11 +26,16 @@ _SOURCE_LABELS = {
     "teams_chats": "Teams チャット",
     "documents_notes": "ドキュメント / ノート",
 }
-_WORK_IQ_CONNECTION_NAME = "WorkIQCopilot"
-_WORK_IQ_SERVER_LABEL = "mcp_M365Copilot"
+_WORK_IQ_MCP_CONNECTION_NAMES = ("WorkIQMCP", "Work IQ MCP")
+_WORK_IQ_MCP_SERVER_LABEL = "WorkIQMCP"
+_WORK_IQ_LEGACY_CONNECTION_NAME = "WorkIQCopilot"
+_WORK_IQ_LEGACY_SERVER_LABEL = "mcp_M365Copilot"
+_WORK_IQ_CONNECTION_NAME = _WORK_IQ_LEGACY_CONNECTION_NAME
+_WORK_IQ_SERVER_LABEL = _WORK_IQ_LEGACY_SERVER_LABEL
 _WORK_IQ_SERVER_DESCRIPTION = (
     "Microsoft 365 workplace context tools for organizational emails, meetings, chats, and documents."
 )
+_TRUE_VALUES = {"1", "true", "yes", "on", "enabled"}
 _WORK_IQ_BASELINE_GUIDANCE = (
     "\n\n## Work IQ / Microsoft 365 tools の利用方針\n"
     "- Work IQ / Microsoft 365 MCP tool が利用可能な場合は、"
@@ -54,6 +60,7 @@ class WorkIQConnectionConfig(TypedDict):
     """Work IQ RemoteTool connection から復元した最小構成。"""
 
     connection_name: str
+    server_label: str
     server_url: str
 
 
@@ -83,10 +90,13 @@ def build_marketing_plan_agent_definition(
     model_name: str,
     *,
     work_iq_tool: MCPTool | None = None,
+    work_iq_tools: list[MCPTool] | None = None,
 ) -> PromptAgentDefinition:
     """marketing-plan 用の事前作成済み Agent 定義を返す。"""
     tools: list[object] = [_build_marketing_plan_web_search_tool()]
-    if work_iq_tool is not None:
+    if work_iq_tools:
+        tools.extend(work_iq_tools)
+    elif work_iq_tool is not None:
         tools.append(work_iq_tool)
     return PromptAgentDefinition(
         model=model_name,
@@ -119,41 +129,122 @@ def _resolve_work_iq_server_url(connection_target: object) -> str:
     return connection_target.strip()
 
 
-def _resolve_work_iq_connection(project_client: AIProjectClient) -> WorkIQConnectionConfig | None:
-    """Foundry project の Work IQ RemoteTool connection 情報を返す。"""
-    try:
-        connections = list(project_client.connections.list())
-    except Exception:
-        return None
+def _normalize_work_iq_marker(value: str) -> str:
+    """Work IQ connection / server label の比較用トークンへ正規化する。"""
+    return re.sub(r"[^a-z0-9]", "", value.strip().lower())
 
-    for connection in connections:
-        connection_name = getattr(connection, "name", "")
-        connection_type = getattr(connection, "type", "")
-        connection_target = _resolve_work_iq_server_url(getattr(connection, "target", ""))
-        if not isinstance(connection_name, str) or not isinstance(connection_type, str):
-            continue
-        if connection_type != "RemoteTool" or not connection_target:
-            continue
-        if connection_name != _WORK_IQ_CONNECTION_NAME and _WORK_IQ_SERVER_LABEL not in connection_target:
-            continue
-        return {
-            "connection_name": connection_name,
-            "server_url": connection_target,
-        }
+
+def _is_generic_work_iq_mcp_enabled() -> bool:
+    """Work IQ MCP generic endpoint を primary として使う明示 opt-in を判定する。"""
+    return os.environ.get("ENABLE_WORKIQ_MCP", "").strip().lower() in _TRUE_VALUES
+
+
+def _is_remote_tool_connection(connection_type: object) -> bool:
+    """Foundry SDK の string / enum どちらの形でも RemoteTool を判定する。"""
+    if not isinstance(connection_type, str):
+        connection_type = str(connection_type)
+    marker = _normalize_work_iq_marker(connection_type)
+    return marker == "remotetool" or marker.endswith("remotetool")
+
+
+def _resolve_work_iq_connection_priority(connection_name: str, server_url: str) -> int | None:
+    """Work IQ MCP を優先し、旧 WorkIQCopilot は fallback として分類する。"""
+    name_marker = _normalize_work_iq_marker(connection_name)
+    target_marker = _normalize_work_iq_marker(server_url)
+    mcp_name_markers = {_normalize_work_iq_marker(name) for name in _WORK_IQ_MCP_CONNECTION_NAMES}
+    if _is_generic_work_iq_mcp_enabled():
+        if (
+            name_marker in mcp_name_markers
+            or "workiqmcp" in name_marker
+            or "workiqmcp" in target_marker
+            or ("workiq" in target_marker and "mcp" in target_marker and "m365copilot" not in target_marker)
+            or ("workiq" in name_marker and "mcp" in name_marker and "copilot" not in name_marker)
+        ):
+            return 0
+
+    if (
+        name_marker == _normalize_work_iq_marker(_WORK_IQ_LEGACY_CONNECTION_NAME)
+        or _WORK_IQ_LEGACY_SERVER_LABEL in server_url
+        or "m365copilot" in target_marker
+    ):
+        return 1
     return None
 
 
+def _derive_work_iq_server_label(connection_name: str, server_url: str) -> str:
+    """Connection 情報から Responses API / MCPTool の server_label を決める。"""
+    label_match = re.search(r"(mcp_[A-Za-z0-9_-]+)", server_url)
+    if label_match:
+        return label_match.group(1)
+    priority = _resolve_work_iq_connection_priority(connection_name, server_url)
+    if priority == 1:
+        return _WORK_IQ_LEGACY_SERVER_LABEL
+    return _WORK_IQ_MCP_SERVER_LABEL
+
+
+def _resolve_work_iq_connections(project_client: AIProjectClient) -> list[WorkIQConnectionConfig]:
+    """Foundry project の Work IQ RemoteTool connection 情報を優先順で返す。"""
+    try:
+        connections = list(project_client.connections.list())
+    except Exception:
+        return []
+
+    candidates: list[tuple[int, int, WorkIQConnectionConfig]] = []
+    for index, connection in enumerate(connections):
+        connection_name = getattr(connection, "name", "")
+        connection_type = getattr(connection, "type", "")
+        connection_target = _resolve_work_iq_server_url(getattr(connection, "target", ""))
+        if not isinstance(connection_name, str):
+            continue
+        if not _is_remote_tool_connection(connection_type) or not connection_target:
+            continue
+        priority = _resolve_work_iq_connection_priority(connection_name, connection_target)
+        if priority is None:
+            continue
+        candidates.append(
+            (
+                priority,
+                index,
+                {
+                    "connection_name": connection_name,
+                    "server_label": _derive_work_iq_server_label(connection_name, connection_target),
+                    "server_url": connection_target,
+                },
+            )
+        )
+    return [item[2] for item in sorted(candidates, key=lambda item: (item[0], item[1]))]
+
+
+def _resolve_work_iq_connection(project_client: AIProjectClient) -> WorkIQConnectionConfig | None:
+    """Foundry project の primary Work IQ RemoteTool connection 情報を返す。"""
+    connections = _resolve_work_iq_connections(project_client)
+    return connections[0] if connections else None
+
+
 def _build_work_iq_mcp_tool(project_client: AIProjectClient) -> MCPTool | None:
-    """Foundry project の Work IQ Copilot connection から MCP tool を組み立てる。"""
+    """Foundry project の Work IQ MCP / 旧 Copilot connection から MCP tool を組み立てる。"""
     connection = _resolve_work_iq_connection(project_client)
     if connection is None:
         return None
+    return _build_work_iq_mcp_tool_from_connection(connection)
+
+
+def _build_work_iq_mcp_tool_from_connection(connection: WorkIQConnectionConfig) -> MCPTool:
+    """Work IQ connection config から MCPTool を構築する。"""
     return MCPTool(
-        server_label=_WORK_IQ_SERVER_LABEL,
+        server_label=connection["server_label"],
         server_url=connection["server_url"],
         project_connection_id=connection["connection_name"],
         require_approval="never",
     )
+
+
+def _build_work_iq_mcp_tools(project_client: AIProjectClient) -> list[MCPTool]:
+    """Work IQ MCP を primary にしつつ、旧 Copilot tool も互換用に attach する。"""
+    return [
+        _build_work_iq_mcp_tool_from_connection(connection)
+        for connection in _resolve_work_iq_connections(project_client)
+    ]
 
 
 def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
@@ -166,10 +257,10 @@ def sync_marketing_plan_agent(project_endpoint: str, model_name: str) -> bool:
         model_name = resolve_model_deployment(model_name, settings=settings)  # type: ignore[arg-type]
         project_client = AIProjectClient(endpoint=project_endpoint, credential=DefaultAzureCredential())
         agent_name = _resolve_marketing_plan_agent_name(model_name)
-        work_iq_tool = _build_work_iq_mcp_tool(project_client)
+        work_iq_tools = _build_work_iq_mcp_tools(project_client)
         project_client.agents.create_version(
             agent_name=agent_name,
-            definition=build_marketing_plan_agent_definition(model_name, work_iq_tool=work_iq_tool),
+            definition=build_marketing_plan_agent_definition(model_name, work_iq_tools=work_iq_tools),
         )
         logger.info("marketing-plan Prompt Agent を同期しました: %s", agent_name)
         return True
@@ -211,21 +302,118 @@ def _build_work_iq_responses_tool(
     server_url: str,
     *,
     connection_name: str,
+    server_label: str | None = None,
+    authorization_token: str = "",
+    allowed_tools: list[str] | None = None,
 ) -> dict[str, object]:
     """Responses API で Work IQ MCP を呼ぶための tool 定義を返す。"""
-    return {
+    tool: dict[str, object] = {
         "type": "mcp",
-        "server_label": _WORK_IQ_SERVER_LABEL,
+        "server_label": server_label or _derive_work_iq_server_label(connection_name, server_url),
         "server_url": server_url,
-        "project_connection_id": connection_name,
         "require_approval": "never",
         "server_description": _WORK_IQ_SERVER_DESCRIPTION,
     }
+    if authorization_token.strip():
+        tool["headers"] = {"Authorization": f"Bearer {authorization_token.strip()}"}
+    else:
+        tool["project_connection_id"] = connection_name
+    if allowed_tools:
+        tool["allowed_tools"] = allowed_tools
+    return tool
 
 
-def _build_work_iq_tool_choice() -> dict[str, str]:
+def _build_work_iq_tool_choice(server_label: str) -> dict[str, str]:
     """Responses API に Work IQ MCP を最低 1 回使わせる tool_choice を返す。"""
-    return {"type": "mcp", "server_label": _WORK_IQ_SERVER_LABEL}
+    return {"type": "mcp", "server_label": server_label}
+
+
+def _is_recoverable_work_iq_mcp_error(exc: Exception) -> bool:
+    """WorkIQMCP preview auth が未成立のとき旧 connector へ戻せるか判定する。"""
+    return _is_recoverable_work_iq_mcp_message(str(exc))
+
+
+def _is_recoverable_work_iq_mcp_message(message: str) -> bool:
+    """WorkIQMCP の auth/token 系失敗メッセージを分類する。"""
+    message = message.lower()
+    return (
+        "mcp server" in message
+        and (
+            "401" in message
+            or "unauthorized" in message
+            or "authentication failed" in message
+            or "invalid audience" in message
+            or "access token is empty" in message
+            or "tool_user_error" in message
+        )
+    )
+
+
+def _response_has_recoverable_work_iq_mcp_failure(response: object, server_label: str) -> bool:
+    """正常 HTTP 応答内の failed MCP call から legacy fallback 必要性を判定する。"""
+    output = getattr(response, "output", None)
+    if not isinstance(output, list):
+        return False
+    queue: list[object] = list(output)
+    while queue:
+        item = queue.pop(0)
+        if isinstance(item, list):
+            queue[:0] = item
+            continue
+        if isinstance(item, dict):
+            item_type = item.get("type")
+            item_server_label = item.get("server_label")
+            status = str(item.get("status") or "").lower()
+            error = str(item.get("error") or "")
+            nested_output = item.get("output")
+            nested_contents = item.get("contents")
+        else:
+            item_type = getattr(item, "type", None)
+            item_server_label = getattr(item, "server_label", None)
+            status = str(getattr(item, "status", "") or "").lower()
+            error = str(getattr(item, "error", "") or "")
+            nested_output = getattr(item, "output", None)
+            nested_contents = getattr(item, "contents", None)
+        if (
+            item_type == "mcp_call"
+            and item_server_label == server_label
+            and status in {"failed", "error", "incomplete"}
+            and _is_recoverable_work_iq_mcp_message(error)
+        ):
+            return True
+        if isinstance(nested_output, list):
+            queue.extend(nested_output)
+        if isinstance(nested_contents, list):
+            queue.extend(nested_contents)
+    return False
+
+
+def _build_work_iq_direct_response_tools(
+    connection: WorkIQConnectionConfig,
+    *,
+    work_iq_mcp_access_token: str,
+) -> list[dict[str, object]]:
+    """agent_reference を使わず WorkIQMCP を header token 付き request tool として渡す。"""
+    return [
+        _build_marketing_plan_responses_web_search_tool(),
+        _build_work_iq_responses_tool(
+            connection["server_url"],
+            connection_name=connection["connection_name"],
+            server_label=connection["server_label"],
+            authorization_token=work_iq_mcp_access_token,
+            allowed_tools=["ask", "fetch", "call_function", "get_schema", "search_paths", "list_agents"],
+        ),
+    ]
+
+
+def _is_work_iq_server_label(server_label: str) -> bool:
+    """旧 Work IQ Copilot と新 Work IQ MCP の tool call label を互換検出する。"""
+    if not server_label:
+        return True
+    if server_label in {_WORK_IQ_MCP_SERVER_LABEL, _WORK_IQ_LEGACY_SERVER_LABEL}:
+        return True
+    marker = _normalize_work_iq_marker(server_label)
+    return ("workiq" in marker and "mcp" in marker) or "m365copilot" in marker
 
 
 def _detect_marketing_plan_tool_usage(response: object) -> tuple[bool, bool]:
@@ -261,8 +449,8 @@ def _detect_marketing_plan_tool_usage(response: object) -> tuple[bool, bool]:
         server_label_raw = _value(item, "server_label") or ""
         server_label = str(server_label_raw)
         if item_type:
-            if item_type == "mcp_call" or item_type.startswith("mcp_"):
-                if not server_label or server_label == _WORK_IQ_SERVER_LABEL:
+            if item_type == "mcp_call":
+                if _is_work_iq_server_label(server_label):
                     work_iq_called = True
             elif (
                 item_type == "web_search_call"
@@ -288,6 +476,7 @@ def run_marketing_plan_prompt_agent(
     *,
     work_iq: WorkIQPromptConfig | None = None,
     work_iq_access_token: str = "",
+    work_iq_mcp_access_token: str = "",
 ) -> object:
     """Foundry Prompt Agent として marketing-plan-agent を実行する。"""
     settings = get_settings()
@@ -305,27 +494,96 @@ def run_marketing_plan_prompt_agent(
     try:
         work_iq_config = work_iq or {"enabled": False, "source_scope": []}
         agent = _get_marketing_plan_agent(project_client, model_name)
+        response = None
         if work_iq_config["enabled"]:
             access_token = work_iq_access_token.strip()
             if not access_token:
                 raise ValueError("Work IQ is enabled for the Foundry marketing-plan path, but no delegated access token was supplied.")
-            work_iq_connection = _resolve_work_iq_connection(project_client)
-            if work_iq_connection is None:
+            work_iq_connections = _resolve_work_iq_connections(project_client)
+            if not work_iq_connections:
                 raise ValueError(
-                    "Work IQ is enabled for the Foundry marketing-plan path, but no WorkIQCopilot RemoteTool connection was found."
+                    "Work IQ is enabled for the Foundry marketing-plan path, but no Work IQ MCP or WorkIQCopilot RemoteTool connection was found."
                 )
-            response_kwargs: dict[str, object] = {
-                "model": model_name,
-                "input": (
-                    f"{_build_work_iq_tool_guidance(work_iq_config)}"
-                    f"\n\n---\n\nユーザー入力:\n{user_input}"
-                ),
-                "extra_body": {
-                    "agent_reference": {"name": agent.name, "type": "agent_reference"},
-                    "tool_choice": _build_work_iq_tool_choice(),
-                },
-            }
-            openai_client = project_client.get_openai_client(api_key=access_token)
+            response_input = (
+                f"{_build_work_iq_tool_guidance(work_iq_config)}"
+                f"\n\n---\n\nユーザー入力:\n{user_input}"
+            )
+            work_iq_mcp_connections = [
+                connection for connection in work_iq_connections if connection["server_label"] == _WORK_IQ_MCP_SERVER_LABEL
+            ]
+            if _is_generic_work_iq_mcp_enabled() and work_iq_mcp_access_token.strip() and work_iq_mcp_connections:
+                work_iq_connection = work_iq_mcp_connections[0]
+                openai_client = project_client.get_openai_client()
+                try:
+                    response = openai_client.responses.create(
+                        model=model_name,
+                        instructions=f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
+                        input=response_input,
+                        tools=_build_work_iq_direct_response_tools(
+                            work_iq_connection,
+                            work_iq_mcp_access_token=work_iq_mcp_access_token,
+                        ),
+                        tool_choice=_build_work_iq_tool_choice(work_iq_connection["server_label"]),
+                    )
+                    fallback_connections = [
+                        connection for connection in work_iq_connections if connection["server_label"] != _WORK_IQ_MCP_SERVER_LABEL
+                    ]
+                    if fallback_connections and _response_has_recoverable_work_iq_mcp_failure(
+                        response,
+                        work_iq_connection["server_label"],
+                    ):
+                        logger.warning(
+                            "Direct Work IQ MCP connection `%s` returned a failed MCP call; retrying with `%s`",
+                            work_iq_connection["connection_name"],
+                            fallback_connections[0]["connection_name"],
+                        )
+                        response = None
+                        work_iq_connections = fallback_connections
+                        openai_client = project_client.get_openai_client(api_key=access_token)
+                    else:
+                        work_iq_connections = []
+                except Exception as exc:
+                    fallback_connections = [
+                        connection for connection in work_iq_connections if connection["server_label"] != _WORK_IQ_MCP_SERVER_LABEL
+                    ]
+                    if fallback_connections and _is_recoverable_work_iq_mcp_error(exc):
+                        logger.warning(
+                            "Direct Work IQ MCP connection `%s` failed; retrying with `%s`: %s",
+                            work_iq_connection["connection_name"],
+                            fallback_connections[0]["connection_name"],
+                            exc,
+                        )
+                        work_iq_connections = fallback_connections
+                        openai_client = project_client.get_openai_client(api_key=access_token)
+                    else:
+                        raise
+            else:
+                openai_client = project_client.get_openai_client(api_key=access_token)
+            for index, work_iq_connection in enumerate(work_iq_connections):
+                response_kwargs: dict[str, object] = {
+                    "model": model_name,
+                    "input": response_input,
+                    "extra_body": {
+                        "agent_reference": {"name": agent.name, "type": "agent_reference"},
+                        "tool_choice": _build_work_iq_tool_choice(work_iq_connection["server_label"]),
+                    },
+                }
+                try:
+                    response = openai_client.responses.create(
+                        **response_kwargs,
+                    )
+                    break
+                except Exception as exc:
+                    has_fallback = index + 1 < len(work_iq_connections)
+                    if has_fallback and _is_recoverable_work_iq_mcp_error(exc):
+                        logger.warning(
+                            "Work IQ MCP connection `%s` failed; retrying with `%s`: %s",
+                            work_iq_connection["connection_name"],
+                            work_iq_connections[index + 1]["connection_name"],
+                            exc,
+                        )
+                        continue
+                    raise
         else:
             response_kwargs = {
                 "model": model_name,
@@ -333,9 +591,10 @@ def run_marketing_plan_prompt_agent(
                 "extra_body": {"agent_reference": {"name": agent.name, "type": "agent_reference"}},
             }
             openai_client = project_client.get_openai_client()
-        response = openai_client.responses.create(
-            **response_kwargs,
-        )
+        if response is None:
+            response = openai_client.responses.create(
+                **response_kwargs,
+            )
         if work_iq_config["enabled"]:
             work_iq_called, web_search_called = _detect_marketing_plan_tool_usage(response)
             if not web_search_called:

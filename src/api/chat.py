@@ -445,6 +445,7 @@ def _build_foundry_workiq_source_metadata(
 
     Foundry MCP の出力は per-source attribution を含まないため、各選択ソースに対して
     `status="connector_used"` を返す（"使用済み" と断定せず "コネクタ実行済" として表現する）。
+    件数や原文 preview は持たせず、UI が実行済み状態を確認できる非機密 summary だけを添える。
     結果は `work_iq_session["brief_source_metadata"]` にも保存し、永続化 / 再開 時にも UI が同じ
     badge を再現できるようにする。
     """
@@ -461,7 +462,15 @@ def _build_foundry_workiq_source_metadata(
         if not source or source in seen or source not in _WORK_IQ_VALID_SOURCES:
             continue
         seen.add(source)
-        metadata.append({"source": source, "status": "connector_used"})
+        label = _WORK_IQ_SOURCE_LABELS[source]
+        metadata.append(
+            {
+                "source": source,
+                "label": label,
+                "status": "connector_used",
+                "summary": f"「{label}」は Foundry Work IQ MCP connector 経由で確認しました（件数・原文プレビューは表示しません）。",
+            }
+        )
 
     if metadata:
         work_iq_session["brief_source_metadata"] = metadata
@@ -566,11 +575,11 @@ def _sanitize_text(value: str) -> str:
     return value
 
 
-def _sanitize_optional_text(value: str | None) -> str:
+def _sanitize_optional_text(value: object | None) -> str:
     """空文字を許可する軽量サニタイズ。"""
     if value is None:
         return ""
-    return _CONTROL_CHAR_RE.sub("", value).strip()
+    return _CONTROL_CHAR_RE.sub("", str(value)).strip()
 
 
 def _strip_response_citation_markers(value: str) -> str:
@@ -1190,6 +1199,10 @@ def _should_retry_marketing_plan_with_graph_prefetch(plan_outcome: dict[str, obj
                 or (
                     payload.get("status") == "timeout"
                     and payload.get("error_code") == "WORKIQ_TIMEOUT"
+                )
+                or (
+                    payload.get("status") == "failed"
+                    and payload.get("error_code") in {"WORKIQ_NOT_USED", "WORKIQ_CALL_FAILED"}
                 )
             )
         ):
@@ -2725,7 +2738,9 @@ _TOOL_CALL_TYPE_MAP = {
     "web_search_call": "web_search",
     "bing_grounding_call": "web_search",
 }
-_WORK_IQ_MCP_SERVER_LABEL = "mcp_M365Copilot"
+_WORK_IQ_MCP_SERVER_LABEL = "WorkIQMCP"
+_WORK_IQ_LEGACY_MCP_SERVER_LABEL = "mcp_M365Copilot"
+_WORK_IQ_MCP_SERVER_LABELS = {_WORK_IQ_MCP_SERVER_LABEL, _WORK_IQ_LEGACY_MCP_SERVER_LABEL}
 
 
 def _merge_tool_names(*tool_groups: list[str]) -> list[str]:
@@ -2746,11 +2761,11 @@ def _collect_result_outputs(result: object) -> list[object]:
     collected: list[object] = []
     queue: list[object] = []
 
-    contents = getattr(result, "contents", None)
+    contents = _read_mapping_or_attr(result, "contents")
     if isinstance(contents, list):
         queue.extend(contents)
 
-    result_output = getattr(result, "output", None)
+    result_output = _read_mapping_or_attr(result, "output")
     if isinstance(result_output, list):
         queue.extend(result_output)
 
@@ -2769,13 +2784,10 @@ def _collect_result_outputs(result: object) -> list[object]:
             continue
         collected.append(item)
 
-        nested_contents = getattr(item, "contents", None)
-        if isinstance(nested_contents, list):
-            queue.extend(nested_contents)
-
-        nested_output = getattr(item, "output", None)
-        if isinstance(nested_output, list):
-            queue.extend(nested_output)
+        for nested_key in ("contents", "content", "output"):
+            nested_items = _read_mapping_or_attr(item, nested_key)
+            if isinstance(nested_items, list):
+                queue.extend(nested_items)
 
     return collected
 
@@ -2785,15 +2797,15 @@ def _extract_tool_names(result: object, agent_name: str, result_text: str) -> li
     tool_names: list[str] = []
 
     for output in _collect_result_outputs(result):
-        output_type = getattr(output, "type", "")
+        output_type = _read_mapping_or_attr(output, "type") or ""
         if not isinstance(output_type, str) or not output_type:
             continue
 
         if output_type == "function_call":
-            name = getattr(output, "name", None)
+            name = _read_mapping_or_attr(output, "name")
             if not isinstance(name, str) or not name:
-                function_obj = getattr(output, "function", None)
-                name = getattr(function_obj, "name", None)
+                function_obj = _read_mapping_or_attr(output, "function")
+                name = _read_mapping_or_attr(function_obj, "name") if function_obj is not None else None
             if isinstance(name, str) and name:
                 tool_names.append(normalize_tool_name(name))
             continue
@@ -2811,21 +2823,47 @@ def _extract_tool_names(result: object, agent_name: str, result_text: str) -> li
 def _find_output_item_by_type(result: object, output_type: str) -> object | None:
     """指定 type の output item を最初の 1 件だけ返す。"""
     for output in _collect_result_outputs(result):
-        if getattr(output, "type", None) == output_type:
+        if _read_mapping_or_attr(output, "type") == output_type:
             return output
     return None
 
 
-def _extract_mcp_calls(result: object, *, server_label: str | None = None) -> list[object]:
+def _extract_mcp_calls(
+    result: object,
+    *,
+    server_label: str | None = None,
+    server_labels: set[str] | None = None,
+) -> list[object]:
     """Responses output から MCP call items を抽出する。"""
     calls: list[object] = []
     for output in _collect_result_outputs(result):
-        if getattr(output, "type", None) != "mcp_call":
+        if _read_mapping_or_attr(output, "type") != "mcp_call":
             continue
-        if server_label is not None and getattr(output, "server_label", None) != server_label:
+        actual_server_label = _sanitize_optional_text(_read_mapping_or_attr(output, "server_label"))
+        if server_labels is not None and actual_server_label not in server_labels:
+            continue
+        if server_label is not None and actual_server_label != server_label:
             continue
         calls.append(output)
     return calls
+
+
+def _is_successful_mcp_call(call: object) -> bool:
+    """Responses MCP call item が実際に成功したかを判定する。"""
+    error = _sanitize_optional_text(_read_mapping_or_attr(call, "error"))
+    if error:
+        return False
+    status = _sanitize_optional_text(_read_mapping_or_attr(call, "status")).lower()
+    return status in {"", "completed", "succeeded", "success", "ok"}
+
+
+def _summarize_mcp_call_failure(call: object) -> str:
+    """MCP call failure の詳細を UI / log 向けに短く整形する。"""
+    error = _sanitize_optional_text(_read_mapping_or_attr(call, "error"))
+    if error:
+        return "MCP call returned an upstream error."
+    status = _sanitize_optional_text(_read_mapping_or_attr(call, "status"))
+    return f"MCP call status was {status or 'unknown'}."
 
 
 def _read_mapping_or_attr(value: object, key: str) -> object | None:
@@ -3141,6 +3179,7 @@ async def _execute_agent(
     workflow_settings: WorkflowSettings | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    work_iq_mcp_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
     caller_auth_mode: str = "anonymous",
@@ -3300,6 +3339,7 @@ async def _execute_agent(
                             "source_scope": list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
                         },
                         work_iq_access_token=work_iq_access_token,
+                        work_iq_mcp_access_token=work_iq_mcp_access_token,
                     )
                     if work_iq_enabled_for_prompt:
                         timeout_seconds = _resolve_work_iq_timeout_seconds()
@@ -3667,7 +3707,7 @@ async def _execute_agent(
                     total_steps=total_steps,
                     start_time=start_time,
                 )
-            work_iq_mcp_calls = _extract_mcp_calls(result, server_label=_WORK_IQ_MCP_SERVER_LABEL)
+            work_iq_mcp_calls = _extract_mcp_calls(result, server_labels=_WORK_IQ_MCP_SERVER_LABELS)
             if not work_iq_mcp_calls:
                 events.append(
                     _format_tool_event_sse(
@@ -3698,6 +3738,46 @@ async def _execute_agent(
                     success=False,
                     latency_seconds=round(time.monotonic() - start_time, 1),
                     error_code="WORKIQ_NOT_USED",
+                )
+                return _build_agent_failure_outcome(
+                    events,
+                    agent_name=agent_name,
+                    step=step,
+                    total_steps=total_steps,
+                    start_time=start_time,
+                )
+            failed_mcp_calls = [call for call in work_iq_mcp_calls if not _is_successful_mcp_call(call)]
+            if failed_mcp_calls:
+                failure_message = _summarize_mcp_call_failure(failed_mcp_calls[0])
+                events.append(
+                    _format_tool_event_sse(
+                        _build_agent_tool_event(
+                            "workiq_foundry_tool",
+                            "failed",
+                            agent_name=agent_name,
+                            step=step,
+                            source="workiq",
+                            provider="foundry",
+                            display_name="Work IQ context tools",
+                            error_code="WORKIQ_CALL_FAILED",
+                            error_message=failure_message,
+                            source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
+                        )
+                    )
+                )
+                events.append(
+                    format_sse(
+                        SSEEventType.ERROR,
+                        {
+                            "message": "Foundry Work IQ tool の実行に失敗したため、企画書生成を中断しました。",
+                            "code": "WORKIQ_CALL_FAILED",
+                        },
+                    )
+                )
+                _finish_agent_span(
+                    success=False,
+                    latency_seconds=round(time.monotonic() - start_time, 1),
+                    error_code="WORKIQ_CALL_FAILED",
                 )
                 return _build_agent_failure_outcome(
                     events,
@@ -3902,6 +3982,7 @@ async def _execute_agent_with_runtime(
     workflow_settings: WorkflowSettings | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    work_iq_mcp_access_token: str = "",
     total_steps: int = _PIPELINE_TOTAL_STEPS,
     include_done: bool = False,
     caller_auth_mode: str = "anonymous",
@@ -3916,6 +3997,7 @@ async def _execute_agent_with_runtime(
         "workflow_settings": workflow_settings,
         "work_iq_session": work_iq_session,
         "work_iq_access_token": work_iq_access_token,
+        "work_iq_mcp_access_token": work_iq_mcp_access_token,
         "total_steps": total_steps,
         "include_done": include_done,
         "caller_auth_mode": caller_auth_mode,
@@ -3926,6 +4008,8 @@ async def _execute_agent_with_runtime(
         kwargs.pop("work_iq_session")
     if "work_iq_access_token" not in inspect.signature(_execute_agent).parameters:
         kwargs.pop("work_iq_access_token")
+    if "work_iq_mcp_access_token" not in inspect.signature(_execute_agent).parameters:
+        kwargs.pop("work_iq_mcp_access_token")
     if "caller_auth_mode" not in inspect.signature(_execute_agent).parameters:
         kwargs.pop("caller_auth_mode")
     return await _execute_agent(**kwargs)
@@ -4525,6 +4609,7 @@ async def _refine_events(
     model_settings_override: dict | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    work_iq_mcp_access_token: str = "",
     approval_token: str | None = None,
 ):
     """完了後のマルチターン修正リクエストを処理する SSE イベント"""
@@ -5675,6 +5760,7 @@ async def workflow_event_generator(
     conversation_settings: ConversationSettings | None = None,
     work_iq_session: WorkIQSessionMetadata | None = None,
     work_iq_access_token: str = "",
+    work_iq_mcp_access_token: str = "",
     work_iq_graph_access_token: str = "",
     user_time_zone: str = "UTC",
     caller_auth_mode: str = "anonymous",
@@ -5797,6 +5883,7 @@ async def workflow_event_generator(
         workflow_settings=workflow_settings,
         work_iq_session=work_iq_session,
         work_iq_access_token=work_iq_access_token,
+        work_iq_mcp_access_token=work_iq_mcp_access_token,
     )
     if (
         work_iq_session
@@ -5902,6 +5989,9 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
     except RequestIdentityError as exc:
         return _error_stream(exc.message, exc.code, status_code=exc.status_code)
     work_iq_access_token = _extract_bearer_token(_sanitize_optional_text(request.headers.get("authorization")))
+    work_iq_mcp_access_token = _extract_bearer_token(
+        _sanitize_optional_text(request.headers.get("x-work-iq-mcp-authorization"))
+    )
     work_iq_graph_access_token = _extract_bearer_token(
         _sanitize_optional_text(request.headers.get("x-work-iq-graph-authorization"))
     )
@@ -6008,6 +6098,7 @@ async def chat(request: Request, body: ChatRequest, background_tasks: Background
                         conversation_settings=effective_conversation_settings,
                         work_iq_session=effective_work_iq_session,
                         work_iq_access_token=work_iq_access_token,
+                        work_iq_mcp_access_token=work_iq_mcp_access_token,
                         work_iq_graph_access_token=work_iq_graph_access_token,
                         user_time_zone=user_time_zone,
                         caller_auth_mode=caller_identity.get("auth_mode", "anonymous"),

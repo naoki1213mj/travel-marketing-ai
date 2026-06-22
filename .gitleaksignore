@@ -3,3 +3,10 @@
 
 # False positive: documentation-only dummy API key example in historical agent guidance.
 ba723c63b66607ea6bf3c70b6917079e48f30572:.github/agents/se-gitops-ci-specialist.md:generic-api-key:92
+
+# False positive: historical session cookie documentation describing Path=/api, not a secret.
+071ff4821cefc38dc5b19889cc4cd8b4f94551f5:src/session_cookie.py:generic-api-key:11
+
+# False positives: historical API docs used the same redacted/truncated sample approval_token.
+a63bb9ae68e6d792c075120512d6632648474af5:docs/api-reference.md:generic-api-key:218
+a63bb9ae68e6d792c075120512d6632648474af5:docs/api-reference.md:generic-api-key:803

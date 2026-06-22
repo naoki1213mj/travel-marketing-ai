@@ -84,6 +84,8 @@
 
 **データソース優先順位 (Foundry path)**: Fabric Data Agent (Pass 1) → SQL endpoint via function tool (Pass 2) → CSV → ハードコードデータ
 
+**Web grounding 方針**: Agent1 は Web Search / Web IQ を使わない。Fabric Data Agent first の required-tool 設計と Fabric data boundary を維持する。Web IQ は docs / SDK が成熟した後に Agent2 / Agent3 の web grounding 候補として検討する。
+
 **Foundry path 前提条件**:
 
 - `caller_identity["auth_mode"] == "delegated"` AND `delegated_user_access_token` 非空 AND `FOUNDRY_FABRIC_CONNECTION_ID` 非空 の AND 条件で発動
@@ -114,7 +116,9 @@
 
 - 既定: `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`
 - connector 対応: `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive
-- `foundry_tool` ではブラウザの `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、事前作成済み Prompt Agent に添付された Work IQ MCP connection を `tool_choice={"type":"mcp","server_label":"mcp_M365Copilot"}` で最低 1 回使わせる
+- `foundry_tool` ではブラウザの `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、事前作成済み Prompt Agent に添付された Work IQ MCP connection を最低 1 回使わせる
+- Foundry UI には OAuth2 の `WorkIQMCP` connection（connectionName / server_label `WorkIQMCP`, server_url `https://workiq.svc.cloud.microsoft/mcp`）を作成済み。`ENABLE_WORKIQ_MCP=true` かつ browser が `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask` token を `X-Work-IQ-MCP-Authorization` で送った場合だけ primary。未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback を使う
+- live production Prompt Agents は既存 container image を壊さないため legacy `WorkIQCopilot` のみに同期済み。code deploy + env opt-in 後に `WorkIQMCP` を有効化する
 - rollback: `WORKIQ_RUNTIME=graph_prefetch` を指定すると Microsoft Graph Copilot Chat API で短い brief を先読みする
 
 ---

@@ -64,6 +64,118 @@ class TestExtractTerminalToolEvents:
         assert payload["error_message"] == "OpenAI rejected request: Invalid data: field is required"
 
 
+class TestWorkIqFoundryRuntimeHelpers:
+    """Foundry Work IQ runtime の出力検出と UI metadata のテスト。"""
+
+    def test_extract_mcp_calls_handles_mapping_outputs(self) -> None:
+        """OpenAI SDK が dict 形状を返しても MCP call を検出する。"""
+        result = SimpleNamespace(
+            output=[
+                {"type": "mcp_list_tools", "server_label": "mcp_M365Copilot"},
+                {
+                    "type": "run_summary",
+                    "output": [
+                        {
+                            "type": "mcp_call",
+                            "server_label": "mcp_M365Copilot",
+                            "status": "completed",
+                        }
+                    ],
+                },
+            ]
+        )
+
+        calls = chat_module._extract_mcp_calls(result, server_label="mcp_M365Copilot")
+
+        assert len(calls) == 1
+        assert chat_module._is_successful_mcp_call(calls[0]) is True
+
+    def test_extract_mcp_calls_accepts_new_and_legacy_work_iq_labels(self) -> None:
+        """WorkIQMCP 移行中は新旧 server_label のどちらも Work IQ 実行として扱う。"""
+        result = SimpleNamespace(
+            output=[
+                {"type": "mcp_call", "server_label": "WorkIQMCP", "status": "completed"},
+                {"type": "mcp_call", "server_label": "mcp_M365Copilot", "status": "completed"},
+                {"type": "mcp_call", "server_label": "other", "status": "completed"},
+            ]
+        )
+
+        calls = chat_module._extract_mcp_calls(result, server_labels=chat_module._WORK_IQ_MCP_SERVER_LABELS)
+
+        assert [_call["server_label"] for _call in calls] == ["WorkIQMCP", "mcp_M365Copilot"]
+
+    def test_failed_mcp_call_is_not_successful(self) -> None:
+        """MCP call の raw error は成功判定にも UI message にも使わない。"""
+        failed_call = {
+            "type": "mcp_call",
+            "server_label": "mcp_M365Copilot",
+            "status": "failed",
+            "error": "Confidential workplace snippet: customer renewal details",
+        }
+
+        assert chat_module._is_successful_mcp_call(failed_call) is False
+        assert chat_module._summarize_mcp_call_failure(failed_call) == "MCP call returned an upstream error."
+        assert "Confidential" not in chat_module._summarize_mcp_call_failure(failed_call)
+
+    def test_failed_mcp_call_handles_structured_error_without_leaking(self) -> None:
+        """Preview SDK が error を dict で返しても SSE stream を落とさず汎用メッセージにする。"""
+        failed_call = {
+            "type": "mcp_call",
+            "server_label": "WorkIQMCP",
+            "status": "failed",
+            "error": {"message": "Confidential workplace snippet"},
+        }
+
+        assert chat_module._is_successful_mcp_call(failed_call) is False
+        assert chat_module._summarize_mcp_call_failure(failed_call) == "MCP call returned an upstream error."
+        assert "Confidential" not in chat_module._summarize_mcp_call_failure(failed_call)
+
+    def test_foundry_workiq_source_metadata_includes_safe_preview_marker(self) -> None:
+        """Foundry MCP 経路でも UI が実行済みと分かる非機密 summary を保存する。"""
+        session = {
+            "enabled": True,
+            "source_scope": ["emails", "teams_chats"],
+            "auth_mode": "anonymous",
+            "owner_oid": "",
+            "owner_tid": "",
+            "owner_upn": "",
+        }
+
+        metadata = chat_module._build_foundry_workiq_source_metadata(session)
+
+        assert metadata == [
+            {
+                "source": "emails",
+                "label": "メール",
+                "status": "connector_used",
+                "summary": "「メール」は Foundry Work IQ MCP connector 経由で確認しました（件数・原文プレビューは表示しません）。",
+            },
+            {
+                "source": "teams_chats",
+                "label": "Teams チャット",
+                "status": "connector_used",
+                "summary": "「Teams チャット」は Foundry Work IQ MCP connector 経由で確認しました（件数・原文プレビューは表示しません）。",
+            },
+        ]
+        assert session["brief_source_metadata"] == metadata
+
+    def test_workiq_not_used_and_call_failed_are_graph_fallback_candidates(self) -> None:
+        """Foundry MCP が呼ばれない/失敗した場合は graph_prefetch fallback 対象にする。"""
+        for error_code in ("WORKIQ_NOT_USED", "WORKIQ_CALL_FAILED"):
+            event = chat_module.format_sse(
+                chat_module.SSEEventType.TOOL_EVENT,
+                {
+                    "tool": "workiq_foundry_tool",
+                    "status": "failed",
+                    "error_code": error_code,
+                },
+            )
+
+            assert chat_module._should_retry_marketing_plan_with_graph_prefetch(
+                {"success": False, "events": [event]}
+            ) is True
+
+
 class TestSSEEventPersistenceParsing:
     """SSE イベント保存用 parser の後方互換テスト"""
 
@@ -521,7 +633,7 @@ class TestMarketingPlanRuntimeSettings:
         monkeypatch.setattr(chat_module, "get_settings", lambda: {"work_iq_timeout_seconds": "30"})
         assert chat_module._resolve_work_iq_timeout_seconds() == 30.0
 
-    def test_foundry_work_iq_no_longer_auto_falls_back(self) -> None:
+    def test_foundry_work_iq_not_used_can_fall_back_to_graph_prefetch(self) -> None:
         event = chat_module.format_sse(
             chat_module.SSEEventType.TOOL_EVENT,
             {
@@ -532,7 +644,7 @@ class TestMarketingPlanRuntimeSettings:
         )
         assert chat_module._should_retry_marketing_plan_with_graph_prefetch(
             {"success": False, "events": [event]}
-        ) is False
+        ) is True
 
     def test_foundry_work_iq_obo_auth_failure_can_fall_back_to_graph_prefetch(self) -> None:
         event = chat_module.format_sse(
@@ -2891,7 +3003,7 @@ async def test_workflow_event_generator_uses_foundry_work_iq_tool_event_semantic
 
 
 def test_build_foundry_workiq_source_metadata_marks_selected_sources_connector_used() -> None:
-    """Foundry MCP 成功時は選択された有効ソースに status=connector_used を付ける。"""
+    """Foundry MCP 成功時は選択ソースに connector_used と非機密 summary を付ける。"""
     session: dict[str, object] = {
         "enabled": True,
         "source_scope": ["meeting_notes", "emails", "documents_notes"],
@@ -2899,11 +3011,13 @@ def test_build_foundry_workiq_source_metadata_marks_selected_sources_connector_u
 
     metadata = chat_module._build_foundry_workiq_source_metadata(session)
 
-    assert metadata == [
-        {"source": "meeting_notes", "status": "connector_used"},
-        {"source": "emails", "status": "connector_used"},
-        {"source": "documents_notes", "status": "connector_used"},
+    assert [(item["source"], item["status"]) for item in metadata] == [
+        ("meeting_notes", "connector_used"),
+        ("emails", "connector_used"),
+        ("documents_notes", "connector_used"),
     ]
+    assert all(item.get("label") for item in metadata)
+    assert all("件数・原文プレビューは表示しません" in str(item.get("summary")) for item in metadata)
     # session にも永続化される (再開時に UI 状態を復元できる)
     assert session["brief_source_metadata"] == metadata
 
@@ -2917,9 +3031,9 @@ def test_build_foundry_workiq_source_metadata_filters_invalid_sources() -> None:
 
     metadata = chat_module._build_foundry_workiq_source_metadata(session)
 
-    assert metadata == [
-        {"source": "meeting_notes", "status": "connector_used"},
-        {"source": "emails", "status": "connector_used"},
+    assert [(item["source"], item["status"]) for item in metadata] == [
+        ("meeting_notes", "connector_used"),
+        ("emails", "connector_used"),
     ]
 
 
@@ -3088,10 +3202,13 @@ async def test_workflow_event_generator_propagates_connector_used_source_metadat
     completed_events = [p for p in tool_events if p.get("tool") == "workiq_foundry_tool" and p.get("status") == "completed"]
     assert completed_events, "expected at least one workiq_foundry_tool completed event"
     completed = completed_events[-1]
-    assert completed.get("source_metadata") == [
-        {"source": "meeting_notes", "status": "connector_used"},
-        {"source": "emails", "status": "connector_used"},
+    source_metadata = completed.get("source_metadata")
+    assert isinstance(source_metadata, list)
+    assert [(item["source"], item["status"]) for item in source_metadata] == [
+        ("meeting_notes", "connector_used"),
+        ("emails", "connector_used"),
     ]
+    assert all("件数・原文プレビューは表示しません" in item["summary"] for item in source_metadata)
 
 
 @pytest.mark.asyncio
@@ -4840,4 +4957,3 @@ class TestBuildAgentFailureOutcome:
         )
 
         assert outcome["text"] == "部分結果の説明"
-
