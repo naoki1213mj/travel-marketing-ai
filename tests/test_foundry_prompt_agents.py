@@ -421,8 +421,7 @@ def test_run_marketing_plan_prompt_agent_falls_back_after_direct_work_iq_mcp_aut
         direct_choice = kwargs.get("tool_choice")
         if isinstance(direct_choice, dict) and direct_choice.get("server_label") == "WorkIQMCP":
             raise RuntimeError(
-                "Authentication failed when connecting to the MCP server: 401 Unauthorized. "
-                "Invalid audience. code=tool_user_error"
+                "The server had an error processing your request. code=server_error"
             )
         return {"id": "resp_legacy"}
 

@@ -552,7 +552,7 @@ def run_marketing_plan_prompt_agent(
                     fallback_connections = [
                         connection for connection in work_iq_connections if connection["server_label"] != _WORK_IQ_MCP_SERVER_LABEL
                     ]
-                    if fallback_connections and _is_recoverable_work_iq_mcp_error(exc):
+                    if fallback_connections:
                         logger.warning(
                             "Direct Work IQ MCP connection `%s` failed; retrying with `%s`: %s",
                             work_iq_connection["connection_name"],
