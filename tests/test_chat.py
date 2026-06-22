@@ -967,3 +967,77 @@ def test_manager_approval_callback_rejects_invalid_token(monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["error"] == "invalid manager approval token"
+
+
+def test_derive_regulation_kb_query_includes_regulation_terms():
+    """規制チェックの Foundry IQ クエリは企画書抜粋と規制キーワードを含む。"""
+    from src.api.chat import _derive_regulation_kb_query
+
+    query = _derive_regulation_kb_query("# 北海道スノーリゾート企画\n最安値で楽しめる**冬旅**")
+    assert "景品表示法" in query
+    assert "旅行業法" in query
+    assert "北海道スノーリゾート企画" in query
+    # markdown 記号は除去される
+    assert "#" not in query
+    assert "**" not in query
+
+
+def test_derive_regulation_kb_query_falls_back_to_terms_when_empty():
+    """空入力でも規制キーワードのみのクエリにフォールバックする。"""
+    from src.api.chat import _derive_regulation_kb_query
+
+    assert "景品表示法" in _derive_regulation_kb_query("")
+
+
+@pytest.mark.asyncio
+async def test_ensure_regulation_foundry_iq_used_emits_event(monkeypatch):
+    """LLM が Foundry IQ を呼ばない場合、決定的フォールバックが tool_event を補完する。"""
+    from src.api.chat import _ensure_regulation_foundry_iq_used
+    from src.tool_telemetry import build_tool_event_data, emit_tool_event
+
+    captured_queries: list[str] = []
+
+    async def _fake_search_knowledge_base(query):
+        captured_queries.append(query)
+        emit_tool_event(
+            build_tool_event_data(
+                "foundry_iq_search",
+                "completed",
+                agent_name="regulation-check-agent",
+                source="foundry",
+                provider="foundry",
+                evidence=[{"id": "kb-1", "title": "景品表示法", "source": "foundry", "quote": "..."}],
+            )
+        )
+        return "{}"
+
+    monkeypatch.setattr(
+        "src.agents.regulation_check.search_knowledge_base",
+        _fake_search_knowledge_base,
+    )
+
+    collector: list = []
+    used = await _ensure_regulation_foundry_iq_used("北海道スキー企画", 4, collector)
+
+    assert used is True
+    assert captured_queries and "景品表示法" in captured_queries[0]
+    assert any(event.get("tool") == "foundry_iq_search" and event.get("status") == "completed" for event in collector)
+
+
+@pytest.mark.asyncio
+async def test_ensure_regulation_foundry_iq_used_returns_false_on_error(monkeypatch):
+    """フォールバックの KB 検索が例外を投げても落ちずに False を返す。"""
+    from src.api.chat import _ensure_regulation_foundry_iq_used
+
+    async def _raising_search_knowledge_base(query):
+        raise RuntimeError("search backend down")
+
+    monkeypatch.setattr(
+        "src.agents.regulation_check.search_knowledge_base",
+        _raising_search_knowledge_base,
+    )
+
+    collector: list = []
+    used = await _ensure_regulation_foundry_iq_used("北海道スキー企画", 4, collector)
+
+    assert used is False

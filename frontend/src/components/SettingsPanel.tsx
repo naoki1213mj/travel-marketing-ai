@@ -4,8 +4,6 @@
 
 import { Building2, ChevronDown, ImagePlus, ShieldCheck, SlidersHorizontal } from 'lucide-react'
 import { useState } from 'react'
-import type { WorkIqSourceMetadata } from '../lib/event-schemas'
-import { WorkIqSourceStatus } from './WorkIqSourceStatus'
 
 export type ImageModel = 'gpt-image-1.5' | 'gpt-image-2' | 'MAI-Image-2'
 
@@ -128,8 +126,6 @@ interface SettingsPanelProps {
   settings: ModelSettings
   conversationSettings: ConversationSettings
   workIqStatus: WorkIqUiStatus
-  workIqSourceMetadata?: WorkIqSourceMetadata[]
-  workIqBriefSummary?: string
   modelRouterAvailable?: boolean
   gpt55Available?: boolean
   workIqAvailable?: boolean
@@ -204,8 +200,6 @@ export function SettingsPanel({
   settings,
   conversationSettings,
   workIqStatus,
-  workIqSourceMetadata,
-  workIqBriefSummary,
   modelRouterAvailable,
   gpt55Available,
   workIqAvailable,
@@ -629,15 +623,6 @@ export function SettingsPanel({
                   </p>
                 )}
               </div>
-
-              <WorkIqSourceStatus
-                enabled={isWorkIqEnabled}
-                selectedSources={conversationSettings.workIqSourceScope}
-                status={effectiveWorkIqStatus}
-                sourceMetadata={workIqSourceMetadata}
-                briefSummary={workIqBriefSummary}
-                t={t}
-              />
             </div>
           )}
         </div>

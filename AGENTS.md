@@ -119,6 +119,7 @@
 - `foundry_tool` ではブラウザの `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、事前作成済み Prompt Agent に添付された Work IQ MCP connection を最低 1 回使わせる
 - Foundry UI には OAuth2 の `WorkIQMCP` connection（connectionName / server_label `WorkIQMCP`, server_url `https://workiq.svc.cloud.microsoft/mcp`）を作成済み。`ENABLE_WORKIQ_MCP=true` かつ browser が `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask` token を `X-Work-IQ-MCP-Authorization` で送った場合だけ primary。未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback を使う
 - live production Prompt Agents は既存 container image を壊さないため legacy `WorkIQCopilot` のみに同期済み。code deploy + env opt-in 後に `WorkIQMCP` を有効化する
+- **既知の問題 (2026-06-22)**: request-level WorkIQMCP は Foundry が一貫して `500 server_error` を返すため実質利用不可。先行試行が legacy フォールバックまでの二段ホップ遅延を生み 120s timeout を誘発していたため、**`ENABLE_WORKIQ_MCP=false`（既定）** とし動作実績のある legacy `WorkIQCopilot`（OBO）を主経路にする。Microsoft サポート調査が解決したら再有効化する
 - rollback: `WORKIQ_RUNTIME=graph_prefetch` を指定すると Microsoft Graph Copilot Chat API で短い brief を先読みする
 
 ---

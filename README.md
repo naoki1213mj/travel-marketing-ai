@@ -141,7 +141,7 @@ azd up                                    # provision + build + deploy
 | `FABRIC_REVIEWS_TABLE` | Optional | Reviews table name for Fabric SQL fallback (v2 default: `tour_review`) |
 | `MARKETING_PLAN_RUNTIME` | Optional | Marketing-plan runtime selector (default: `foundry_preprovisioned`; `legacy` remains available for rollback/testing) |
 | `WORKIQ_RUNTIME` | Optional | Work IQ runtime selector (default: `foundry_tool`; `graph_prefetch` remains available as the explicit rollback path) |
-| `ENABLE_WORKIQ_MCP` | Optional | Opt-in to make the Foundry `WorkIQMCP` connection primary when the browser also sends `X-Work-IQ-MCP-Authorization`; leave unset to use legacy `WorkIQCopilot` only |
+| `ENABLE_WORKIQ_MCP` | Optional | **Default `false`.** Would make the Foundry `WorkIQMCP` connection the primary request-level tool when the browser also sends `X-Work-IQ-MCP-Authorization`, but as of 2026-06-22 Foundry consistently returns `500 server_error` for that connection, so it is disabled and the working legacy `WorkIQCopilot` (OBO) path is used. Re-enable only after the server-side 500 is resolved |
 | `WORK_IQ_TIMEOUT_SECONDS` | Optional | Timeout for the `graph_prefetch` rollback path when fetching a short Work IQ brief from Microsoft Graph Copilot Chat API (default: `120`) |
 | `PUBLIC_APP_BASE_URL` | Recommended for manager approval | Canonical public base URL used when generating manager approval and callback links |
 | `ENABLE_GITHUB_COPILOT_REVIEW_AGENT` | Optional | Opt-in for the preview `GitHubCopilotAgent` quality review path. Default is `false`, which keeps the safer Foundry review fallback |

@@ -141,7 +141,7 @@ azd up                                    # プロビジョニング + ビルド
 | `FABRIC_REVIEWS_TABLE` | 任意 | Fabric SQL fallback 用レビューテーブル名（コード default: `customer_reviews`、v2 lakehouse 運用時の推奨値: `tour_review`） |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan の runtime 切替（既定: `foundry_preprovisioned`、`legacy` は rollback / 検証用） |
 | `WORKIQ_RUNTIME` | 任意 | Work IQ runtime 切替（既定: `foundry_tool`、`graph_prefetch` は明示 rollback 用） |
-| `ENABLE_WORKIQ_MCP` | 任意 | browser が `X-Work-IQ-MCP-Authorization` を送る場合に Foundry `WorkIQMCP` connection を primary にする opt-in。未設定時は legacy `WorkIQCopilot` のみ使用 |
+| `ENABLE_WORKIQ_MCP` | 任意 | **既定 `false`。** browser が `X-Work-IQ-MCP-Authorization` を送る場合に Foundry `WorkIQMCP` connection を request-level primary にする想定だが、2026-06-22 時点で Foundry が一貫して `500 server_error` を返すため無効化し、動作実績のある legacy `WorkIQCopilot`（OBO）を使用。500 解消後に再有効化する |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | `graph_prefetch` rollback 経路で Microsoft Graph Copilot Chat API から短い Work IQ brief を取得するときの timeout（既定: `120`） |
 | `PUBLIC_APP_BASE_URL` | 上司承認で推奨 | manager approval / callback URL を生成するときに使う公開ベース URL |
 | `ENABLE_GITHUB_COPILOT_REVIEW_AGENT` | 任意 | preview の `GitHubCopilotAgent` 品質レビュー経路を opt-in するフラグ。既定 `false` では Foundry review fallback を使います |

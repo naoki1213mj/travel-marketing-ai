@@ -400,7 +400,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `MCP_REGISTRY_ENDPOINT` | 任意 | MCP registry UI / capabilities 用 endpoint |
 | `MARKETING_PLAN_RUNTIME` | 任意 | marketing-plan runtime（既定: `foundry_preprovisioned`） |
 | `WORKIQ_RUNTIME` | 任意 | Work IQ runtime（既定: `foundry_tool`）。`graph_prefetch` は明示 rollback 用 |
-| `ENABLE_WORKIQ_MCP` | 任意 | `true` のとき、browser の `X-Work-IQ-MCP-Authorization` があれば Foundry `WorkIQMCP` connection を primary にする。未設定時は legacy `WorkIQCopilot` のみ |
+| `ENABLE_WORKIQ_MCP` | 任意 | **既定 `false`。** `true` で browser の `X-Work-IQ-MCP-Authorization` がある場合に Foundry `WorkIQMCP` を request-level primary にする想定だが、2026-06-22 時点で Foundry が `500 server_error` を返すため無効。legacy `WorkIQCopilot` を使用 |
 | `WORK_IQ_TIMEOUT_SECONDS` | 任意 | Graph Copilot Chat API 取得 timeout（秒、既定 120） |
 | `PUBLIC_APP_BASE_URL` | 上司承認で推奨 | manager approval / callback URL に使う canonical public URL |
 | `ENABLE_GITHUB_COPILOT_REVIEW_AGENT` | 任意 | preview の `GitHubCopilotAgent` 品質レビューを opt-in するときだけ `true` |

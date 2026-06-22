@@ -539,8 +539,6 @@ function App() {
               settings={state.settings}
               conversationSettings={state.conversationSettings}
               workIqStatus={state.workIq.status}
-              workIqSourceMetadata={state.workIq.sourceMetadata}
-              workIqBriefSummary={state.workIq.briefSummary}
               modelRouterAvailable={modelRouterAvailable}
               gpt55Available={gpt55Available}
               workIqAvailable={workIqAvailable}

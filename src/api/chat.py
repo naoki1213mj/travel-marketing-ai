@@ -3170,6 +3170,43 @@ async def _await_blocking_call_with_timeout(call_coro: Awaitable[object], timeou
     raise TimeoutError(f"Foundry Work IQ connector timed out after {timeout_seconds:.0f}s")
 
 
+def _derive_regulation_kb_query(user_input: str) -> str:
+    """企画書テキストから規制チェック用の Foundry IQ 検索クエリを生成する。"""
+    regulation_terms = "旅行広告 景品表示法 有利誤認 優良誤認 旅行業法 取引条件明示 表示規制"
+    snippet = re.sub(r"[#*`>|\-]", " ", user_input or "")
+    snippet = re.sub(r"\s+", " ", snippet).strip()[:80]
+    return f"{snippet} {regulation_terms}".strip() if snippet else regulation_terms
+
+
+async def _ensure_regulation_foundry_iq_used(
+    user_input: str,
+    step: int,
+    collector: list[ToolEventPayload],
+) -> bool:
+    """規制チェックで LLM が Foundry IQ を呼ばなかった場合の決定的フォールバック。
+
+    サーバー側で 1 回だけ Foundry IQ ナレッジベース検索 (`search_knowledge_base`) を実行し、
+    その tool_event を collector に取り込むことで「Foundry IQ を必ず使う」要件を
+    instructions の compliance に依存せず決定的に保証する。成功時 True を返す。
+    """
+    from src.agents.regulation_check import search_knowledge_base
+
+    query = _derive_regulation_kb_query(user_input)
+    try:
+        with tool_event_context(
+            collector.append,
+            agent_name="regulation-check-agent",
+            step=step,
+            step_key=resolve_step_key("regulation-check-agent"),
+            provider="foundry",
+        ):
+            await search_knowledge_base(query)
+        return True
+    except Exception as exc:
+        logger.warning("規制チェックの Foundry IQ 決定的フォールバックに失敗しました: %s", exc)
+        return False
+
+
 async def _execute_agent(
     agent_name: str,
     agent_step: int,
@@ -3621,6 +3658,14 @@ async def _execute_agent(
     completion_tokens = token_usage.get("completion_tokens", 0)
     estimated_cost_usd = _estimate_cost_usd(token_usage, model_settings)
     tool_names = _extract_tool_names(result, agent_name, result_text)
+    if agent_name == "regulation-check-agent" and "foundry_iq_search" not in tool_names:
+        # 決定的保証 (rubber-duck 2026-06-22): 強化した instructions で通常は LLM 自身が
+        # search_knowledge_base を呼び KB を grounding に使うが、万一 skip した場合の
+        # フォールバックとして、サーバー側で KB 検索を 1 回実行し tool_event を補完する。
+        # これは 3IQ ステータスストリップの「Foundry IQ 使用」を決定的に担保する目的で、
+        # 生成済みの regulation 判定には注入しない (grounding は instructions 経路が担う)。
+        if await _ensure_regulation_foundry_iq_used(user_input, step, collected_tool_events):
+            tool_names = _merge_tool_names(tool_names, ["foundry_iq_search"])
     if agent_name == "marketing-plan-agent" and used_foundry_prompt_agent:
         work_iq_enabled_for_prompt = bool(
             work_iq_session

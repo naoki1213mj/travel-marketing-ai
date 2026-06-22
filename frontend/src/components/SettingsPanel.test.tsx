@@ -55,17 +55,6 @@ const translations: Record<string, string> = {
   'settings.workiq.source.emails': 'メール',
   'settings.workiq.source.teams_chats': 'Teams チャット',
   'settings.workiq.source.documents_notes': 'ドキュメント/ノート',
-  'settings.workiq.sourceStatus.title': 'ソース別ステータス',
-  'settings.workiq.sourceStatus.safeOnly': '要約のみ表示',
-  'settings.workiq.sourceStatus.summary': 'サニタイズ済みプレビュー',
-  'settings.workiq.sourceStatus.off': 'オフ',
-  'settings.workiq.sourceStatus.ready': '確認待ち',
-  'settings.workiq.sourceStatus.sign_in_required': 'サインイン',
-  'settings.workiq.sourceStatus.consent_required': '同意が必要',
-  'settings.workiq.sourceStatus.unavailable': '利用不可',
-  'settings.workiq.sourceStatus.used': '使用済み',
-  'settings.workiq.sourceStatus.count': '{count} 件',
-  'settings.workiq.sourceStatus.noPreview': '表示できるサニタイズ済みプレビューはまだありません。',
   'settings.reset': 'デフォルトに戻す',
 }
 
@@ -220,27 +209,6 @@ describe('SettingsPanel', () => {
     expect(screen.queryByLabelText('画像モデル')).toBeNull()
   })
 
-  it('shows Work IQ sources when the toggle is enabled', () => {
-    render(
-      <SettingsPanel
-        settings={DEFAULT_SETTINGS}
-        conversationSettings={{ ...DEFAULT_CONVERSATION_SETTINGS, workIqEnabled: true }}
-        workIqStatus="ready"
-        onChange={() => {}}
-        onConversationSettingsChange={() => {}}
-        t={t}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
-
-    expect(screen.getByText('会議メモ')).toBeInTheDocument()
-    expect(screen.getByText('メール')).toBeInTheDocument()
-    expect(screen.getByText('Teams チャット')).toBeInTheDocument()
-    expect(screen.getByText('ドキュメント/ノート')).toBeInTheDocument()
-    expect(screen.getAllByText('確認待ち')).toHaveLength(4)
-  })
-
   it('updates the Work IQ runtime from the Work IQ panel', () => {
     const onChange = vi.fn()
     render(
@@ -261,34 +229,6 @@ describe('SettingsPanel', () => {
       ...DEFAULT_SETTINGS,
       workIqRuntime: 'graph_prefetch',
     })
-  })
-
-  it('shows sanitized Work IQ source summaries and used counts', () => {
-    render(
-      <SettingsPanel
-        settings={DEFAULT_SETTINGS}
-        conversationSettings={{ ...DEFAULT_CONVERSATION_SETTINGS, workIqEnabled: true, workIqSourceScope: ['emails'] }}
-        workIqStatus="enabled"
-        workIqSourceMetadata={[{
-          source: 'emails',
-          label: 'メール',
-          count: 2,
-          status: 'completed',
-          summary: '営業メールでは家族向け訴求が重視されています。',
-        }]}
-        workIqBriefSummary="職場コンテキストは要約済みです。"
-        onChange={() => {}}
-        onConversationSettingsChange={() => {}}
-        t={t}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /Work IQ/ }))
-
-    expect(screen.getByText('職場コンテキストは要約済みです。')).toBeInTheDocument()
-    expect(screen.getByText('使用済み')).toBeInTheDocument()
-    expect(screen.getByText('2 件')).toBeInTheDocument()
-    expect(screen.getByText('営業メールでは家族向け訴求が重視されています。')).toBeInTheDocument()
   })
 
   it('shows quality controls for GPT Image 2', () => {
