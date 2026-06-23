@@ -691,6 +691,18 @@ def test_build_work_iq_tool_guidance_includes_web_search_requirement() -> None:
     assert "禁止" in guidance
 
 
+def test_build_work_iq_tool_guidance_requires_internal_knowledge_section() -> None:
+    """B1 (2026-06-23): Work IQ 有効時は「社内ナレッジ反映」セクションの明示を要求する。"""
+    config = {"enabled": True, "source_scope": ["emails", "meeting_notes"]}
+    guidance = module._build_work_iq_tool_guidance(config)
+
+    assert "社内ナレッジ反映" in guidance
+    # 出所バッジ（デモ映え）
+    assert "📧" in guidance
+    assert "💬" in guidance
+    assert "📝" in guidance
+
+
 def test_build_marketing_plan_agent_definition_instructions_mention_web_search_compliance() -> None:
     """Agent definition の instructions も Web Search 利用を強調する。"""
     definition = module.build_marketing_plan_agent_definition("gpt-5-4-mini")
