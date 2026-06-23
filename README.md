@@ -61,7 +61,7 @@ See [docs/azure-architecture.md](docs/azure-architecture.md) for detailed Azure 
 | **Evaluation-Driven Refinement** | Feed results back via APIM-fronted Azure Functions MCP |
 | **Real-Time Streaming** | SSE with per-agent step tracking (15-min timeout) |
 | **Conversation History** | Cosmos DB persistence, instant restore, new-conversation button |
-| **Voice Input** | Voice Live API (MSAL.js) + Web Speech API fallback |
+| **Voice Input** | Azure AI Speech STT (keyless) + Web Speech API fallback |
 | **Multilingual UI** | Japanese / English / Chinese, dark/light mode (WCAG AA) |
 | **Enterprise Integration** | Logic Apps post-approval actions, optional Teams/email notification |
 | **Infrastructure as Code** | Bicep + azd for one-command Azure deployment |
@@ -103,7 +103,7 @@ azd auth login
 azd up                                    # provision + build + deploy
 ```
 
-`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Voice Agent, Marketing-plan Prompt Agent sync, and Entra SPA registration. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and the remaining follow-up items.
+`scripts/postprovision.py` auto-configures the APIM AI Gateway, MCP Function App, Marketing-plan Prompt Agent sync, and Entra SPA registration. Voice input uses keyless Azure Speech STT and does not require a Voice Agent. See [docs/azure-setup.md](docs/azure-setup.md) for the current tenant snapshot and the remaining follow-up items.
 
 ### Current Azure status (`workiq-dev` tenant)
 

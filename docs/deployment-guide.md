@@ -99,9 +99,9 @@ azd deploy
 | AI Project + Foundry Project endpoint | ✅ | — | — | 起動成功 |
 | API Management `StandardV2` (~30 分 provisioning) | ✅ | — | — | 起動成功（D2 cutover は別途要 env 設定） |
 | Container App MI ↔ AI Services / ACR / Storage の RBAC | ✅ | — | — | 起動成功 |
-| **Foundry Connections** (APIM→Foundry / Foundry IQ→Search / Voice Agent / Marketing / Data Search Prompt Agent) | — | ✅ (`scripts/postprovision.py` Step 1, 4, 4.5, 4.6) | — | 該当ツール mock fallback (Web Search / Foundry IQ / Marketing は legacy ChatClient に degrade) |
+| **Foundry Connections** (APIM→Foundry / Foundry IQ→Search / Marketing / Data Search Prompt Agent) | — | ✅ (`scripts/postprovision.py` Step 1, 4.5, 4.6) | — | 該当ツール mock fallback (Web Search / Foundry IQ / Marketing は legacy ChatClient に degrade) |
 | **Improvement MCP Function App** + Storage + APIM ルート | — | ✅ (Step 3.5、Storage 名は英数字 24 文字 cap) | — | UI で Improvement brief 取得が空応答 |
-| Entra SPA App Registration (Voice Live + Work IQ) | — | ✅ (Step 5、tenant admin consent は portal 必須) | redirect URI の追加・admin consent | 認証なしモード (Work IQ off) で動作 |
+| Entra SPA App Registration (Work IQ delegated auth) | — | ✅ (Step 5、tenant admin consent は portal 必須) | redirect URI の追加・admin consent | 認証なしモード (Work IQ off) で動作 |
 | **Azure AI Search + `regulations-index`** | — | — | ✅ (検索 ksb は別途 indexer) | regulation-check が静的レスポンスに fall-through |
 | **Microsoft Fabric Lakehouse (`lh_travel_marketing_v2`) + Data Agent (`Travel_Ontology_DA_v2`)** | — | — | ✅ (Fabric ポータルで作成、portal-only) | data-search が CSV → ハードコードに degrade |
 | **Foundry Fabric DA Connection (`travel-fabric-da`)** | — | — | ✅ (Foundry ポータル限定、management plane 非対応) | PR 3 path 無効 → legacy SQL fallback |
@@ -130,9 +130,9 @@ azd deploy
 - Step 1: AI Gateway 接続 (`travel-ai-gateway`) と APIM token policy
 - Step 3: AI Gateway 用の追加 APIM policy
 - Step 3.5: Improvement MCP 用 Function App の作成・managed identity storage 構成・zip 配備・APIM route 登録
-- Step 4: Voice Agent (Prompt Agent) の作成
+- Step 4: 音声入力は Azure Speech STT keyless 構成のため Voice Agent 作成不要
 - Step 4.5/4.6: Marketing-plan / data-search Prompt Agent の作成・再同期 (UI で選択可能な 4 model variants 全件)
-- Step 5: Entra SPA app registration (Voice Live + Work IQ delegated auth 用)
+- Step 5: Entra SPA app registration (Work IQ delegated auth 用)
 
 #### postprovision 後に残る portal manual 作業 (新 tenant のとき)
 
@@ -419,7 +419,7 @@ azd env set IMPROVEMENT_MCP_STORAGE_ACCOUNT_NAME stfn<suffix>
 | `MAI_TRANSCRIBE_1_API_PATH` | 任意 | 確認済みの Transcribe API path。未設定時は呼び出さない |
 | `SPEECH_SERVICE_ENDPOINT` | 任意 | Photo Avatar 動画生成 |
 | `SPEECH_SERVICE_REGION` | 任意 | Speech リージョン |
-| `ENABLE_VOICE_TALK_TO_START` | 任意 | Voice Live の talk-to-start UX を公開する場合だけ `true` |
+| `ENABLE_VOICE_TALK_TO_START` | 任意 | Azure Speech STT のマイク (talk-to-start) UX を公開する場合だけ `true` |
 | `LOGIC_APP_CALLBACK_URL` | 任意 | 承認後アクション workflow。signed URL なので secret として扱う |
 | `MANAGER_APPROVAL_TRIGGER_URL` | 任意 | 上司承認通知 workflow。signed URL なので secret として扱う |
 | `TRUST_AUTH_HEADER_CLAIMS` | 任意 | 署名検証済み upstream auth がある場合だけ bearer claims を信頼する。通常は `false` |

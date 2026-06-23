@@ -19,7 +19,7 @@
 - **デプロイ**: Azure Container Apps (VNet 統合 CAE) / Docker マルチステージ / azd
 - **CI/CD**: GitHub Actions (DevSecOps: Ruff + pytest + tsc → ACR `az acr build` → Container Apps)
 - **パッケージ管理**: uv（pip ではなく uv を使う）
-- **音声入力**: Voice Live API (Preview, Foundry Agent Service 統合)
+- **音声入力**: Azure AI Speech (Speech-to-Text, GA, keyless Managed Identity)
 - **文書解析**: Content Understanding (GA, 既存パンフレット PDF 解析)
 - **販促動画**: Photo Avatar + Voice Live (Lisa / casual-sitting 固定, ja-JP-Nanami:DragonHDLatestNeural)
 - **ワークフロー自動化**: Azure Logic Apps (承認後の Teams 通知 + SharePoint 保存)

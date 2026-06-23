@@ -16,6 +16,7 @@
 
 ### Changed
 
+- **音声入力を keyless Azure Speech STT へ移行** — Voice Live API 依存を外し、ユーザーログイン / Voice Agent / WebSocket 不要の構成に変更。`/api/speech-config` + `/api/speech-token` で 10 分の Speech token を発行し、Web Speech API fallback は継続。
 - **個人プロジェクトへの移行** — 元 Team D ハッカソン (2026-03 開始) から個人プロジェクトへ移行済み。`AGENTS.md` / `CONTRIBUTING.md` / `SECURITY.md` / `docs/requirements_v4.0.md` 等の現在進行系の表現を `個人プロジェクト` に置換。改版履歴 / 初版担当 / 第三者ハッカソンへの参照は史実として保持。`LICENSE` の Copyright を `Travel Marketing AI` に更新
 
 - **Work IQ ソース別ステータスパネルを auto-hide** — `foundry_tool` runtime で全ソースが `connector_used` のみ・件数 / プレビュー / サマリ無しの場合、UI ノイズになるため非表示。runtime 表示と Settings の "この会話で有効" バッジで activation は別途可視化される ([79016b0](https://github.com/naoki1213mj/travel-marketing-ai/commit/79016b0))
@@ -23,6 +24,7 @@
 
 ### Fixed
 
+- **PDF analysis / evaluation の blocking I/O を worker thread 化** — 重い PDF 解析と評価処理で event loop を塞がないように改善。
 - **Refine without explicit `refineContext` の観測性** — frontend が完了状態 RefineChat から refine を投げるとき `source: 'post_completion'` を明示。backend は明示なしの refine を WARN ログで App Insights に記録 (重複 refine round の regression detector) ([25bcb34](https://github.com/naoki1213mj/travel-marketing-ai/commit/25bcb34))
 
 ### Predicted next changes

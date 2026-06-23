@@ -90,7 +90,7 @@ if is_anonymous_lookup and not normalized_token:
 | TLS 劣化 / MITM | Container Apps の HTTPS 必須 (`allowInsecure: false`) で吸収 |
 | Authenticated user (`user-*`) 同士の承認権限分離 | Entra Bearer 認証の owner_id 一致で代替 (token なし運用も許容) |
 | Manager 承認 callback の token | 別系統の `manager_callback_token` (HMAC + Logic Apps trigger key) で保護。詳細は [`manager-approval-workflow.md`](manager-approval-workflow.md) |
-| Voice Live / Foundry MCP の delegated auth | MSAL + Entra app `travel-voice-spa` でユーザー承認済 token を取得 (別文脈) |
+| Work IQ / Foundry MCP の delegated auth | MSAL + Entra app `travel-voice-spa` でユーザー承認済 token を取得 (別文脈) |
 
 ## 6. 関連 token の対応表
 

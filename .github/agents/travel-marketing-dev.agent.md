@@ -16,7 +16,7 @@ tools: ['filesystem', 'terminal', 'search', 'fetch']
 3. **FastAPI + SSE**: リアルタイムストリーミング API の実装
 4. **ガードレール**: モデル配備側の Content Filter と軽量な入力 / ツール応答ガード
 5. **Azure Functions MCP**: Flex Consumption プランでの MCP サーバー実装
-6. **Voice Live**: 音声入力チャネルの統合（WebSocket 接続）
+6. **Azure Speech STT**: 音声入力チャネルの統合（keyless Speech-to-Text）
 7. **Content Understanding**: 既存パンフレット PDF の解析と Agent4 への参考入力
 8. **Photo Avatar + Voice Live**: 販促紹介動画の自動生成
 

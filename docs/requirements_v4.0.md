@@ -43,7 +43,7 @@
 - モデル配備側ガードレール + 軽量入力 / ツール応答ガードによるプロンプトインジェクション対策
 - Foundry Observability（トレーシング + 評価）
 - フロントエンド多言語 UI（日本語・英語・中国語）+ ダーク/ライトモード
-- Voice Live による音声入力（Preview）
+- Azure AI Speech STT による音声入力（GA、keyless Managed Identity）
 - Foundry Evaluations による品質評価 API（`/api/evaluate`）+ 評価起点の改善フロー
 - Logic Apps による承認後自動アクション（Teams 通知 + SharePoint 保存）
 - Content Understanding による既存パンフレット PDF 解析
@@ -185,7 +185,7 @@
 | 入力安全性 | モデル配備側ガードレール + 軽量入力 / ツール応答ガード | 明らかな入力攻撃のブロックとモデル入出力のフィルタリング | FastAPI 側の軽量判定 + モデルデプロイメント設定 |
 | 監視・評価 | Foundry Observability | トレーシング・品質評価・ダッシュボード | Application Insights 連携。評価・監視・トレーシングすべて GA |
 | デプロイ | Azure Container Apps | フロントエンド + バックエンドの一体デプロイ | Docker マルチステージビルド。azd up 対応 |
-| 音声入力 | Voice Live API | リアルタイム音声対話。マイクから指示 → パイプライン実行 | Foundry Agent Service に統合。Preview |
+| 音声入力 | Azure AI Speech STT | マイク音声をテキスト化してパイプライン実行 | keyless Managed Identity。GA |
 | 文書解析 | Content Understanding | 既存パンフレット PDF のレイアウト・テキスト解析 | Foundry Tools。RAG アナライザー。GA |
 | 販促動画 | Photo Avatar + Voice Live | 旅行プラン紹介動画の自動生成（15〜30 秒） | Photo Avatar は Preview |
 | ワークフロー自動化 | Azure Logic Apps | 承認後の Teams 通知・SharePoint 保存・メール送信 | 1,400+ コネクタ。ノーコード |
@@ -647,7 +647,7 @@ Social AI Studio のパターンを参考に、以下のコンポーネント構
 | `EvaluationPanel.tsx` | 品質評価結果の表示・改善フロー | `/api/evaluate` レスポンス |
 | `VideoPreview.tsx` | Agent5 の動画プレビュー | MP4 URL |
 | `PdfUpload.tsx` | 既存パンフレット PDF アップロード | — |
-| `VoiceInput.tsx` | Voice Live 音声入力 UI | — |
+| `VoiceInput.tsx` | Azure Speech STT 音声入力 UI | Web Speech API フォールバック |
 | `LanguageSwitcher.tsx` | 言語切替（日英中） | — |
 | `ThemeToggle.tsx` | ダーク/ライトモード切替 | — |
 | `ErrorBoundary.tsx` | React エラーバウンダリ | — |
@@ -722,7 +722,7 @@ Social AI Studio のパターンを参考に、以下のコンポーネント構
 | Microsoft Fabric | Fabric 容量（Trial / Premium）が有効であること |
 | Fabric Data Agent | `FABRIC_DATA_AGENT_URL` が設定されている場合、Agent1 は Fabric Data Agent Published URL を最優先で使い NL2SQL でデータ分析を実行する |
 | Foundry Observability | 評価・監視・トレーシングすべて GA（2026年3月16日〜）。Application Insights リソースが必要。カスタム評価器は Preview |
-| Voice Live API | Preview。Foundry Agent Service に統合。音声モデルのデプロイ不要（フルマネージド）。リージョン制約あり（対応リージョンを事前確認） |
+| Azure AI Speech STT | GA。Managed Identity で短期 Speech token を発行し、ブラウザの Speech SDK で音声をテキスト化。Web Speech API フォールバックあり |
 | Content Understanding | GA。Foundry リソースが必要。`prebuilt-document-rag` アナライザーを使用 |
 | Photo Avatar | Preview。Voice Live と組み合わせて使用。本アプリの販促動画では Lisa / casual-sitting に固定 |
 | Azure Logic Apps | Consumption または Standard プラン。承認後の自動アクション用。Teams / SharePoint / Outlook コネクタを使用 |
@@ -740,8 +740,8 @@ Social AI Studio のパターンを参考に、以下のコンポーネント構
 | 担当 | ロール | 担当範囲 |
 |------|--------|---------|
 | **Tokunaga** | Data SE | Fabric Lakehouse / Fabric Data Factory / デモデータ生成 / Agent1 実装 / Content Understanding（既存パンフレット PDF の取り込み・解析） |
-| **Matsumoto** | App SE | Web フロントエンド（コンポーネント群 + SSE クライアント + Voice Live マイク UI）/ FastAPI バックエンド / Agent2 実装 / Agent4 実装 / Agent5 実装（販促動画生成）/ Agent6 実装（品質レビュー） |
-| **mmatsuzaki** | Infra SE | Infrastructure（Bicep IaC + Container Apps + azd）/ API Management AI Gateway / Foundry IQ Knowledge Base / Agent3a 実装 / Agent3b 実装 / モデル配備側ガードレール設定 / Observability 設定 / Voice Live API 接続 / Logic Apps 構成 / Foundry Evaluations 設定 |
+| **Matsumoto** | App SE | Web フロントエンド（コンポーネント群 + SSE クライアント + Azure Speech STT マイク UI）/ FastAPI バックエンド / Agent2 実装 / Agent4 実装 / Agent5 実装（販促動画生成）/ Agent6 実装（品質レビュー） |
+| **mmatsuzaki** | Infra SE | Infrastructure（Bicep IaC + Container Apps + azd）/ API Management AI Gateway / Foundry IQ Knowledge Base / Agent3a 実装 / Agent3b 実装 / モデル配備側ガードレール設定 / Observability 設定 / Azure Speech STT 接続 / Logic Apps 構成 / Foundry Evaluations 設定 |
 
 ---
 
@@ -754,7 +754,7 @@ Social AI Studio のパターンを参考に、以下のコンポーネント構
 
 | Step | 画面表示 | 説明 |
 |------|---------|------|
-| 1 | チャット入力画面 | 🎤 マイクボタンを押して「春の沖縄ファミリー向けプランを企画して」と音声で指示（Voice Live）。テキスト入力でも可 |
+| 1 | チャット入力画面 | 🎤 マイクボタンを押して「春の沖縄ファミリー向けプランを企画して」と音声で指示（Azure Speech STT）。テキスト入力でも可 |
 | 2 | Agent1: 🔄 分析中 | 販売データ・顧客評価を検索・分析。グラフを自動生成 |
 | 3 | 分析サマリ + グラフ | 売上推移グラフ・セグメント円グラフをインライン表示 |
 | 4 | Agent2: 🔄 生成中 | 分析結果 + 市場トレンド（Web Search）で施策立案 |
@@ -853,7 +853,7 @@ travel-marketing-agents/
 │   │   ├── evaluate.py       # /api/evaluate（品質評価）
 │   │   ├── health.py         # /api/health + /api/ready
 │   │   ├── sources.py        # /api/sources（default-off source ingestion）
-│   │   └── voice.py          # /api/voice-token + /api/voice-config
+│   │   └── voice.py          # /api/voice-token + /api/voice-config + /api/speech-config + /api/speech-token
 │   ├── source_ingestion.py    # owner-scoped source draft / review / TTL 管理
 │   ├── mai_transcribe.py      # MAI-Transcribe-1 adapter（確認済み path のみ）
 │   ├── continuous_monitoring.py # 最小化済み評価 / 監視 payload
@@ -866,7 +866,7 @@ travel-marketing-agents/
 │   │   ├── App.tsx
 │   │   ├── components/       # UI コンポーネント群（§6.2 参照）
 │   │   ├── hooks/            # useSSE, useTheme, useI18n
-│   │   └── lib/              # i18n.ts, sse-client.ts, export.ts, msal-auth.ts, voice-live.ts
+│   │   └── lib/              # i18n.ts, sse-client.ts, export.ts, msal-auth.ts, speech-stt.ts
 │   ├── vite.config.ts
 │   └── package.json
 ├── data/
@@ -981,17 +981,17 @@ ignore = ["E501", "E402"]
 
 Phase C（デプロイ後）で追加する機能。コアパイプラインとは独立しており、個別に有効化・無効化できる設計にする。Source ingestion、MAI Transcribe、評価ログ、継続監視、cost metrics、Model Router、gpt-5.5 は default-off / opt-in gate を守り、必要な env var・deployment・quota・同意が揃うまで production-ready と表示しない。
 
-### 14.1 Voice Live（音声入力チャネル）
+### 14.1 Azure Speech STT（音声入力チャネル）
 
 **実装方針:**
 
-- フロントエンドにマイクボタンを追加し、WebSocket で Voice Live API に接続する
-- Voice Live がノイズ抑制・エコーキャンセル・割り込み対応をフルマネージドで提供するため、音声処理のコードは不要
-- 既存の Foundry Agent にそのまま音声チャネルを追加する形。新しいエージェントは作らない
+- フロントエンドにマイクボタンを追加し、Speech SDK (`speech-stt.ts`) を lazy import して Azure Speech STT に接続する
+- バックエンドが Managed Identity で 10 分の Speech authorization token を発行し、ブラウザに短期 token だけを渡す
+- Voice Agent / WebSocket / MSAL ユーザーログインは不要。Azure Speech が使えない場合は Web Speech API にフォールバックする
 
 - テキスト入力と音声入力を切り替え可能にする（音声のみに限定しない）
 
-**状態:** Preview（2026年3月〜）
+**状態:** GA
 
 ### 14.2 Foundry Evaluations（品質評価 API）
 
@@ -1186,7 +1186,7 @@ GitHub Copilot SDK（Technical Preview）を Agent Framework と組み合わせ�
 | DevSecOps | 開発（Dev）・セキュリティ（Sec）・運用（Ops）を CI/CD パイプラインに統合する手法 |
 | i18n | 多言語対応（Internationalization）。UI ラベル・メッセージを複数言語で表示する仕組み |
 | ブローシャ | 旅行プランの販促パンフレット・チラシ |
-| Voice Live | Foundry Agent Service 統合の音声対話 API。Preview |
+| Azure Speech STT | Azure AI Speech の Speech-to-Text。Managed Identity で短期 token を発行してブラウザ SDK から利用する。GA |
 | Photo Avatar | 1 枚の写真から表情豊かなアバター動画を生成する Azure AI サービス。Preview |
 | Content Understanding | Foundry Tools の文書解析サービス。PDF をマークダウンに変換。GA |
 | Logic Apps | Azure のノーコードワークフロー自動化サービス。1,400 以上のコネクタ |
@@ -1227,9 +1227,8 @@ GitHub Copilot SDK（Technical Preview）を Agent Framework と組み合わせ�
 | ツール可用性（リージョン・モデル別） | <https://learn.microsoft.com/en-us/azure/foundry/agents/concepts/limits-quotas-regions> |
 | MCP ツールガバナンス | <https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/tools/governance> |
 | Private networking 設定 | <https://learn.microsoft.com/en-us/azure/foundry/agents/how-to/virtual-networks> |
-| Voice Live 概要 | <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live> |
-| Voice Live + Foundry Agent クイックスタート | <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/voice-live-agents-quickstart> |
-| Voice Live 発表ブログ | <https://techcommunity.microsoft.com/blog/azure-ai-foundry-blog/public-preview-voice-native-agents-in-microsoft-foundry/4502756> |
+| Azure Speech STT | <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-recognize-speech> |
+| Speech SDK 認証 (JavaScript) | <https://learn.microsoft.com/en-us/azure/ai-services/speech-service/how-to-configure-azure-speech-sdk?tabs=javascript> |
 | Content Understanding 概要 | <https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/overview> |
 | Content Understanding ドキュメント解析 | <https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/document/overview> |
 | Content Understanding プリビルトアナライザー | <https://learn.microsoft.com/en-us/azure/ai-services/content-understanding/concepts/prebuilt-analyzers> |

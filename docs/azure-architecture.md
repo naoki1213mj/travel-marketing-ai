@@ -151,8 +151,8 @@ flowchart TD
 | Azure AI Search + `regulations-index` 投入 | ナレッジベース検索に必要 |
 | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` | 現行 runtime の優先経路。Foundry の Azure AI Search 既定接続は fallback |
 | `FABRIC_DATA_AGENT_URL` | Agent1 が Fabric Data Agent を優先するため |
-| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成 |
-| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live MSAL.js 認証 |
+| `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Azure Speech STT 音声入力 + Photo Avatar 動画生成 |
+| `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Work IQ delegated 認証用 MSAL 設定 (`/api/voice-config`) |
 | `MANAGER_APPROVAL_TRIGGER_URL` / `LOGIC_APP_CALLBACK_URL` | 上司通知 workflow / 承認後アクション workflow の callback を live URL へ合わせるため |
 | Work IQ admin consent + tenant member ブラウザアカウント | delegated Work IQ 経路を tenant 内ユーザーで検証するため。WorkIQMCP primary は現在の `500 server_error` が解消し、`WorkIQAgent.Ask` admin grant + `ENABLE_WORKIQ_MCP=true` + browser header が揃ってから有効化 |
 
@@ -163,7 +163,7 @@ flowchart TD
 | 実行主体 | 認証方式 | 用途 |
 | --- | --- | --- |
 | Container App | `DefaultAzureCredential` | Foundry, Fabric, Cosmos DB, AI Search |
-| ブラウザ利用者 | delegated token (`https://ai.azure.com/user_impersonation` / `https://cognitiveservices.azure.com/user_impersonation` / `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`) | 既定の Work IQ Foundry tool auth、Voice Live auth、owner-bound 会話 API、評価保存。`ENABLE_WORKIQ_MCP=true` のときだけ WorkIQMCP token も利用し、`graph_prefetch` rollback を使う場合だけ Graph delegated token も利用 |
+| ブラウザ利用者 | delegated token (`https://ai.azure.com/user_impersonation` / `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`) | 既定の Work IQ Foundry tool auth、owner-bound 会話 API、評価保存。`ENABLE_WORKIQ_MCP=true` のときだけ WorkIQMCP token も利用し、`graph_prefetch` rollback を使う場合だけ Graph delegated token も利用 |
 | APIM | Managed Identity | Foundry バックエンド接続 |
 | AI Search bootstrap | Foundry connection or API key | 初期インデックス投入 |
 

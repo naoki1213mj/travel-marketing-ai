@@ -22,9 +22,9 @@
 
 1. **AI Gateway**: Foundry に `travel-ai-gateway` APIM 接続を作成、token policy 適用
 2. **Improvement MCP**: Flex Consumption Function App の作成、managed identity ベースの storage 構成、vendored 依存入り ready-to-run zip 配備、MCP runtime 応答確認、APIM `improvement-mcp` route 同期
-3. **Voice Agent**: Foundry SDK 経由で Voice Live 対応 Prompt Agent を作成
+3. **音声入力**: Azure Speech STT を keyless で利用（Voice Agent 作成は不要）
 4. **Marketing plan Agent**: Foundry SDK 経由で Agent2 用の事前作成済み Prompt Agent を作成/同期（UI で選択できる `gpt-5-4-mini` / `gpt-5.4` / `gpt-4-1-mini` / `gpt-4.1` をまとめて同期）
-5. **Entra SPA**: Voice Live + Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Voice Live / Foundry delegated scopes、WorkIQMCP 用 `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`、`graph_prefetch` rollback 用の Graph delegated permissions を同期）
+5. **Entra SPA**: Work IQ delegated auth 用の Entra アプリ登録を作成/再同期（既存 app registration の redirect URI、Foundry delegated scopes、WorkIQMCP 用 `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask`、`graph_prefetch` rollback 用の Graph delegated permissions を同期）
 
 ## 3. Current rebuilt-tenant snapshot (`workiq-dev`, 2026-04-18)
 
@@ -424,7 +424,7 @@ curl https://<app>/api/sources/limits
 | ナレッジベース | `search_knowledge_base()` が検索結果を返す (静的レスポンスでない) |
 | 画像生成 | GPT Image 1.5 と MAI 経路の両方でヒーロー画像が透明 PNG でない |
 | 動画生成 | MP4 が返る (SSML ナレーション付き) |
-| Voice Live | `/api/voice-config` が MSAL 設定を返す |
+| 音声入力 (Azure Speech STT) | `/api/speech-config` が available を返し `/api/speech-token` が token を発行 |
 | Capabilities | `/api/capabilities` が endpoint / connection string を返さず boolean feature 状態だけを返す |
 | Source ingestion | default-off では `SOURCE_INGESTION_DISABLED`、有効化後は text/PDF/audio source がレビュー待ち draft になる |
 | Fabric | Agent1 が Fabric Data Agent または Fabric SQL endpoint を使い、CSV フォールバックにならない |

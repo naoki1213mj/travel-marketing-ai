@@ -46,7 +46,7 @@ frontend/src/
     ├── i18n.ts                # 翻訳データ（ja/en/zh）
     ├── export.ts              # 成果物エクスポート（PDF/HTML/画像）
     ├── msal-auth.ts           # MSAL 認証（Work IQ 用 user_impersonation token）
-    └── voice-live.ts          # Voice Live API 統合（音声入力）
+    └── speech-stt.ts          # Azure Speech STT 統合（音声入力）
 ```
 
 ## 画面レイアウト

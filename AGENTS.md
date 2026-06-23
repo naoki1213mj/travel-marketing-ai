@@ -11,7 +11,7 @@
 ## アーキテクチャ
 
 ```text
-ユーザー → React (Vite/Tailwind/i18n) + 🎤 Voice Live → FastAPI (SSE)
+ユーザー → React (Vite/Tailwind/i18n) + 🎤 Azure Speech STT → FastAPI (SSE)
   → FastAPI 直接オーケストレーション
     → Agent1 (データ検索: Fabric Lakehouse + Code Interpreter)
     → Agent2 (施策生成: Web Search)
@@ -44,7 +44,7 @@
 | AI Gateway | Azure API Management | GA |
 | デプロイ | Azure Container Apps + azd | GA |
 | CI/CD | GitHub Actions (DevSecOps) | — |
-| 音声入力 | Voice Live API | Preview |
+| 音声入力 | Azure AI Speech (STT, keyless) | GA |
 | 文書解析 | Content Understanding | GA |
 | 販促動画 | Photo Avatar + Voice Live | Preview |
 | ワークフロー自動化 | Azure Logic Apps | GA |
@@ -301,7 +301,7 @@ travel-marketing-agents/
 │   │   ├── evaluate.py           # /api/evaluate
 │   │   ├── health.py             # /api/health + /api/ready
 │   │   ├── sources.py            # /api/sources/* (PDF / text / audio ingestion)
-│   │   └── voice.py              # /api/voice-config
+│   │   └── voice.py              # /api/voice-config + /api/speech-config + /api/speech-token
 │   ├── middleware/               # 軽量入力 / ツール応答ガード
 │   ├── pipeline_schemas.py       # SSE / pipeline schema (Pydantic)
 │   ├── conversations.py          # Cosmos DB / インメモリ会話管理
@@ -322,7 +322,7 @@ travel-marketing-agents/
 │   └── src/
 │       ├── components/           # UI コンポーネント (Settings / Approval / ToolEventCard 等)
 │       ├── hooks/                # useSSE, useTheme, useI18n
-│       └── lib/                  # i18n.ts, sse-client.ts, event-schemas.ts, msal-auth.ts, voice-live.ts, iq-brand.ts
+│       └── lib/                  # i18n.ts, sse-client.ts, event-schemas.ts, msal-auth.ts, speech-stt.ts, iq-brand.ts
 ├── infra/                        # Bicep IaC (17 モジュール)
 ├── data/                         # デモデータ + demo-replay.json
 ├── regulations/                  # レギュレーション文書

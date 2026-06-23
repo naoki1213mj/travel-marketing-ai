@@ -61,7 +61,7 @@ flowchart TD
 | **評価起点の改善** | APIM 経由の Azure Functions MCP で改善ブリーフを生成 |
 | **リアルタイム配信** | SSE によるエージェント単位の進捗表示（15 分タイムアウト） |
 | **会話履歴** | Cosmos DB 保存、即時復元、新しい会話ボタン |
-| **音声入力** | Voice Live API (MSAL.js) + Web Speech API フォールバック |
+| **音声入力** | Azure AI Speech STT (keyless) + Web Speech API フォールバック |
 | **多言語 UI** | 日本語・英語・中国語、ダーク/ライトモード (WCAG AA) |
 | **エンタープライズ連携** | Logic Apps 承認後アクション、Teams/メール通知(任意) |
 | **IaC** | Bicep + azd でワンコマンド Azure デプロイ |
@@ -103,7 +103,7 @@ azd auth login
 azd up                                    # プロビジョニング + ビルド + デプロイ
 ```
 
-`scripts/postprovision.py` が APIM AI Gateway、MCP Function App、Voice Agent、marketing-plan Prompt Agent 同期、Entra SPA 登録を自動構成します。現在の tenant 状態と残るフォローアップ項目は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
+`scripts/postprovision.py` が APIM AI Gateway、MCP Function App、marketing-plan Prompt Agent 同期、Entra SPA 登録を自動構成します。音声入力は keyless Azure Speech STT を使い、Voice Agent は不要です。現在の tenant 状態と残るフォローアップ項目は [docs/azure-setup.md](docs/azure-setup.md) を参照してください。
 
 ### 現在の Azure 状態（`workiq-dev` tenant）
 
