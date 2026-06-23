@@ -43,7 +43,11 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
     model_router = model_router_availability(resolved)
     mai_transcribe = get_mai_transcribe_availability(resolved)
     evaluation_logging_enabled = parse_bool_setting(resolved["enable_evaluation_logging"])
-    voice_live_configured = has_project_endpoint and has_entra_client
+    # 音声入力は Azure Speech STT を keyless（Managed Identity）で使うため、custom-domain
+    # endpoint と region だけが必要。MSAL ユーザーログイン（entra_client）には依存しない。
+    speech_stt_configured = _has_value(resolved["speech_service_endpoint"]) and _has_value(
+        resolved["speech_service_region"]
+    )
     work_iq_configured = (
         has_entra_client
         and marketing_runtime == "foundry_preprovisioned"
@@ -84,9 +88,9 @@ def build_capability_snapshot(settings: AppSettings | None = None) -> Capability
             parse_bool_setting(resolved["enable_source_ingestion"]),
             parse_bool_setting(resolved["enable_source_ingestion"]) or _has_value(resolved["source_ingestion_endpoint"]),
         ),
-        "voice_live": _feature(voice_live_configured, voice_live_configured),
+        "voice_live": _feature(speech_stt_configured, speech_stt_configured),
         "voice_talk_to_start": _feature(
-            parse_bool_setting(resolved["enable_voice_talk_to_start"]) and voice_live_configured,
+            parse_bool_setting(resolved["enable_voice_talk_to_start"]) and speech_stt_configured,
             parse_bool_setting(resolved["enable_voice_talk_to_start"]),
         ),
         "mai_transcribe_1": _feature(

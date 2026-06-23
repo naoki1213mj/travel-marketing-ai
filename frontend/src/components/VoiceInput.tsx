@@ -6,8 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiUrl } from '../lib/api-base'
-import { getVoiceLiveToken } from '../lib/msal-auth'
-import { VoiceLiveClient, type VoiceLiveConfig } from '../lib/voice-live'
+import { AzureSpeechRecognizer } from '../lib/speech-stt'
 
 interface VoiceInputProps {
   onTranscript: (text: string) => void
@@ -85,13 +84,13 @@ export function VoiceInput({
 }: VoiceInputProps) {
   const [state, setState] = useState<VoiceState>('idle')
   const [transcript, setTranscript] = useState('')
-  const [useVoiceLive, setUseVoiceLive] = useState<boolean | null>(null)
-  const clientRef = useRef<VoiceLiveClient | null>(null)
+  const [useAzureSpeech, setUseAzureSpeech] = useState<boolean | null>(null)
+  const clientRef = useRef<AzureSpeechRecognizer | null>(null)
   const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const activeSessionIdRef = useRef(0)
   const idleResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const finalTranscriptRef = useRef('')
-  const voiceLiveInterimRef = useRef('')
+  const azureInterimRef = useRef('')
 
   const clearIdleResetTimeout = useCallback(() => {
     if (idleResetTimeoutRef.current) {
@@ -105,7 +104,7 @@ export function VoiceInput({
     const nextSessionId = activeSessionIdRef.current + 1
     activeSessionIdRef.current = nextSessionId
     finalTranscriptRef.current = ''
-    voiceLiveInterimRef.current = ''
+    azureInterimRef.current = ''
     setTranscript('')
     return nextSessionId
   }, [clearIdleResetTimeout])
@@ -131,30 +130,39 @@ export function VoiceInput({
     }, 3000)
   }, [clearIdleResetTimeout, isActiveSession])
 
-  // Voice Live 利用可能性チェック — MSAL.js トークン取得を試みる
+  // Azure Speech 利用可能性チェック — backend の音声設定を取得する。
+  // setState は async コールバック内だけで呼び、エフェクト本体での同期 setState を避ける。
   useEffect(() => {
-    if (voiceTalkToStartAvailable === false) {
-      setUseVoiceLive(false)
-      return
+    let cancelled = false
+
+    const resolveAvailability = async (): Promise<boolean> => {
+      if (voiceTalkToStartAvailable === false || voiceLiveAvailable === false) {
+        return false
+      }
+      // 以前に失敗している場合は Web Speech にフォールバックしたまま再試行しない
+      if (sessionStorage.getItem('azureSpeechFailed') === 'true') {
+        return false
+      }
+      try {
+        const data = (await fetch(apiUrl('/api/speech-config')).then(r => r.json())) as {
+          mode?: string
+          available?: boolean
+        }
+        return data.available === true || data.mode === 'azure_speech'
+      } catch {
+        return false
+      }
     }
 
-    if (voiceLiveAvailable === false) {
-      setUseVoiceLive(false)
-      return
-    }
+    void resolveAvailability().then(result => {
+      if (!cancelled) {
+        setUseAzureSpeech(result)
+      }
+    })
 
-    // Voice Live が以前失敗している場合はスキップ（Edge リダイレクト後の再試行防止）
-    if (sessionStorage.getItem('voiceLiveFailed') === 'true') {
-      setUseVoiceLive(false)
-      return
+    return () => {
+      cancelled = true
     }
-
-    fetch(apiUrl('/api/voice-config'))
-      .then(r => r.json())
-      .then((data: { agent_name?: string; client_id?: string }) => {
-        setUseVoiceLive(!!data.client_id)
-      })
-      .catch(() => setUseVoiceLive(false))
   }, [voiceLiveAvailable, voiceTalkToStartAvailable])
 
   const startWebSpeech = useCallback(() => {
@@ -208,61 +216,30 @@ export function VoiceInput({
     setState('listening')
   }, [beginSession, isActiveSession, publishTranscript])
 
-  const startVoiceLive = useCallback(async () => {
+  const startAzureSpeech = useCallback(async () => {
     const sessionId = beginSession()
     setState('connecting')
     try {
-      // Voice Live 設定を取得（client_id, tenant_id, endpoint 等）
-      const configResp = await fetch(apiUrl('/api/voice-config'))
-      const configData = (await configResp.json()) as {
-        client_id?: string; tenant_id?: string; endpoint?: string;
-        agent_name?: string; project_name?: string; api_version?: string
-      }
-
-      if (!configData.client_id || !configData.endpoint) {
-        throw new Error('Voice Live config missing client_id or endpoint')
-      }
-
-      // MSAL.js でユーザー委任トークンを取得
-      const token = await getVoiceLiveToken({
-        clientId: configData.client_id,
-        tenantId: configData.tenant_id || '',
-      })
-
-      if (!token) {
-        throw new Error('MSAL token acquisition failed')
-      }
-
-      const config: VoiceLiveConfig = {
-        endpoint: configData.endpoint,
-        token: token,
-        agentName: configData.agent_name || 'travel-voice-orchestrator',
-        projectName: configData.project_name || '',
-        apiVersion: configData.api_version || '2026-01-01-preview',
-      }
-
-      const client = new VoiceLiveClient(config, {
+      const recognizer = new AzureSpeechRecognizer(apiUrl('/api/speech-token'), {
         onTranscript: (text, isFinal) => {
           if (!isActiveSession(sessionId)) {
             return
           }
           if (isFinal) {
             finalTranscriptRef.current = appendTranscript(finalTranscriptRef.current, text)
-            voiceLiveInterimRef.current = ''
+            azureInterimRef.current = ''
             publishTranscript(finalTranscriptRef.current)
             return
           }
-          voiceLiveInterimRef.current = appendTranscript(voiceLiveInterimRef.current, text)
-          publishTranscript(finalTranscriptRef.current, voiceLiveInterimRef.current)
-        },
-        onAgentText: () => {
-          // エージェント応答テキスト — 将来の UI 表示用
+          // Azure Speech の recognizing は現在の発話の全文を返すため、追記せず置換する。
+          azureInterimRef.current = text.trim()
+          publishTranscript(finalTranscriptRef.current, azureInterimRef.current)
         },
         onError: (error) => {
           if (!isActiveSession(sessionId)) {
             return
           }
-          console.warn('Voice Live error:', error)
+          console.warn('Azure Speech error:', error)
           setState('error')
           scheduleIdleReset(sessionId)
         },
@@ -271,28 +248,25 @@ export function VoiceInput({
             return
           }
           if (s === 'listening') setState('listening')
-          else if (s === 'processing') setState('processing')
-          else if (s === 'speaking') setState('speaking')
-          else if (s === 'connected') setState('listening')
-          else if (s === 'disconnected') setState('idle')
           else if (s === 'connecting') setState('connecting')
+          else if (s === 'stopped') setState('idle')
         },
       })
 
-      await client.connect()
+      await recognizer.start()
       if (!isActiveSession(sessionId)) {
-        client.disconnect()
+        recognizer.stop()
         return
       }
-      clientRef.current = client
+      clientRef.current = recognizer
     } catch (err) {
       if (!isActiveSession(sessionId)) {
         return
       }
-      console.warn('Voice Live 接続失敗、Web Speech API にフォールバック:', err)
-      sessionStorage.setItem('voiceLiveFailed', 'true')
+      console.warn('Azure Speech 接続失敗、Web Speech API にフォールバック:', err)
+      sessionStorage.setItem('azureSpeechFailed', 'true')
       setState('idle')
-      setUseVoiceLive(false)
+      setUseAzureSpeech(false)
       startWebSpeech()
     }
   }, [beginSession, isActiveSession, publishTranscript, scheduleIdleReset, startWebSpeech])
@@ -300,7 +274,7 @@ export function VoiceInput({
   const stop = useCallback(() => {
     activeSessionIdRef.current += 1
     clearIdleResetTimeout()
-    clientRef.current?.disconnect()
+    clientRef.current?.stop()
     clientRef.current = null
     if (recognitionRef.current) {
       recognitionRef.current.stop()
@@ -312,12 +286,12 @@ export function VoiceInput({
   const toggle = useCallback(() => {
     if (state !== 'idle') {
       stop()
-    } else if (useVoiceLive) {
-      startVoiceLive()
+    } else if (useAzureSpeech) {
+      startAzureSpeech()
     } else {
       startWebSpeech()
     }
-  }, [state, useVoiceLive, startVoiceLive, startWebSpeech, stop])
+  }, [state, useAzureSpeech, startAzureSpeech, startWebSpeech, stop])
 
   // アンマウント時にクリーンアップ
   useEffect(() => () => stop(), [stop])
@@ -339,7 +313,7 @@ export function VoiceInput({
         <button
           type="button"
           onClick={toggle}
-          disabled={isVoiceDisabled || useVoiceLive === null}
+          disabled={isVoiceDisabled || useAzureSpeech === null}
           className={`inline-flex items-center justify-center gap-2 rounded-full border px-3 py-2.5 text-xs font-medium transition-all ${
             state === 'listening'
               ? 'animate-pulse border-red-400 bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400'
@@ -350,7 +324,7 @@ export function VoiceInput({
                   : 'border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]'
           } ${isVoiceDisabled ? 'cursor-not-allowed opacity-50' : ''}`}
           aria-label={buttonLabel}
-          title={useVoiceLive ? t('voice.provider') : t('voice.talk_to_start')}
+          title={useAzureSpeech ? t('voice.provider') : t('voice.talk_to_start')}
         >
           {isActive ? (
             <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -376,7 +350,7 @@ export function VoiceInput({
             {stateLabel}
           </span>
         )}
-        {useVoiceLive && state === 'idle' && (
+        {useAzureSpeech && state === 'idle' && (
           <span className="text-[10px] text-[var(--success-text)]">{t('voice.provider')}</span>
         )}
       </div>

@@ -37,7 +37,8 @@ def test_api_key_middleware_allows_authorized_request(monkeypatch):
     response = client.get("/api/voice-config", headers={"x-api-key": "test-secret"})
 
     assert response.status_code == 200
-    assert response.json()["agent_name"] == "travel-voice-orchestrator"
+    assert "client_id" in response.json()
+    assert "tenant_id" in response.json()
 
 
 def test_api_key_middleware_keeps_health_exempt(monkeypatch):

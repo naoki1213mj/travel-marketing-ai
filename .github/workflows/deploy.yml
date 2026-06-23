@@ -29,6 +29,7 @@ jobs:
       IMAGE_PROJECT_ENDPOINT_MAI: ${{ vars.IMAGE_PROJECT_ENDPOINT_MAI }}
       MAI_RESOURCE_NAME: ${{ vars.MAI_RESOURCE_NAME }}
       VOICE_SPA_CLIENT_ID: ${{ vars.VOICE_SPA_CLIENT_ID }}
+      ENABLE_VOICE_TALK_TO_START: ${{ vars.ENABLE_VOICE_TALK_TO_START }}
       SEARCH_ENDPOINT: ${{ vars.SEARCH_ENDPOINT }}
       WORK_IQ_TIMEOUT_SECONDS: ${{ vars.WORK_IQ_TIMEOUT_SECONDS }}
       ENABLE_WORKIQ_MCP: ${{ vars.ENABLE_WORKIQ_MCP }}
@@ -97,11 +98,14 @@ jobs:
             --set-env-vars IMAGE_PROJECT_ENDPOINT_MAI="${IMAGE_PROJECT_ENDPOINT_MAI}"
 
       - name: Configure optional Work IQ / Search endpoints
-        if: ${{ env.VOICE_SPA_CLIENT_ID != '' || env.SEARCH_ENDPOINT != '' || env.WORK_IQ_TIMEOUT_SECONDS != '' || env.ENABLE_WORKIQ_MCP != '' }}
+        if: ${{ env.VOICE_SPA_CLIENT_ID != '' || env.ENABLE_VOICE_TALK_TO_START != '' || env.SEARCH_ENDPOINT != '' || env.WORK_IQ_TIMEOUT_SECONDS != '' || env.ENABLE_WORKIQ_MCP != '' }}
         run: |
           env_vars=()
           if [ -n "${VOICE_SPA_CLIENT_ID}" ]; then
             env_vars+=("VOICE_SPA_CLIENT_ID=${VOICE_SPA_CLIENT_ID}")
+          fi
+          if [ -n "${ENABLE_VOICE_TALK_TO_START}" ]; then
+            env_vars+=("ENABLE_VOICE_TALK_TO_START=${ENABLE_VOICE_TALK_TO_START}")
           fi
           if [ -n "${SEARCH_ENDPOINT}" ]; then
             env_vars+=("SEARCH_ENDPOINT=${SEARCH_ENDPOINT}")

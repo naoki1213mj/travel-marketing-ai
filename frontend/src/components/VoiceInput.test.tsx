@@ -6,14 +6,34 @@ const originalFetch = globalThis.fetch
 const originalSpeechRecognition = (window as Window & typeof globalThis & { SpeechRecognition?: unknown }).SpeechRecognition
 const originalWebkitSpeechRecognition = (window as Window & typeof globalThis & { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition
 
-vi.mock('../lib/msal-auth', () => ({
-  getVoiceLiveToken: vi.fn(),
+const speechMocks = vi.hoisted(() => ({
+  start: vi.fn(),
+  stop: vi.fn(),
+  handlers: { current: null as null | {
+    onTranscript: (text: string, isFinal: boolean) => void
+    onError: (error: string) => void
+    onStateChange: (state: 'connecting' | 'listening' | 'stopped') => void
+  } },
 }))
 
-vi.mock('../lib/voice-live', () => ({
-  VoiceLiveClient: class {
-    async connect() {}
-    disconnect() {}
+vi.mock('../lib/speech-stt', () => ({
+  AzureSpeechRecognizer: class {
+    constructor(_tokenUrl: string, handlers: {
+      onTranscript: (text: string, isFinal: boolean) => void
+      onError: (error: string) => void
+      onStateChange: (state: 'connecting' | 'listening' | 'stopped') => void
+    }) {
+      speechMocks.handlers.current = handlers
+    }
+
+    async start() {
+      speechMocks.start()
+      speechMocks.handlers.current?.onStateChange('listening')
+    }
+
+    stop() {
+      speechMocks.stop()
+    }
   },
 }))
 
@@ -53,7 +73,7 @@ const t = (key: string) => ({
   'voice.speaking': '読み上げ中…',
   'voice.connecting': '接続中…',
   'voice.unsupported': 'このブラウザは音声入力に対応していません',
-  'voice.provider': 'Voice Live',
+  'voice.provider': 'Azure Speech',
 }[key] ?? key)
 
 function createSpeechResult(transcript: string, isFinal: boolean) {
@@ -84,7 +104,10 @@ function createSpeechEvent(
 describe('VoiceInput', () => {
   beforeEach(() => {
     MockSpeechRecognition.instances = []
-    sessionStorage.removeItem('voiceLiveFailed')
+    speechMocks.start.mockClear()
+    speechMocks.stop.mockClear()
+    speechMocks.handlers.current = null
+    sessionStorage.removeItem('azureSpeechFailed')
     globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({})))
     Object.defineProperty(window, 'SpeechRecognition', {
       configurable: true,
@@ -147,7 +170,7 @@ describe('VoiceInput', () => {
     expect(MockSpeechRecognition.instances[0].stop).toHaveBeenCalledTimes(1)
   })
 
-  it('skips Voice Live config lookup when capability is unavailable', async () => {
+  it('skips Azure Speech config lookup when capability is unavailable', async () => {
     render(<VoiceInput onTranscript={vi.fn()} voiceLiveAvailable={false} t={t} />)
 
     const button = screen.getByRole('button', { name: '話して開始' })
@@ -195,6 +218,53 @@ describe('VoiceInput', () => {
 
     expect(onTranscript).toHaveBeenLastCalledWith('春の沖縄 ファミリー向け')
     expect(screen.getByText('春の沖縄 ファミリー向け')).toBeInTheDocument()
+  })
+
+  it('uses Azure Speech recognition and publishes the transcript when configured', async () => {
+    const onTranscript = vi.fn()
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ available: true, mode: 'azure_speech' })))
+    render(<VoiceInput onTranscript={onTranscript} voiceLiveAvailable={true} voiceTalkToStartAvailable={true} t={t} />)
+
+    const button = screen.getByRole('button', { name: '話して開始' })
+    await waitFor(() => {
+      expect(button).not.toBeDisabled()
+    })
+
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(speechMocks.start).toHaveBeenCalledTimes(1)
+    })
+    // Web Speech にはフォールバックせず Azure Speech を使う
+    expect(MockSpeechRecognition.instances).toHaveLength(0)
+    expect(screen.getByText('音声を認識中…')).toBeInTheDocument()
+
+    act(() => {
+      speechMocks.handlers.current?.onTranscript('沖縄 ファミリー旅行', true)
+    })
+
+    expect(onTranscript).toHaveBeenLastCalledWith('沖縄 ファミリー旅行')
+    expect(screen.getByText('沖縄 ファミリー旅行')).toBeInTheDocument()
+  })
+
+  it('falls back to Web Speech when Azure Speech fails to start', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ available: true, mode: 'azure_speech' })))
+    speechMocks.start.mockImplementationOnce(() => {
+      throw new Error('token unavailable')
+    })
+    render(<VoiceInput onTranscript={vi.fn()} voiceLiveAvailable={true} voiceTalkToStartAvailable={true} t={t} />)
+
+    const button = screen.getByRole('button', { name: '話して開始' })
+    await waitFor(() => {
+      expect(button).not.toBeDisabled()
+    })
+
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(MockSpeechRecognition.instances).toHaveLength(1)
+    })
+    expect(sessionStorage.getItem('azureSpeechFailed')).toBe('true')
   })
 
   it('disables Talk to start when the capability is unavailable', async () => {

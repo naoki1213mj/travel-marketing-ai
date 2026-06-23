@@ -44,6 +44,8 @@ def test_capabilities_default_to_unavailable(monkeypatch):
         "ENABLE_SOURCE_INGESTION",
         "SOURCE_INGESTION_ENDPOINT",
         "ENABLE_VOICE_TALK_TO_START",
+        "SPEECH_SERVICE_ENDPOINT",
+        "SPEECH_SERVICE_REGION",
         "ENABLE_MAI_TRANSCRIBE_1",
         "MAI_TRANSCRIBE_1_ENDPOINT",
         "MAI_TRANSCRIBE_1_DEPLOYMENT_NAME",
@@ -59,6 +61,8 @@ def test_capabilities_default_to_unavailable(monkeypatch):
     assert snapshot["features"]["evaluation_logging"]["available"] is False
     assert snapshot["features"]["source_ingestion"]["available"] is False
     assert snapshot["features"]["work_iq"]["available"] is False
+    assert snapshot["features"]["voice_live"]["available"] is False
+    assert snapshot["features"]["voice_talk_to_start"]["available"] is False
 
 
 def test_capabilities_reflect_safe_configuration(monkeypatch):
@@ -75,6 +79,8 @@ def test_capabilities_reflect_safe_configuration(monkeypatch):
     monkeypatch.setenv("CONTINUOUS_MONITORING_SAMPLE_RATE", "1")
     monkeypatch.setenv("ENABLE_EVALUATION_LOGGING", "true")
     monkeypatch.setenv("ENABLE_VOICE_TALK_TO_START", "true")
+    monkeypatch.setenv("SPEECH_SERVICE_ENDPOINT", "https://example.cognitiveservices.azure.com/")
+    monkeypatch.setenv("SPEECH_SERVICE_REGION", "eastus2")
     monkeypatch.setenv("ENABLE_MAI_TRANSCRIBE_1", "true")
     monkeypatch.setenv("MAI_TRANSCRIBE_1_ENDPOINT", "https://transcribe.example")
     monkeypatch.setenv("MAI_TRANSCRIBE_1_DEPLOYMENT_NAME", "mai-transcribe-1")

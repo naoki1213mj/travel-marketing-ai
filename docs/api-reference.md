@@ -39,7 +39,9 @@ REST API と SSE イベントの仕様です。
 | `POST` | `/api/sources/{source_id}/review` | source summary の承認 / 却下 |
 | `DELETE` | `/api/sources/{source_id}` | owner scope 内の source 削除 |
 | `GET` | `/api/voice-token` | 廃止済み endpoint（常に `410 Gone`） |
-| `GET` | `/api/voice-config` | Voice Live MSAL 設定取得 |
+| `GET` | `/api/voice-config` | Work IQ delegated 認証用の MSAL 設定（`client_id` / `tenant_id`）取得 |
+| `GET` | `/api/speech-config` | 音声入力モード（`azure_speech` / `web_speech`）取得 |
+| `GET` | `/api/speech-token` | Azure Speech STT の短命 authorization token（keyless / MI、IP レート制限） |
 | `POST` | `/api/evaluate` | 品質評価の実行 |
 | `POST` | `/api/upload-pdf` | 旧 PDF アップロード互換 route（source draft を返す） |
 
@@ -87,8 +89,8 @@ REST API と SSE イベントの仕様です。
 | `continuous_monitoring` | `ENABLE_CONTINUOUS_MONITORING=true`、評価ログ opt-in、project endpoint、`CONTINUOUS_MONITORING_SAMPLE_RATE > 0` |
 | `cost_metrics` | `ENABLE_COST_METRICS=true` と `APPLICATIONINSIGHTS_CONNECTION_STRING` が設定済み。token usage からの概算で、請求データではありません |
 | `source_ingestion` | `ENABLE_SOURCE_INGESTION=true` |
-| `voice_live` | project endpoint と Entra SPA client id が設定済み |
-| `voice_talk_to_start` | `ENABLE_VOICE_TALK_TO_START=true` かつ Voice Live が利用可能 |
+| `voice_live` | `SPEECH_SERVICE_ENDPOINT` と `SPEECH_SERVICE_REGION` が設定済み（Azure Speech STT が keyless で利用可能） |
+| `voice_talk_to_start` | `ENABLE_VOICE_TALK_TO_START=true` かつ Azure Speech STT が利用可能 |
 | `mai_transcribe_1` | `ENABLE_MAI_TRANSCRIBE_1=true`、endpoint、deployment、確認済み API path が設定済み |
 | `work_iq` | Entra SPA client id と `MARKETING_PLAN_RUNTIME=foundry_preprovisioned`、`WORKIQ_RUNTIME=foundry_tool` + project endpoint、または明示 rollback の `graph_prefetch` |
 
@@ -1003,47 +1005,66 @@ Work IQ の主な `status` 値:
 | `POST /api/chat/{thread_id}/approve` | 10 リクエスト / 分 |
 | `POST /api/evaluate` | 5 リクエスト / 分 |
 
-## Voice Live API
+## 音声入力（Azure Speech Speech-to-Text）
+
+ブラウザの音声入力は Azure AI Speech の Speech-to-Text を **keyless（Managed Identity）** で利用します。FastAPI が Cognitive Services の AAD トークンを取得して短命の Speech authorization token を発行し、ブラウザの Speech SDK が継続認識で発話を入力欄へ文字起こしします。リアルタイム音声会話（旧 Voice Live API）や MSAL ユーザーログイン、voice agent は不要です。
 
 ### `GET /api/voice-token`
 
-この endpoint は **廃止済み** で、常に `410 Gone` を返します。バックエンドの managed-identity token をブラウザへ返さず、`/api/voice-config` + browser delegated MSAL auth (`https://cognitiveservices.azure.com/user_impersonation`) を正規契約とします。
-
-レスポンス例:
+この endpoint は **廃止済み** で、常に `410 Gone` を返します。
 
 ```json
 {
   "error": "Voice token endpoint disabled",
   "code": "VOICE_TOKEN_ENDPOINT_DISABLED",
-  "message": "Use /api/voice-config and browser delegated MSAL auth with https://cognitiveservices.azure.com/user_impersonation."
+  "message": "Use /api/speech-token for keyless Azure Speech Speech-to-Text authorization tokens."
 }
 ```
 
 ### `GET /api/voice-config`
 
-Voice Live の MSAL.js クライアント設定を返します。フロントエンドはこの情報を使って MSAL.js で Entra 認証を行い、`https://cognitiveservices.azure.com/user_impersonation` の browser delegated token で Voice Live へ接続します。
-
-レスポンス例:
+Work IQ の delegated 認証（`frontend/src/lib/api-auth.ts`）が使う MSAL クライアント設定を返します（機密値は含みません）。音声入力固有の情報は含めず、`/api/speech-config` と責務を分離しています。
 
 ```json
 {
-  "agent_name": "travel-voice-orchestrator",
-  "client_id": "<entra-app-client-id>",
-  "tenant_id": "<entra-tenant-id>",
-  "resource_name": "your-foundry",
-  "project_name": "your-project",
-  "voice": "ja-JP-NanamiNeural",
-  "vad_type": "azure_semantic_vad",
-  "endpoint": "wss://your-foundry.services.ai.azure.com/voice-live/realtime",
-  "api_version": "2026-01-01-preview"
+  "client_id": "<entra-spa-client-id>",
+  "tenant_id": "<entra-tenant-id>"
 }
 ```
 
-`VOICE_SPA_CLIENT_ID` や `AZURE_TENANT_ID` が未設定でもこのエンドポイント自体は `200 OK` を返し、未設定項目は空文字列になります。
+### `GET /api/speech-config`
+
+音声入力モードの可用性を返します（機密値は含みません）。`SPEECH_SERVICE_ENDPOINT` と `SPEECH_SERVICE_REGION` が設定済みなら `azure_speech`、未設定ならブラウザの Web Speech API へフォールバックする `web_speech` を返します。
+
+```json
+{
+  "mode": "azure_speech",
+  "region": "eastus2",
+  "language": "ja-JP",
+  "available": true
+}
+```
+
+### `GET /api/speech-token`
+
+Azure Speech STT 用の短命 authorization token を Managed Identity で発行します。バックエンドは `DefaultAzureCredential` で `https://cognitiveservices.azure.com/.default` の AAD トークンを取得し、`{SPEECH_SERVICE_ENDPOINT}/sts/v1.0/issueToken` を `Authorization: Bearer <aad>` で呼んで service token を取得します。AAD トークン自体はブラウザへ返さず、派生した Speech service token のみを返します（`Cache-Control: no-store`）。Speech リソースの quota 濫用を防ぐため送信元 IP ごとに `30/分` のレート制限を課します。
+
+```json
+{
+  "token": "<speech-authorization-token>",
+  "region": "eastus2",
+  "language": "ja-JP",
+  "expires_at": 1750000000
+}
+```
+
+`SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` 未設定時は `503 SPEECH_STT_NOT_CONFIGURED`、トークン発行失敗時は `503 SPEECH_TOKEN_UNAVAILABLE` を返します。Managed Identity には AIServices アカウントの `Cognitive Services User` ロールが必要です。
 
 フロントエンドの `VoiceInput` コンポーネントは以下のフローで動作します:
 
-1. `/api/voice-config` を呼び出して MSAL 設定を取得
-2. MSAL.js で `https://cognitiveservices.azure.com/user_impersonation` スコープのトークンを取得
-3. Voice Live WebSocket に接続
-4. Voice Live が利用不可の場合は Web Speech API にフォールバック
+1. `/api/speech-config` で音声入力モードを確認（`available` が true なら Azure Speech）
+2. マイク開始時に `/api/speech-token` から authorization token を取得
+3. Speech SDK（`microsoft-cognitiveservices-speech-sdk`、動的 import で遅延ロード）の `SpeechConfig.fromAuthorizationToken(token, region)` で継続認識
+4. token は失効前に自動更新（`recognizer.authorizationToken` を差し替え）
+5. Azure Speech が利用不可・接続失敗の場合はブラウザの Web Speech API にフォールバック
+
