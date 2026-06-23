@@ -124,13 +124,13 @@ def test_improvement_mcp_header_default(monkeypatch):
 
 
 def test_work_iq_timeout_default(monkeypatch):
-    """Work IQ timeout の環境既定値は 120 秒を維持する"""
+    """Work IQ timeout の環境既定値は 180 秒を維持する"""
     _disable_azd_env(monkeypatch)
     monkeypatch.delenv("WORK_IQ_TIMEOUT_SECONDS", raising=False)
 
     settings = get_settings()
 
-    assert settings["work_iq_timeout_seconds"] == "120"
+    assert settings["work_iq_timeout_seconds"] == "180"
 
 
 def test_fabric_lakehouse_database_default_and_alias(monkeypatch):

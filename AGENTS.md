@@ -136,6 +136,8 @@
 | `check_travel_law_compliance(document)` | 旅行業法チェックリスト 5 項目を検証 | ローカル処理（キーワード検索） | — |
 | `search_safety_info(destination)` | 渡航先の安全情報（外務省警告・気象警報） | ✅ Foundry Agent Service (Bing grounding) | 静的安全データ |
 
+**Foundry IQ 使用保証**: instructions で `search_knowledge_base` を必須の初手にし、model が skip した場合も `src/api/chat.py` の `_ensure_regulation_foundry_iq_used` が server-side fallback 検索を実行するため、3IQ status strip では常に Foundry IQ 使用済みとして表示される。
+
 **出力形式**: Markdown（チェック結果テーブル ✅/⚠️/❌ / 違反詳細 / 修正提案）
 
 ---
@@ -272,6 +274,7 @@ Agent6 (quality-review-agent) ← バックグラウンド実行（オプショ�
 | Fabric capacity | `fcdemoeastus2001` (East US 2, F64, Active) |
 | Fabric Data Agent | `Travel_Ontology_DA_v2` (Phase 11d 適用済み 2026-05-04) |
 | Fabric Lakehouse | `lh_travel_marketing_v2` (10 Delta tables in `dbo`) |
+| Work IQ runtime | legacy `WorkIQCopilot` (OBO) が主経路。`ENABLE_WORKIQ_MCP=false`（WorkIQMCP は Foundry `500 server_error`）、`WORK_IQ_TIMEOUT_SECONDS=180`（コード側 cap 200） |
 | 既知 platform 問題 | Phase 10 P13 / P14 prompts に起因する Fabric `submit_tool_outputs` BadRequest (Phase 11d でも未解決, Microsoft サポート起票待ち) |
 | 削除済 | `ca-wmbvhdhcsuyb2`, `cae-wmbvhdhcsuyb2` (2026-05-01 削除) |
 
@@ -317,7 +320,7 @@ travel-marketing-agents/
 │   └── main.py                   # FastAPI エントリポイント
 ├── frontend/                     # フロントエンド (React 19 + Tailwind v4)
 │   └── src/
-│       ├── components/           # UI コンポーネント (Settings / WorkIqSourceStatus / Approval / ToolEventCard 等)
+│       ├── components/           # UI コンポーネント (Settings / Approval / ToolEventCard 等)
 │       ├── hooks/                # useSSE, useTheme, useI18n
 │       └── lib/                  # i18n.ts, sse-client.ts, event-schemas.ts, msal-auth.ts, voice-live.ts, iq-brand.ts
 ├── infra/                        # Bicep IaC (17 モジュール)

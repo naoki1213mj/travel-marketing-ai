@@ -100,6 +100,12 @@ if is_anonymous_lookup and not normalized_token:
 | `manager_callback_token` | Logic Apps → backend callback の HMAC | `MANAGER_APPROVAL_TRIGGER_URL` 経由 Logic Apps へ署名付き payload | Cosmos `metadata.manager_approval_callback_token` (`awaiting_manager_approval` 中のみ) | `_is_manager_approval_token_valid` (constant-time) |
 | `manager_approval_token` (URL fragment) | 上司承認ページの一時 token | `manager_approval_url` (URL fragment, never query string) | Logic Apps Workflow Run 状態 + frontend hash params | `_extract_manager_approval_token` (body / `X-Manager-Approval-Token` header のみ受理。クエリ拒否) |
 
+## 6.1 2026-06-23 update: manager approval URL の employee 露出防止
+
+上司承認の segregation-of-duty を強化するため、token 付き `manager_approval_url` は `manager_delivery_mode == "manual"` の `approval_request` payload にだけ含める。`workflow` 配信では Logic App が上司へ out-of-band 通知するため、会話 owner（申請者）へ URL を返さず、自己承認に使える token を露出しない。
+
+さらに `src/api/conversations.py` の `_redact_manager_approval_urls` が read-time redaction を行い、`GET /api/conversations/{id}` と `GET /api/replay/{id}` で返す非 manual の `approval_request` event から `manager_approval_url` を削除する。これにより、修正前に保存された transcript も token を再露出しない。手動共有 mode の URL は、フロントエンドのコピー / 共有リンク UI に必要なため保持する。
+
 ## 7. 監視 / 監査
 
 - App Insights `traces` で `path=/api/chat/.*/approve` + `code=APPROVAL_CONTEXT_NOT_FOUND` を観測すれば bearer 不一致 / 漏洩攻撃の検知に使える

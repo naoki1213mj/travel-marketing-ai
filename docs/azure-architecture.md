@@ -73,7 +73,7 @@ flowchart TD
 
 | Runtime | 既定 | 実装 |
 | --- | --- | --- |
-| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行する。ブラウザが取得した `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、Prompt Agent に添付済みの Work IQ connection を per-user で実行する。`ENABLE_WORKIQ_MCP=true` かつ `X-Work-IQ-MCP-Authorization` がある場合のみ Foundry UI の `WorkIQMCP` (`https://workiq.svc.cloud.microsoft/mcp`) を primary にし、未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback を使う。live Prompt Agents は code deploy + env opt-in まで legacy のみに同期済み。`source_scope` は connector 動的 overlay ではなく、instructions / UI / metadata のガイダンス |
+| `foundry_tool` | ✅ | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせて Agent2 を事前作成済み Foundry Prompt Agent として実行する。ブラウザが取得した `https://ai.azure.com/user_impersonation` token を backend が Foundry Responses client へ渡し、Prompt Agent に添付済みの Work IQ connection を per-user で実行する。`ENABLE_WORKIQ_MCP=true` かつ `X-Work-IQ-MCP-Authorization` がある場合のみ Foundry UI の `WorkIQMCP` (`https://workiq.svc.cloud.microsoft/mcp`) を primary にし、未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback を使う。ただし 2026-06-22 時点で request-level `WorkIQMCP` は `500 server_error` のため既定無効で、legacy `WorkIQCopilot` (OBO) が主経路。live Prompt Agents は code deploy + env opt-in まで legacy のみに同期済み。`source_scope` は connector 動的 overlay ではなく、instructions / UI / metadata のガイダンス |
 | `graph_prefetch` | rollback | Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API から短い workplace brief を取得して prompt に注入する |
 
 - `source_scope` ごとの guidance は `meeting_notes` → Teams meeting artifacts、`emails` → Outlook Email、`teams_chats` → Teams、`documents_notes` → SharePoint / OneDrive です。実際の利用可否は事前作成済み Prompt Agent に添付した Work IQ connection（`WorkIQMCP` または legacy `WorkIQCopilot`）と tenant-wide enablement に依存します。
@@ -154,7 +154,7 @@ flowchart TD
 | `SPEECH_SERVICE_ENDPOINT` / `SPEECH_SERVICE_REGION` | Photo Avatar 動画生成 |
 | `VOICE_SPA_CLIENT_ID` / `AZURE_TENANT_ID` | Voice Live MSAL.js 認証 |
 | `MANAGER_APPROVAL_TRIGGER_URL` / `LOGIC_APP_CALLBACK_URL` | 上司通知 workflow / 承認後アクション workflow の callback を live URL へ合わせるため |
-| Work IQ admin consent + tenant member ブラウザアカウント | delegated Work IQ 経路を tenant 内ユーザーで検証するため。WorkIQMCP primary は `WorkIQAgent.Ask` admin grant + `ENABLE_WORKIQ_MCP=true` + browser header が揃ってから有効化 |
+| Work IQ admin consent + tenant member ブラウザアカウント | delegated Work IQ 経路を tenant 内ユーザーで検証するため。WorkIQMCP primary は現在の `500 server_error` が解消し、`WorkIQAgent.Ask` admin grant + `ENABLE_WORKIQ_MCP=true` + browser header が揃ってから有効化 |
 
 上記以外の環境変数（`IMPROVEMENT_MCP_ENDPOINT`, `COSMOS_DB_ENDPOINT` 等）は `azd up` で自動注入されます。rebuilt `workiq-dev` tenant では Search / Work IQ / Fabric / Teams 通知までは live で復旧済みで、残件は主に SharePoint 保存経路です。
 

@@ -30,7 +30,7 @@
 
 | 領域 | 状態 | 補足 |
 | --- | --- | --- |
-| Work IQ | 完了 | SPA redirect URI、Foundry delegated auth (`https://ai.azure.com/user_impersonation`)、Work IQ SP + SPA `WorkIQAgent.Ask` delegated permission/admin grant、`graph_prefetch` rollback 用 Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。Foundry UI には OAuth2 の `WorkIQMCP` connection（`https://workiq.svc.cloud.microsoft/mcp`, server label `WorkIQMCP`）を作成済みですが、live Prompt Agents は既存 image 互換のため legacy `WorkIQCopilot` のみに同期済みです。code deploy 後に `ENABLE_WORKIQ_MCP=true` と browser の `X-Work-IQ-MCP-Authorization` で primary 化できます |
+| Work IQ | 完了 | SPA redirect URI、Foundry delegated auth (`https://ai.azure.com/user_impersonation`)、Work IQ SP + SPA `WorkIQAgent.Ask` delegated permission/admin grant、`graph_prefetch` rollback 用 Graph delegated permissions、admin consent、M365 Copilot ライセンス確認まで完了。Foundry UI には OAuth2 の `WorkIQMCP` connection（`https://workiq.svc.cloud.microsoft/mcp`, server label `WorkIQMCP`）を作成済みですが、2026-06-22 時点で request-level `WorkIQMCP` は `500 server_error` のため既定無効で、legacy `WorkIQCopilot` (OBO) が主経路です。live Prompt Agents は既存 image 互換のため legacy `WorkIQCopilot` のみに同期済みです |
 | Search / Foundry IQ | 完了 | Azure AI Search は **East US** に作成。`regulations-index`、`regulations-ks`、`regulations-kb` を投入済み |
 | 追加モデル | 完了 / 要 quota | メイン East US 2 Foundry account に `gpt-5-4-mini`、`gpt-4-1-mini`、`gpt-4.1`、`gpt-5.4` を配備済み。`gpt-5.5` は East US 2 catalog で GA（version `2026-04-24`、`GlobalStandard` / `DataZoneStandard`、Responses 対応）ですが、現 subscription の quota は 0 TPM なので未配備です。アプリ既定の画像経路は `gpt-image-2` で、GPT 系画像モデルは `AZURE_AI_PROJECT_ENDPOINT` から導出した AI Services account endpoint の Azure OpenAI Images API を Managed Identity で呼びます。deployment 名が既定と異なる場合は `GPT_IMAGE_2_DEPLOYMENT_NAME` で上書きできます。`gpt-image-1.5` も引き続き利用可能です |
 | MAI 経路 | 完了 | 別 East US AI Services account を `IMAGE_PROJECT_ENDPOINT_MAI` へ配線。`MAI-Image-2` deployment 名は `MAI-Image-2e` の alias |
@@ -305,7 +305,7 @@ GitHub Actions の `deploy.yml` は manager approval workflow の signed trigger
    - `http://localhost:8000/auth-redirect.html`
    - `https://<container-app-host>/auth-redirect.html`
 7. 既定 runtime は **`MARKETING_PLAN_RUNTIME=foundry_preprovisioned` + `WORKIQ_RUNTIME=foundry_tool`**。`postprovision.py` が Agent2 用の Foundry Prompt Agent を同期し、実行時はその `agent_reference` を使う。instructions を更新した場合も、反映には `scripts/postprovision.py` の再実行で marketing-plan agent の再同期が必要
-8. `WORKIQ_RUNTIME=foundry_tool` では、live 互換の既定は legacy `WorkIQCopilot` / `mcp_M365Copilot`。Foundry UI の OAuth2 `WorkIQMCP` connection（server_url `https://workiq.svc.cloud.microsoft/mcp`）を primary にするのは、code deploy 後に `ENABLE_WORKIQ_MCP=true` を設定し、frontend が `X-Work-IQ-MCP-Authorization` を送れる状態を確認してからにする
+8. `WORKIQ_RUNTIME=foundry_tool` では、live 互換の既定は legacy `WorkIQCopilot` / `mcp_M365Copilot`。Foundry UI の OAuth2 `WorkIQMCP` connection（server_url `https://workiq.svc.cloud.microsoft/mcp`）は 2026-06-22 時点で request-level `500 server_error` のため既定無効で、Microsoft 解消後に `ENABLE_WORKIQ_MCP=true` と frontend の `X-Work-IQ-MCP-Authorization` で再有効化する
 9. `WORKIQ_RUNTIME=graph_prefetch` は明示 rollback 用で、この場合だけ **Microsoft Graph Copilot Chat API**（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）を per-user delegated で呼び出して短い brief を先読みする
 10. フロントエンドで Microsoft 365 サインイン後に新しい会話を開始し、preflight の状態が `auth_required` / `consent_required` / `redirecting` から `ready` / `enabled` へ進むこと、そしてバックエンドに保存された `work_iq_session.status` を復元しても同じ UI 状態が表示されることを確認する
 
@@ -442,8 +442,8 @@ curl https://<app>/api/sources/limits
 | 画像が透明 PNG | 画像モデル配備を確認。MAI は別 East US account + RBAC が必要。`MAI-Image-2` quota が無い場合は `MAI-Image-2e` を `MAI-Image-2` deployment 名で alias すると現行 backend で利用可能 |
 | MCP 改善が使われない | `IMPROVEMENT_MCP_ENDPOINT` の APIM route を確認。新 tenant では Function App が managed identity storage に切り替わっているかも確認する |
 | KB が静的レスポンス | `SEARCH_ENDPOINT` / `SEARCH_API_KEY` または Foundry の Azure AI Search 既定接続、`regulations-index` / `regulations-kb` を確認 |
-| Work IQ が `timeout` / `completed` にならない | App Insights で Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を 120 以上へ調整する |
-| `work_iq_runtime=foundry_tool` がエラーになる | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。`ENABLE_WORKIQ_MCP=true` の場合は `X-Work-IQ-MCP-Authorization` が届いているか確認し、必要なら env を外して legacy `WorkIQCopilot` fallback で切り分ける |
+| Work IQ が `timeout` / `completed` にならない | App Insights で Foundry Work IQ tool と Microsoft Graph Copilot Chat API `chatOverStream` / `/chat` のレイテンシを確認し、必要なら `WORK_IQ_TIMEOUT_SECONDS` を調整する（既定 180、コード側 cap 200） |
+| `work_iq_runtime=foundry_tool` がエラーになる | `MARKETING_PLAN_RUNTIME=foundry_preprovisioned` と組み合わせているか、`postprovision.py` で marketing-plan Agent が同期済みか確認する。`ENABLE_WORKIQ_MCP=true` の request-level `WorkIQMCP` は現在 `500 server_error` の既知問題があるため、必要なら env を外して legacy `WorkIQCopilot` fallback で切り分ける |
 | Work IQ サインインで弾かれる | サインインに使っている Microsoft 365 アカウントが tenant member / guest か確認する。tenant 外アカウントは SPA redirect 後に拒否される |
 | `/api/sources/*` が 503 | `ENABLE_SOURCE_INGESTION=true` が Container App に反映済みか確認。音声だけ失敗する場合は MAI Transcribe の endpoint / deployment / API path を確認 |
 | `/api/capabilities` で `configured=true` だが `available=false` | 必須 endpoint、App Insights、sample rate、deployment/quota、または privacy gate が不足していないか確認 |

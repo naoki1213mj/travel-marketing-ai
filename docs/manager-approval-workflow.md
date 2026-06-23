@@ -4,7 +4,7 @@
 
 現在の IaC が自動作成する Logic Apps は post approval actions 専用です。上司承認通知は別 workflow として分離し、`MANAGER_APPROVAL_TRIGGER_URL` で FastAPI から呼び出します。
 
-現在の組み込み上司承認ページは、今回承認対象の企画書と、直前までの確定済み企画書を横並びで比較表示できます。通知 workflow 側は `manager_approval_url` を上司へ届ければ十分で、比較 UI 自体はアプリ側が担当します。
+現在の組み込み上司承認ページは、今回承認対象の企画書と、直前までの確定済み企画書を横並びで比較表示できます。通知 workflow 側は `manager_approval_url` を上司へ届ければ十分で、比較 UI 自体はアプリ側が担当します。2026-06-23 以降、申請者向け `approval_request` には manual mode のときだけこの URL を含めます。
 
 2026-04-18 時点の推奨構成は、既存の `Microsoft.Web/connections/teams` 接続を使う Consumption Logic App です。現在のワークスペースには、そのまま deploy できる standalone Bicep として [infra/modules/manager-approval-notification-logic-app.bicep](../infra/modules/manager-approval-notification-logic-app.bicep) を追加しています。rebuilt `workiq-dev` tenant では `teams-1` が Connected で、`logic-manager-approval-wmbvhdhcsuyb2` が live です。`deploy.yml` による signed trigger URL の再同期も live で検証済みで、Container App secret は現在の Logic App callback URL と一致しています。
 
@@ -24,6 +24,8 @@ FastAPI は `MANAGER_APPROVAL_TRIGGER_URL` に対して次の JSON を `POST` �
   "manager_callback_token": "<shared-secret-token>"
 }
 ```
+
+> 2026-06-23 更新: `manager_approval_url` は workflow request には引き続き含まれますが、申請者へ返す `approval_request` payload では `manager_delivery_mode == "manual"` のときだけ含めます。`workflow` mode では Logic App が上司へ out-of-band 配信し、申請者が token URL を見て自己承認できないようにします。
 
 各フィールドの意味:
 
@@ -134,13 +136,13 @@ FastAPI は manager approval の待機中、UI 上では待機表示だけを出
 
 - token は URL fragment (`#manager_approval_token=...`) に入るため、通常の HTTP リクエストやサーバーアクセスログには乗りません。
 - 承認ページは `GET /api/chat/{thread_id}/manager-approval-request` で企画書を取得し、決定時は `POST /api/chat/{thread_id}/manager-approval-callback` を呼びます。
-- `MANAGER_APPROVAL_TRIGGER_URL` を設定しない場合でも、この承認ページ URL を担当者が共有すれば運用できます。
+- `MANAGER_APPROVAL_TRIGGER_URL` を設定しない manual mode では、この承認ページ URL を担当者が共有すれば運用できます。
 - `GET /api/chat/{thread_id}/manager-approval-request` のレスポンスには `current_version` と `previous_versions` が含まれ、2 回目以降の上司承認では前回確定版との比較をそのまま表示できます。
 
 ## 6. セキュリティ注意点
 
 - `manager_callback_token` は secret と同等に扱い、Teams 本文や監査ログへ出さない。
-- `manager_approval_url` は manager にだけ共有する。token 自体は URL fragment に入っているが、チャットや監査ログへ転記しない。
+- `manager_approval_url` は manager にだけ共有する。workflow mode では backend が申請者向け `approval_request` から URL を省略し、`GET /api/conversations/{id}` / `GET /api/replay/{id}` でも非 manual の過去 event を `_redact_manager_approval_urls` で read-time redaction する。manual mode の URL はコピー / 共有リンク UI のため保持する。
 - workflow 実行ログに request body 全体を残す場合は token をマスクする。
 - callback 先は HTTPS を使う。
 - `conversation_id` だけで callback しない。必ず token を返す。

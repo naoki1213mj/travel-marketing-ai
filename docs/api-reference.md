@@ -160,7 +160,7 @@ REST API と SSE イベントの仕様です。
 | ヘッダ | 必須 | 用途 |
 | --- | --- | --- |
 | `Authorization: Bearer <token>` | 任意 | Work IQ を有効化した **新規会話** で使う本人の delegated token。`work_iq_runtime=foundry_tool` では **Foundry data-plane (`https://ai.azure.com/user_impersonation`) token**、`graph_prefetch` では Graph delegated token を送ります。`foundry_tool` はこのヘッダの有無で fail-closed 判定し、同意や接続不備は Foundry の `oauth_consent_request` / tool error として返します |
-| `X-Work-IQ-MCP-Authorization: Bearer <WorkIQMCP token>` | 任意 | `ENABLE_WORKIQ_MCP=true` のときだけ使う `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask` token。存在すれば Foundry `WorkIQMCP` connection (`https://workiq.svc.cloud.microsoft/mcp`, server label `WorkIQMCP`) を primary として呼び、未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback に戻ります |
+| `X-Work-IQ-MCP-Authorization: Bearer <WorkIQMCP token>` | 任意 | `ENABLE_WORKIQ_MCP=true` のときだけ使う `api://workiq.svc.cloud.microsoft/WorkIQAgent.Ask` token。存在すれば Foundry `WorkIQMCP` connection (`https://workiq.svc.cloud.microsoft/mcp`, server label `WorkIQMCP`) を primary として呼び、未取得 / auth failure 時は legacy `WorkIQCopilot` / `mcp_M365Copilot` fallback に戻ります。ただし 2026-06-22 時点で request-level `WorkIQMCP` は `500 server_error` のため既定無効で、legacy `WorkIQCopilot` (OBO) が主経路です |
 | `X-Work-IQ-Graph-Authorization: Bearer <Graph token>` | 任意 | `graph_prefetch` rollback を明示利用するときの Graph delegated token。`foundry_tool` の通常経路では不要です |
 | `X-Work-IQ-Auth-Status` | 任意 | フロントエンド preflight の結果。`authenticated` / `auth_required` / `consent_required` / `redirecting` / `failed` を backend の session 復元と UI 状態整合に使います |
 | `X-User-Timezone` | 任意 | rollback の `graph_prefetch` で Work IQ brief を取得するときの `locationHint.timeZone` に使用（未指定時は `UTC`） |
@@ -180,12 +180,12 @@ REST API と SSE イベントの仕様です。
 ### `/api/chat` 注意
 
 - Azure モードの主フローは Agent2（施策生成）完了後に担当者向け `approval_request` を返します。
-- 既定値は `marketing_plan_runtime=foundry_preprovisioned` + `work_iq_runtime=foundry_tool` です。Agent2 は Work IQ の有無にかかわらず `postprovision.py` で同期した事前作成済み Foundry Prompt Agent を `agent_reference` で実行し、Work IQ 有効時は **ユーザーの Foundry delegated token** で Responses API を呼びつつ、agent definition に含まれる Work IQ connection を使います。Foundry UI には `WorkIQMCP` connection を作成済みですが、primary 化は `ENABLE_WORKIQ_MCP=true` + `X-Work-IQ-MCP-Authorization` が揃った場合だけです。live Prompt Agents は code deploy + env opt-in まで legacy `WorkIQCopilot` のみに同期済みです。
-- `work_iq_runtime=graph_prefetch` は **明示 rollback 専用** の経路で、この場合だけ Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。既定 timeout は `120` 秒です。`foundry_tool` 失敗時に自動で silent fallback することはありません。
+- 既定値は `marketing_plan_runtime=foundry_preprovisioned` + `work_iq_runtime=foundry_tool` です。Agent2 は Work IQ の有無にかかわらず `postprovision.py` で同期した事前作成済み Foundry Prompt Agent を `agent_reference` で実行し、Work IQ 有効時は **ユーザーの Foundry delegated token** で Responses API を呼びつつ、agent definition に含まれる Work IQ connection を使います。Foundry UI には `WorkIQMCP` connection を作成済みですが、primary 化は `ENABLE_WORKIQ_MCP=true` + `X-Work-IQ-MCP-Authorization` が揃った場合だけです。ただし 2026-06-22 時点で request-level `WorkIQMCP` は `500 server_error` のため既定無効で、legacy `WorkIQCopilot` (OBO) が主経路です。live Prompt Agents は code deploy + env opt-in まで legacy `WorkIQCopilot` のみに同期済みです。
+- `work_iq_runtime=graph_prefetch` は **明示 rollback 専用** の経路で、この場合だけ Agent1 と Agent2 の間で Microsoft Graph Copilot Chat API（`POST /beta/copilot/conversations` → `POST /beta/copilot/conversations/{id}/chatOverStream`、必要時 `/chat` へフォールバック）から短い workplace brief を取得し、Agent2 prompt にだけ注入します。`WORK_IQ_TIMEOUT_SECONDS` の既定は `180` 秒（コード側 cap `200` 秒）で、Foundry Work IQ tool 呼び出しと `graph_prefetch` の両方に適用されます。`foundry_tool` 失敗時に自動で silent fallback することはありません。
 - `work_iq_runtime=foundry_tool` を `marketing_plan_runtime=legacy` と組み合わせた request はバリデーションエラーになります。
 - `work_iq_runtime=foundry_tool` は fail-closed です。Foundry delegated token の認証不足・同意不足・接続不備・`WORKIQ_NOT_USED` はエラーとして会話を止めます。`ENABLE_WORKIQ_MCP=true` で WorkIQMCP token が未取得 / auth failure の場合だけ legacy `WorkIQCopilot` / `mcp_M365Copilot` に戻せます。**brief なしで継続** するのは `graph_prefetch` rollback 経路だけで、その場合は `tool_event.source="workiq"` の status を返します。
 - 担当者承認後は Agent3a → Agent3b を実行し、`workflow_settings.manager_approval_enabled=true` の場合は manager approval 用の `approval_request` を返して待機します。
-- manager approval の `approval_request` には `approval_scope=manager`、`manager_email`、`manager_approval_url` が含まれます。`MANAGER_APPROVAL_TRIGGER_URL` が設定されていれば通知 workflow も同時に呼ばれ、未設定または送信失敗時は共有リンク運用にフォールバックします。
+- manager approval の `approval_request` には `approval_scope=manager`、`manager_email` が含まれます。`manager_approval_url` は `manager_delivery_mode="manual"` のときだけ含まれ、workflow 配信時は employee 側へ token を露出しないため省略されます。`MANAGER_APPROVAL_TRIGGER_URL` が未設定または送信失敗時は共有リンク運用にフォールバックします。
 - `conversation_id` を指定した修正モードでも、評価フィードバック（`品質評価` または `evaluation` を含む文）は特別扱いで、企画書再生成 → 再承認フローに戻ります。
 - `IMPROVEMENT_MCP_ENDPOINT` が設定されている場合、評価フィードバックでは保存済み評価結果・規制要約・差し戻し履歴をまとめて APIM 配下の MCP `generate_improvement_brief` に渡し、成功時は `tool_event` を 1 件返します。
 - Work IQ の raw context は SSE や会話履歴には保存されず、`tool_event.source="workiq"` の status と brief summary / source metadata だけが保存されます。バックエンドは `metadata.work_iq_session` の status を継続保存するため、`restoreConversation()` 後も Work IQ の UI 表示は同じ状態に戻ります。
@@ -824,9 +824,9 @@ Work IQ の主な `status` 値:
   "approval_token": "ee_6D5JuLZ_4JZG0-KPq...",
   "approval_scope": "user",
   "model_settings": {"text_model": "gpt-5-4-mini", "image_model": "gpt-image-2"},
-  "workflow_settings": {"manager_email": "manager@example.com", "manager_delivery_mode": "workflow"},
+  "workflow_settings": {"manager_email": "manager@example.com", "manager_delivery_mode": "manual"},
   "manager_approval_url": "https://app.example.com/?manager_conversation_id=...#manager_approval_token=...",
-  "manager_delivery_mode": "workflow",
+  "manager_delivery_mode": "manual",
   "manager_comment": "上司から差し戻しされました。内容を確認して修正してください。"
 }
 ```
@@ -840,7 +840,7 @@ Work IQ の主な `status` 値:
 | `approval_scope` | `"user"` \| `"manager"` | `manager` の場合は上司承認待ち |
 | `model_settings` | `object` (optional) | client 側で記録しておく現 model 設定 |
 | `workflow_settings` | `object` (optional) | manager_email / manager_delivery_mode 等 |
-| `manager_approval_url` | `string` (optional) | scope=manager のときに上司に渡す URL。fragment 部に `manager_approval_token` を含む |
+| `manager_approval_url` | `string` (optional) | scope=manager かつ `manager_delivery_mode="manual"` のときだけ含む上司承認 URL。fragment 部に `manager_approval_token` を含む。workflow 配信では employee transcript からも read-time redaction される |
 | `manager_delivery_mode` | `"workflow"` \| `"manual"` (optional) | Logic Apps 自動配信 vs 手動共有 |
 | `manager_comment` | `string` (optional) | manager から差し戻しされた場合のコメント |
 

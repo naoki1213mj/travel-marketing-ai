@@ -164,7 +164,7 @@ _ENV_CANDIDATES: dict[str, tuple[str, ...]] = {
 # デフォルト値（オプショナルな設定のみ）
 _DEFAULTS: dict[str, str] = {
     "model_name": "gpt-5-4-mini",
-    "work_iq_timeout_seconds": "120",
+    "work_iq_timeout_seconds": "180",
     "improvement_mcp_api_key_header": "Ocp-Apim-Subscription-Key",
     "environment": "development",
     "fabric_lakehouse_database": "Travel_Lakehouse",

@@ -1520,9 +1520,9 @@ def _resolve_work_iq_timeout_seconds() -> float:
     """Foundry connector 側で使う Work IQ タイムアウトを返す。
 
     Microsoft 365 MCP (mcp_M365Copilot) は cold start や大きいメールボックスだと
-    1 回の MCP 呼び出しで 30〜120 秒近く掛かるため、env 由来の値を 150 秒で頭打ちにする。
-    150 秒は Container Apps の ingress timeout (240s) や OpenAI クライアントの
-    既定 timeout (600s) を下回り、SSE keepalive にも干渉しない安全な上限。
+    1 回の MCP 呼び出しで 30〜120 秒近く掛かるため、env 由来の値 (既定 180s) を
+    200 秒で頭打ちにする。200 秒は Container Apps の ingress timeout (240s) や
+    OpenAI クライアントの既定 timeout (600s) を下回り、SSE keepalive にも干渉しない安全な上限。
     """
     raw_timeout = _sanitize_optional_text(get_settings().get("work_iq_timeout_seconds"))
     try:

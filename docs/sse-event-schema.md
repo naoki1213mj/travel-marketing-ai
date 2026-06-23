@@ -141,14 +141,13 @@ interface WorkIqSourceMetadata {
 **`connector_used` セマンティクス**: Foundry MCP は per-source attribution
 （どのソースから何件取れたか）を expose しないため、`foundry_tool` runtime では
 コネクタ実行成功後に `selected_sources` 全件を `status="connector_used"` でマークします。
-`count` / `preview` / `summary` は付かず、UI 側 (`WorkIqSourceStatus.tsx`) では sky tone
-の「コネクタ実行」バッジで表示されます。`graph_prefetch` runtime では従来通り
+`count` / `preview` / `summary` は付きません。per-source status cards は Settings panel から削除済みで、
+現在は全体の Work IQ status badge だけを表示します。`graph_prefetch` runtime では従来通り
 `status="completed"` + `count` + `preview` が付きます。
 
-> **UI 表示ルール**: `sourceMetadata` が全件 `connector_used` で
-> `count` / `preview` / `summary` / `briefSummary` も無い場合、
-> `WorkIqSourceStatus` コンポーネントは描画自体を省略します
-> （ランタイム表示と「この会話で有効」バッジで Work IQ アクティブ状態は伝わるため）。
+> **UI 表示ルール**: `sourceMetadata` は API 互換のため残しますが、
+> Settings panel では per-source card を描画せず、ランタイム表示と
+> 「この会話で有効」バッジで Work IQ アクティブ状態を伝えます。
 
 ---
 
@@ -228,8 +227,8 @@ interface ApprovalRequestEvent {
   approval_scope?: 'user' | 'manager';     // 'user': ユーザー直接承認, 'manager': 上長承認
   manager_email?: string;                  // manager 承認時の宛先
   manager_comment?: string;               // 上長へのコメント
-  manager_approval_url?: string;          // Logic Apps 生成の承認 URL
-  manager_delivery_mode?: string;         // 通知方法 (例: "teams", "email")
+  manager_approval_url?: string;          // manual mode のときだけ含む承認 URL
+  manager_delivery_mode?: 'workflow' | 'manual';
   approval_token?: string;                // 承認 API 呼び出し用トークン（32-byte urlsafe）
 }
 ```
@@ -350,7 +349,7 @@ interface EvaluationResult {
 | `web_search` | Agent2 / Agent3a | Bing grounding / Web Search（マーケットトレンド・安全情報の双方で使用） |
 | `workiq_foundry_tool` | Agent2 | 既定 `foundry_tool` runtime: 事前作成済み Foundry Prompt Agent + Work IQ MCP connection |
 | `generate_workplace_context_brief` | Agent2 | rollback `graph_prefetch` runtime: Microsoft Graph Copilot Chat API |
-| `foundry_iq_search` | Agent3a | Foundry IQ ナレッジベース検索（実装上の関数名は `search_knowledge_base`、テレメトリでは alias として `foundry_iq_search` に正規化） |
+| `foundry_iq_search` | Agent3a | Foundry IQ ナレッジベース検索（実装上の関数名は `search_knowledge_base`、テレメトリでは alias として `foundry_iq_search` に正規化）。instructions の必須初手に加え、model skip 時も server-side fallback で実行する |
 | `check_ng_expressions` | Agent3a | 禁止表現スキャン（ローカル処理） |
 | `check_travel_law_compliance` | Agent3a | 旅行業法チェック（ローカル処理） |
 | `generate_hero_image` | Agent4 | ヒーロー画像生成（GPT Image 2 / 1.5 / MAI-Image-2） |
