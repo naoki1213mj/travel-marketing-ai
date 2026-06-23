@@ -2922,6 +2922,51 @@ def _extract_web_search_evidence(result: object, result_text: str) -> list[Mappi
     return evidence
 
 
+_WORKIQ_BADGE_TO_SOURCE = {
+    "📧": "emails",
+    "💬": "teams_chats",
+    "📝": "meeting_notes",
+    "📄": "documents_notes",
+}
+
+
+def _extract_workiq_evidence_from_plan(result_text: str) -> list[Mapping[str, object]]:
+    """B1「社内ナレッジ反映」セクションから Work IQ の参照元 evidence カードを抽出する (B2)。
+
+    foundry_tool 経路では Foundry MCP 出力が per-source attribution を持たないため、企画書に
+    出力させた「## 社内ナレッジ反映」(出所バッジ 📧/💬/📝/📄 付き) を構造化 evidence として
+    再利用し、UI の evidence カードに「参照した社内ナレッジ」を一覧表示する。
+    """
+    if not result_text:
+        return []
+    match = re.search(r"#+\s*社内ナレッジ反映[^\n]*\n(.*?)(?:\n#+\s|\Z)", result_text, re.DOTALL)
+    if not match:
+        return []
+    evidence: list[Mapping[str, object]] = []
+    for raw_line in match.group(1).splitlines():
+        line = raw_line.strip().lstrip("-*・ ").strip()
+        badge = next((symbol for symbol in _WORKIQ_BADGE_TO_SOURCE if line.startswith(symbol)), None)
+        if badge is None:
+            continue
+        text = line[len(badge):].strip()
+        if not text:
+            continue
+        source = _WORKIQ_BADGE_TO_SOURCE[badge]
+        label = _WORK_IQ_SOURCE_LABELS.get(source, "Work IQ")
+        evidence.append(
+            {
+                "id": f"workiq-ref-{len(evidence) + 1}",
+                "title": f"{badge} {label}",
+                "source": "workiq",
+                "quote": text[:240],
+                "metadata": {"connector": source},
+            }
+        )
+        if len(evidence) >= 6:
+            break
+    return evidence
+
+
 async def _load_pending_approval_context(
     conversation_id: str,
     owner_id: str | None = None,
@@ -3823,6 +3868,7 @@ async def _execute_agent(
                     total_steps=total_steps,
                     start_time=start_time,
                 )
+            workiq_evidence = _extract_workiq_evidence_from_plan(result_text)
             collected_tool_events.append(
                 _build_agent_tool_event(
                     "workiq_foundry_tool",
@@ -3834,6 +3880,7 @@ async def _execute_agent(
                     display_name="Work IQ context tools",
                     source_scope=list(work_iq_session.get("source_scope", [])) if work_iq_session else [],
                     source_metadata=_build_foundry_workiq_source_metadata(work_iq_session) or None,
+                    evidence=workiq_evidence or None,
                 )
             )
         collected_tool_events.append(

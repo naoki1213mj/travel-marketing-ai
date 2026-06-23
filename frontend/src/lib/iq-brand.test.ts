@@ -36,6 +36,11 @@ describe('classifyEvidence', () => {
     expect(classifyEvidence(ev({ source: 'foundry' }))).toBe('foundry_iq')
   })
 
+  it('returns work_iq for workiq source (B2 evidence cards)', () => {
+    expect(classifyEvidence(ev({ source: 'workiq' }))).toBe('work_iq')
+    expect(classifyEvidence(ev({ source: 'work_iq' }))).toBe('work_iq')
+  })
+
   it('returns null for local / fallback / web (silent fallback signals)', () => {
     expect(classifyEvidence(ev({ source: 'local' }))).toBeNull()
     expect(classifyEvidence(ev({ source: 'local-check' }))).toBeNull()

@@ -77,6 +77,11 @@ const FOUNDRY_IQ_SOURCES = new Set([
   'azure_ai_search',
 ])
 
+const WORK_IQ_SOURCES = new Set([
+  'workiq',
+  'work_iq',
+])
+
 const FABRIC_IQ_TOOLS = new Set([
   'query_data_agent',
 ])
@@ -98,6 +103,7 @@ export function classifyEvidence(item: EvidenceItem): IQBrand | null {
   const source = (item.source || '').trim().toLowerCase()
   if (FABRIC_IQ_SOURCES.has(source)) return 'fabric_iq'
   if (FOUNDRY_IQ_SOURCES.has(source)) return 'foundry_iq'
+  if (WORK_IQ_SOURCES.has(source)) return 'work_iq'
   // local / local-check / fallback はあえて IQ ブランドを付けない (silent fallback の信号を消さない)
   return null
 }

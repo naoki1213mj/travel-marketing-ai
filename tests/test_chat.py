@@ -1064,3 +1064,33 @@ def test_build_approval_request_data_includes_manager_url_only_for_manual_delive
     workflow = _build_approval_request_data(**common, manager_delivery_mode="workflow")
     assert "manager_approval_url" not in workflow
     assert workflow.get("manager_delivery_mode") == "workflow"
+
+
+def test_extract_workiq_evidence_from_plan_parses_internal_knowledge_section():
+    """B2: 「社内ナレッジ反映」セクションから出所バッジ付き Work IQ evidence を抽出する。"""
+    from src.api.chat import _extract_workiq_evidence_from_plan
+
+    plan = (
+        "# 企画書\n\n## KPI\n- 予約200件\n\n"
+        "## 社内ナレッジ反映\n"
+        "- 📧 早期予約割で予約+30%（2024春振り返りメール）→ 本企画も早割採用\n"
+        "- 📝 上限8万・利益率20%（会議メモ）→ 価格帯を準拠\n"
+        "- 💬 美ら海水族館を前面（チーム議論）→ ヒーロー訴求に採用\n\n"
+        "> Evidence: ...\n"
+    )
+    evidence = _extract_workiq_evidence_from_plan(plan)
+
+    assert len(evidence) == 3
+    assert all(item["source"] == "workiq" for item in evidence)
+    assert evidence[0]["title"] == "📧 メール"
+    assert "早期予約割" in str(evidence[0]["quote"])
+    assert evidence[1]["title"] == "📝 会議メモ"
+    assert evidence[2]["title"] == "💬 Teams チャット"
+
+
+def test_extract_workiq_evidence_from_plan_empty_without_section():
+    """セクションが無い（Work IQ OFF など）場合は空リストを返す。"""
+    from src.api.chat import _extract_workiq_evidence_from_plan
+
+    assert _extract_workiq_evidence_from_plan("# 企画書\n## KPI\n- 予約200件") == []
+    assert _extract_workiq_evidence_from_plan("") == []
