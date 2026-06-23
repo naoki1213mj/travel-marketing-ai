@@ -847,7 +847,7 @@ async def _query_data_agent(question: str) -> str | None:
         from src.agent_client import get_shared_credential
 
         credential = get_shared_credential()
-        token = credential.get_token("https://analysis.windows.net/powerbi/api/.default")
+        token = await asyncio.to_thread(credential.get_token, "https://analysis.windows.net/powerbi/api/.default")
     except (ValueError, OSError) as exc:
         logger.warning("Fabric Data Agent: トークン取得失敗: %s", exc)
         return None

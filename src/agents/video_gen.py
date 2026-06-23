@@ -289,7 +289,7 @@ async def poll_video_job(job_id: str, max_wait: int = 180) -> VideoPollResult | 
 
     try:
         credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
     except (ValueError, OSError) as exc:
         logger.warning("Photo Avatar ポーリング: トークン取得失敗: %s", exc)
         return None
@@ -401,7 +401,7 @@ async def generate_promo_video(
 
         try:
             credential = DefaultAzureCredential()
-            token = credential.get_token("https://cognitiveservices.azure.com/.default")
+            token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
 
             # バッチ合成ジョブを作成する
             job_id = f"promo-{int(time.time())}"

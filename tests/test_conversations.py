@@ -219,3 +219,62 @@ def test_replay_rejects_zero_speed():
     """speed は正の値のみ受け付ける"""
     response = client.get("/api/replay/demo-replay-001?speed=0")
     assert response.status_code == 422
+
+
+def test_redact_manager_approval_urls_strips_workflow_token_only():
+    """workflow 配信の manager_approval_url(token 入り)だけを read-time で除去する。"""
+    from src.api.conversations import _redact_manager_approval_urls
+
+    events = [
+        {"event": "text", "data": {"content": "hello"}},
+        {
+            "event": "approval_request",
+            "data": {
+                "approval_scope": "manager",
+                "manager_delivery_mode": "workflow",
+                "manager_approval_url": "https://app/#manager_approval_token=leaked",
+            },
+        },
+        {
+            "event": "approval_request",
+            "data": {
+                "approval_scope": "manager",
+                "manager_delivery_mode": "manual",
+                "manager_approval_url": "https://app/#manager_approval_token=shared",
+            },
+        },
+    ]
+    original_workflow_data = events[1]["data"]
+
+    redacted = _redact_manager_approval_urls(events)
+
+    # workflow 配信は token URL を除去
+    assert "manager_approval_url" not in redacted[1]["data"]
+    assert redacted[1]["data"]["manager_delivery_mode"] == "workflow"
+    # manual 配信は共有リンクとして温存
+    assert redacted[2]["data"]["manager_approval_url"] == "https://app/#manager_approval_token=shared"
+    # 非承認イベントは素通し
+    assert redacted[0] == {"event": "text", "data": {"content": "hello"}}
+    # 元イベントを破壊的に変更しない
+    assert original_workflow_data.get("manager_approval_url") == "https://app/#manager_approval_token=leaked"
+
+
+def test_sanitize_conversation_document_redacts_workflow_manager_url():
+    """会話詳細レスポンスでも workflow の manager_approval_url を除去する。"""
+    from src.api.conversations import _sanitize_conversation_document
+
+    doc = {
+        "id": "conv-1",
+        "user_id": "owner-1",
+        "messages": [
+            {
+                "event": "approval_request",
+                "data": {"manager_delivery_mode": "workflow", "manager_approval_url": "https://app/#manager_approval_token=leaked"},
+            }
+        ],
+    }
+    sanitized = _sanitize_conversation_document(doc)
+    assert "user_id" not in sanitized
+    assert "manager_approval_url" not in sanitized["messages"][0]["data"]
+    # 元ドキュメントは変更しない
+    assert doc["messages"][0]["data"]["manager_approval_url"] == "https://app/#manager_approval_token=leaked"

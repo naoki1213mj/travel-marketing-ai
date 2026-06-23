@@ -403,18 +403,6 @@ _pending_approvals: dict[str, PendingApprovalContext] = {}
 # クライアント切断後も残す必要があるバックグラウンドタスクの参照保持。GC で先に消えないよう
 # strong reference を保持し、完了時に discard する。
 _BACKGROUND_TASK_REGISTRY: set[asyncio.Task] = set()
-_TOOL_EVENT_HINTS: dict[str, list[str]] = {
-    "data-search-agent": ["query_data_agent", "search_sales_history", "search_customer_reviews", "code_interpreter"],
-    "marketing-plan-agent": ["web_search"],
-    "regulation-check-agent": ["foundry_iq_search", "check_ng_expressions", "check_travel_law_compliance"],
-    "plan-revision-agent": [],
-    "brochure-gen-agent": [
-        "generate_hero_image",
-        "generate_banner_image",
-        "analyze_existing_brochure",
-    ],
-    "video-gen-agent": ["generate_promo_video"],
-}
 _WORK_IQ_SOURCE_LABELS = {
     "meeting_notes": "会議メモ",
     "emails": "メール",
@@ -1724,7 +1712,11 @@ def _build_approval_request_data(
             data["manager_email"] = workflow_settings["manager_email"]
     if manager_comment:
         data["manager_comment"] = manager_comment
-    if manager_approval_url:
+    # 上司承認 token を含む URL は manual 配信時のみ payload に含める。workflow 配信では
+    # 上司が Logic App 経由で別途リンクを受け取るため、申請者(=会話 owner)へ token を
+    # 渡すと自己承認で segregation-of-duty を回避できてしまう (security 監査 2026-06-23)。
+    # frontend も manual 時のみ URL を表示するため、workflow での省略は UX を変えない。
+    if manager_approval_url and manager_delivery_mode == "manual":
         data["manager_approval_url"] = manager_approval_url
     if manager_delivery_mode:
         data["manager_delivery_mode"] = manager_delivery_mode

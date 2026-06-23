@@ -527,7 +527,7 @@ async def _generate_image_mai(prompt: str, width: int = 1024, height: int = 1024
 
         # MAI-Image-2 はリソース直接アクセスのため cognitiveservices スコープを使用
         credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
 
         body = json.dumps(
             {
@@ -760,7 +760,7 @@ async def analyze_existing_brochure(pdf_path: str) -> str:
         # Content Understanding API でドキュメント解析
         try:
             credential = DefaultAzureCredential()
-            token = credential.get_token("https://cognitiveservices.azure.com/.default")
+            token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
 
             analyze_url = (
                 f"{endpoint.rstrip('/')}/contentunderstanding/analyzers/"

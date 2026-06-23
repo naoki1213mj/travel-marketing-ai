@@ -58,6 +58,29 @@ def _if_none_match_matches(header_value: str | None, etag: str) -> bool:
     return etag in candidates or "*" in candidates
 
 
+def _redact_manager_approval_urls(events: list) -> list:
+    """永続化済みイベントから workflow 配信の manager_approval_url(token 入り)を除去する。
+
+    申請者(=会話 owner)へ上司承認 token を再配布して自己承認させないための read-time 防御。
+    fix 前に保存された会話にも後方互換で効く。manual 配信のリンクは frontend が共有 UI で
+    利用するため温存する。元の events を破壊的に変更せず、必要な要素だけ複製する。
+    """
+    safe_events: list = []
+    for event in events:
+        if (
+            isinstance(event, dict)
+            and event.get("event") == "approval_request"
+            and isinstance(event.get("data"), dict)
+            and event["data"].get("manager_delivery_mode") != "manual"
+            and "manager_approval_url" in event["data"]
+        ):
+            safe_data = {key: value for key, value in event["data"].items() if key != "manager_approval_url"}
+            safe_events.append({**event, "data": safe_data})
+        else:
+            safe_events.append(event)
+    return safe_events
+
+
 def _sanitize_conversation_document(doc: dict) -> dict:
     """フロントエンドへ返す会話ドキュメントから機密 metadata を除去する。"""
     sanitized = {key: value for key, value in doc.items() if key != "user_id"}
@@ -77,6 +100,9 @@ def _sanitize_conversation_document(doc: dict) -> dict:
                 continue
             safe_metadata[key] = value
         sanitized["metadata"] = safe_metadata
+    messages = sanitized.get("messages")
+    if isinstance(messages, list):
+        sanitized["messages"] = _redact_manager_approval_urls(messages)
     return sanitized
 
 
@@ -165,6 +191,8 @@ async def replay(request: Request, conversation_id: str, speed: float = Query(5.
 
         return StreamingResponse(identity_error(), status_code=status_code, media_type="text/event-stream")
     events = await get_replay_data(conversation_id, owner_id=identity["user_id"])
+    if isinstance(events, list):
+        events = _redact_manager_approval_urls(events)
 
     if not events:
         # デモ用フォールバック: JSON ファイルがなければ空レスポンス

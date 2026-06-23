@@ -1041,3 +1041,26 @@ async def test_ensure_regulation_foundry_iq_used_returns_false_on_error(monkeypa
     used = await _ensure_regulation_foundry_iq_used("北海道スキー企画", 4, collector)
 
     assert used is False
+
+
+def test_build_approval_request_data_includes_manager_url_only_for_manual_delivery():
+    """workflow 配信では token 入り manager_approval_url を payload に含めない (segregation of duty)。"""
+    from src.api.chat import _build_approval_request_data
+
+    common = {
+        "prompt": "上司承認をお願いします",
+        "conversation_id": "conv-1",
+        "plan_markdown": "# 企画書",
+        "model_settings": None,
+        "workflow_settings": None,
+        "approval_scope": "manager",
+        "manager_approval_url": "https://app.example.com/#manager_approval_token=secret-token",
+    }
+
+    manual = _build_approval_request_data(**common, manager_delivery_mode="manual")
+    assert manual.get("manager_approval_url") == "https://app.example.com/#manager_approval_token=secret-token"
+    assert manual.get("manager_delivery_mode") == "manual"
+
+    workflow = _build_approval_request_data(**common, manager_delivery_mode="workflow")
+    assert "manager_approval_url" not in workflow
+    assert workflow.get("manager_delivery_mode") == "workflow"

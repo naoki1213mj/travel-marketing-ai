@@ -299,7 +299,7 @@ async def search_knowledge_base(query: str) -> str:
             mi_used = False
             try:
                 credential = DefaultAzureCredential()
-                token = credential.get_token("https://search.azure.com/.default")
+                token = await asyncio.to_thread(credential.get_token, "https://search.azure.com/.default")
                 headers["Authorization"] = f"Bearer {token.token}"
                 mi_used = True
             except (ClientAuthenticationError, OSError, ValueError) as exc:
@@ -406,7 +406,7 @@ async def _fallback_index_search(query: str, search_endpoint: str, api_key: str)
         headers: dict[str, str] = {"Content-Type": "application/json"}
         try:
             credential = DefaultAzureCredential()
-            token = credential.get_token("https://search.azure.com/.default")
+            token = await asyncio.to_thread(credential.get_token, "https://search.azure.com/.default")
             headers["Authorization"] = f"Bearer {token.token}"
         except (ClientAuthenticationError, OSError, ValueError) as exc:
             if api_key:
