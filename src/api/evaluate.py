@@ -1,5 +1,6 @@
 """品質評価 API。Built-in + カスタム評価器でパイプライン成果物を評価する。"""
 
+import asyncio
 import json
 import logging
 import os
@@ -1010,7 +1011,7 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         from azure.identity import DefaultAzureCredential
 
         credential = DefaultAzureCredential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
 
         parsed = urlparse(endpoint)
         azure_endpoint = f"{parsed.scheme}://{parsed.netloc}"
@@ -1040,7 +1041,7 @@ async def _run_builtin_evaluators(query: str, response: str) -> dict:
         results: dict[str, dict] = {}
         for name, evaluator in evaluators.items():
             try:
-                result = evaluator(query=trimmed_query, response=trimmed_response)
+                result = await asyncio.to_thread(evaluator, query=trimmed_query, response=trimmed_response)
                 score = result.get(name, result.get(f"gpt_{name}"))
                 reason = result.get(f"{name}_reason", result.get(f"{name}_label", ""))
                 results[name] = {
@@ -1082,7 +1083,7 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
         from src.agent_client import get_shared_credential
 
         credential = get_shared_credential()
-        token = credential.get_token("https://cognitiveservices.azure.com/.default")
+        token = await asyncio.to_thread(credential.get_token, "https://cognitiveservices.azure.com/.default")
 
         parsed = urlparse(endpoint)
         azure_endpoint = f"{parsed.scheme}://{parsed.netloc}"
@@ -1122,7 +1123,8 @@ async def _run_marketing_quality_evaluator(query: str, response: str) -> dict:
   "reason": "<50文字以内の総合コメント>"
 }}"""
 
-        completion = client.chat.completions.create(
+        completion = await asyncio.to_thread(
+            client.chat.completions.create,
             model=eval_model,
             messages=[
                 {"role": "system", "content": "JSON のみ出力してください。"},

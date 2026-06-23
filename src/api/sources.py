@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import urllib.error
@@ -218,7 +219,9 @@ async def _analyze_pdf_content(content: bytes, *, title: str) -> tuple[str, dict
     try:
         from src.agent_client import get_shared_credential
 
-        token = get_shared_credential().get_token("https://cognitiveservices.azure.com/.default")
+        token = await asyncio.to_thread(
+            get_shared_credential().get_token, "https://cognitiveservices.azure.com/.default"
+        )
         analyze_url = (
             f"{endpoint.rstrip('/')}/contentunderstanding/analyzers/"
             f"prebuilt-document-rag:analyze?api-version=2025-05-01-preview"
@@ -232,8 +235,12 @@ async def _analyze_pdf_content(content: bytes, *, title: str) -> tuple[str, dict
             },
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            result = json.loads(resp.read().decode("utf-8"))
+
+        def _post_pdf_for_analysis() -> dict:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+
+        result = await asyncio.to_thread(_post_pdf_for_analysis)
         extracted_text, page_count, paragraph_count = _extract_content_understanding_text(result)
         metadata.update(
             {

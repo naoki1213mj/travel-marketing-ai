@@ -5,7 +5,6 @@ import json
 import logging
 import os
 import re
-from datetime import datetime, timezone
 from typing import Any, TypedDict
 
 from azure.ai.projects import AIProjectClient
@@ -103,11 +102,6 @@ def build_marketing_plan_agent_definition(
         instructions=f"{MARKETING_PLAN_INSTRUCTIONS}{_WORK_IQ_BASELINE_GUIDANCE}",
         tools=tools,
     )
-
-
-def _utc_now_iso() -> str:
-    """UTC 現在時刻を ISO 文字列で返す。"""
-    return datetime.now(timezone.utc).isoformat()
 
 
 def _get_marketing_plan_agent(project_client: AIProjectClient, model_name: str):
